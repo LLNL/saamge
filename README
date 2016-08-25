@@ -1,0 +1,103 @@
+This file includes instructions and information on how to build and use libraries and tools here present.
+
+1. License and Disclaimer Statements
+
+SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
+        and solvers.
+
+Copyright (c) 2015, Lawrence Livermore National Security,
+LLC. Developed under the auspices of the U.S. Department of Energy by
+Lawrence Livermore National Laboratory under Contract
+No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
+and Panayot S. Vassilevski. Released under LLNL-CODE-667453.
+
+This file is part of SAAMGE. 
+
+Please also read the full notice of copyright and license in the file
+LICENSE.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License (as
+published by the Free Software Foundation) version 2.1 dated February
+1999.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the IMPLIED WARRANTY OF
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the terms and
+conditions of the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this program; if not, see
+<http://www.gnu.org/licenses/>.
+
+2. Requirements
+
+The code almost entirely relies on standard language (C++) features. Additionally, a few POSIX functions are used but only for less important functionalities in the code. It is tested for:
+
+GCC 4.4.7 20120313 (http://gcc.gnu.org/)
+MFEM 2.0 (http://code.google.com/p/mfem/)
+GLVIS 2.0 (http://code.google.com/p/glvis/)
+METIS 5.0.2 (http://glaros.dtc.umn.edu/gkhome/views/metis)
+HYPRE 2.9.0b (https://computation-rnd.llnl.gov/linear_solvers/)
+
+The build system relies on UNIX-like properties of the environment. It is not tested if it would work properly when emulated environments like CYGWIN are used. It also uses functionalities provided by GNU MAKE (http://www.gnu.org/software/make/).
+
+The compiler must be invoked with parameters enabling Run-Time Type Information (RTTI). Usually this is enabled by default for GCC.
+
+2. Uncompressing
+
+In some directory, e.g. called 'BASE', execute:
+
+    [BASE]$ tar jxf archive.tar.bz2
+
+It will extract a directory called 'proj'. In 'proj' two subdirectories can be found: 'amg' and 'libraries'. The former contains the code of the solver library and test programs, while the latter is related to the additionally required libraries. The location of the SAAMGE library code is 'BASE/proj/amg/lib/saamge'. Additionally, in 'proj' you can find the texts of the GPLv3 and LGPLv3 licences, and this README.
+
+3. Libraries, Tools, and Header Files Needed
+
+3.1 Libraries
+
+There are a few libraries required when SAAMGE linked against executables. These are:
+
+BLAS (http://www.netlib.org/blas/, see also http://math-atlas.sourceforge.net/)
+LAPACK (http://www.netlib.org/lapack/)
+MFEM (http://code.google.com/p/mfem/)
+METIS (http://glaros.dtc.umn.edu/gkhome/views/metis)
+HYPRE (https://computation-rnd.llnl.gov/linear_solvers/)
+
+Additionally, due to the use of FORTRAN, the libraries GFORTRAN (http://gcc.gnu.org/fortran/) and/or G2C (http://www.kilmnj.com/g77/) may be required depending on the FORTRAN compiler. Currently, GFORTRAN is assumed and expected by default. This, and all other library dependencies, can be seen and/or modified in 'BASE/proj/amg/mk/common.mk'.
+
+If the required libraries are available and in the default search paths of the linker, then nothing is required. If they are available but not in the paths of the linker, a simple solution is to create symbolic links to the library files in 'BASE/proj/libraries/bulk'. For example, a library might be available and in the linker paths but with a name that does not allow the linker to detect it, e.g. '/usr/lib64/atlas/libf77blas.so.3'. In this case, this issue can be resolved similarly by executing the following command in 'BASE/proj/libraries/bulk':
+
+    [BASE/proj/libraries/bulk]$ ln -s /usr/lib64/atlas/libf77blas.so.3 libblas.so
+
+Another approach is to crate symbolic links 'BASE/proj/libraries/lapack', 'BASE/proj/libraries/metis', 'BASE/proj/libraries/mfem', and 'BASE/proj/libraries/hypre' pointing respectively to the directories of LAPACK, METIS, MFEM, and HYPRE (if you have them compiled from sources somewhere). Creating these symbolic links should be sufficient. No further actions are required.
+
+3.2 Tools
+
+If visualization is desired, GLVIS has to be running. It requires MFEM and also other libraries like GL, GLU, X11, PTHREAD, and possibly others. That is, some modifications of the makefile and extra work might be necessary depending on the circumstances. Once the executable is available it only needs to be executed in some terminal to have GLVIS up and running. Have in mind that GLVIS generates a lot of output so even if it is executed in background (unless the standard outputs are redirected) the terminal will still not be very usable.
+
+3.3 Header Files
+
+If for some reason some external header files are required, symbolic links to them can also be created in 'BASE/proj/libraries/bulk'.
+
+The C header files 'f2c.h' and 'clapack.h' are required. Typically they are part of CLAPACK (http://www.netlib.org/clapack/) but apart from these two header files nothing else is required from CLAPACK. Currently, their copies can be found in 'BASE/proj/libraries/bulk'. If the user can provide something he considers to be better, he/she can remove/replace these files in 'BASE/proj/libraries/bulk' and/or use symbolic links.
+
+Since MFEM is the major library used by the code, the header file 'mfem.hpp' is necessary. If MFEM is compiled somewhere externally, simply crating a link to 'mfem.hpp' in 'BASE/proj/libraries/bulk' will not be sufficient. The simplest resolution is to create a symbolic link 'BASE/proj/libraries/mfem' to the external MFEM directory, where the MFEM library file and 'mfem.hpp' are located. If this is done, then no separate symbolic link to the MFEM library file is necessary in 'BASE/proj/libraries/bulk'.
+
+4. Building
+
+To build the AMGe solver library and test programs, execute the following in 'BASE/proj/amg'
+
+    [BASE/proj/amg]$ make all
+
+The compiled and archived SAAMGE library file should be located in 'BASE/proj/amg/lib/saamge'.
+
+The test programs (with their sources) can be found in subdirectories of 'BASE/proj/amg/test'.
+
+Sample mesh files can be found in 'BASE/proj/amg/data/meshes'.
+
+It may be a good idea (if some issues arise) to initially compile serial version of MFEM and then use it to compile and link GLVIS as a serial program. Then, MFEM can be "cleaned" and compiled with parallel support.
+
+5. Output and Debug
+
+In 'BASE/proj/amg/lib/saamge/inc/config.hpp' settings for the debug and output levels can be found and modified as necessary.

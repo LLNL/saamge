@@ -1,0 +1,395 @@
+/*! \file
+
+    SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
+            and solvers.
+
+    Copyright (c) 2015, Lawrence Livermore National Security,
+    LLC. Developed under the auspices of the U.S. Department of Energy by
+    Lawrence Livermore National Laboratory under Contract
+    No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
+    and Panayot S. Vassilevski. Released under LLNL-CODE-667453.
+
+    This file is part of SAAMGE. 
+
+    Please also read the full notice of copyright and license in the file
+    LICENSE.
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License (as
+    published by the Free Software Foundation) version 2.1 dated February
+    1999.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the IMPLIED WARRANTY OF
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the terms and
+    conditions of the GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this program; if not, see
+    <http://www.gnu.org/licenses/>.
+*/
+
+#include "common.hpp"
+#include "spectral.hpp"
+#include <climits>
+#include <mfem.hpp>
+#include "aggregates.hpp"
+#include "xpacks.hpp"
+#include "helpers.hpp"
+#include "mbox.hpp"
+
+/* Functions */
+
+bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
+         SparseMatrix *& B, int part, int agg_id, int agg_size,
+         const int *aggregates,
+         const agg_partititoning_relations_t& agg_part_rels,
+         double& theta, DenseMatrix& cut_evects,
+         const DenseMatrix *Tt,
+         bool transf, bool all_eigens)
+{
+    DenseMatrix *cut_ptr, cut_helper;
+    DenseMatrix deA, deB;
+    Vector evals;
+    const double lmax = 1.; // Special choice which is good when the weighted
+                            // l1-smoother is used
+    const int cut_evects_num_beg = cut_evects.Width(); // Number of vectors in
+                                                       // old basis (w/o xbad)
+    bool vector_added = false;
+    double skipped = 0.;
+
+    SA_ASSERT(A.Width() == A.Size());
+
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(theta >= 0.);
+    // Build the weighted l1-smoother for the eigenvalue problem if not given.
+    if(!B) B = mbox_snd_D_sparse_from_sparse(A);
+
+    SA_ASSERT(B->Width() == B->Size());
+    SA_ASSERT(B->Width() == A.Width());
+#if 0 //(SA_IS_DEBUG_LEVEL(10))
+    {
+        int lmaxiters;
+        DenseMatrix Aa, Bb;
+        mbox_convert_sparse_to_dense(A, Aa);
+        mbox_convert_sparse_to_dense(*B, Bb);
+        PROC_STR_STREAM << "compute lmax: "
+                        << xpacks_calc_largest_eval_dense(Aa, Bb, &lmaxiters,
+                                                          theta / 10., INT_MAX);
+        PROC_STR_STREAM << ", iterations: " << lmaxiters << "\n";
+        SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
+        PROC_CLEAR_STR_STREAM;
+    }
+#endif
+    if (transf)
+    {
+        // Transform the matrices for the eigenproblem.
+        SA_ASSERT(Tt);
+        DenseMatrix T(*Tt, 't');
+        mbox_transform_sparse(A, *Tt, deA);
+        mbox_transform_diag(T, *B, deB);
+        cut_ptr = &cut_helper;
+    } else
+    {
+        // Take the matrices without transforming them.
+        mbox_convert_sparse_to_dense(A, deA);
+        mbox_convert_sparse_to_dense(*B, deB);
+        cut_ptr = &cut_evects;
+    }
+    SA_ASSERT(deA.Width() == deA.Height());
+    SA_ASSERT(deB.Width() == deB.Height());
+    SA_ASSERT(deB.Width() == deA.Width());
+    SA_ASSERT((transf && &cut_helper == cut_ptr) ||
+              (!transf && &cut_evects == cut_ptr));
+
+    if (all_eigens)
+    {
+        DenseMatrix evects;
+
+        // Solve the local eigenvalue problem computing all eigenvalues and
+        // eigenvectors
+        xpacks_calc_all_gen_eigens_dense(deA, evals, evects, deB);
+#if (SA_IS_DEBUG_LEVEL(12))
+        helpers_write_vector_for_gnuplot(part, evals);
+#endif
+
+        // Take only the eigenvectors with eigenvalue <= theta * lmax
+        // Store them in *cut_ptr
+        skipped = xpack_cut_evects_small(evals, evects, theta * lmax, *cut_ptr);
+        SA_PRINTF_L(9, "skipped = %g, largest: %g\n", skipped,
+                    evals(evals.Size() - 1));
+        SA_ASSERT(SA_REAL_ALMOST_LE(skipped, lmax));
+        SA_ASSERT(SA_REAL_ALMOST_LE(0., skipped));
+    } else
+    {
+        // Solve the local eigenvalue problem computing the necessary
+        // eigenvalues and eigenvectors
+        xpacks_calc_lower_eigens_dense(deA, evals, *cut_ptr, deB, theta * lmax,
+                                       true);
+    }
+    if (SA_IS_OUTPUT_LEVEL(9))
+    {
+        SA_PRINTF("theta * lmax: %g\n", theta * lmax);
+        SA_PRINTF("total eigens: %d, taken: %d\n", deA.Size(),
+                  cut_ptr->Width());
+    }
+
+    // If width of matrix *cut_ptr is greater than the original number
+    // of vects, then throw vector_added flag
+    vector_added = (cut_evects_num_beg < cut_ptr->Width());
+    SA_PRINTF_L(9, "cut_evects before: %d, after: %d, added (true/false): %d\n",
+                cut_evects_num_beg, cut_ptr->Width(), vector_added);
+    SA_ALERT_COND_MSG(cut_evects_num_beg <= cut_ptr->Width(),
+                      "Dimension decreased for %d!", part);
+    SA_ASSERT(vector_added || transf);
+
+    if (transf)
+    {
+        // Transform back the computed eigenvectors
+        SA_PRINTF_L(9, "%s", "Transforming back eigenvectors...\n");
+        SA_ASSERT(Tt);
+        SA_ASSERT(&cut_helper == cut_ptr);
+        mbox_transform_vects(*Tt, cut_helper, cut_evects);
+    }
+
+    // Return the skipped eigenvalue using the argument (variable) theta
+    if (all_eigens)
+        theta = skipped;
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(SA_REAL_ALMOST_LE(0., theta));
+    if (theta < 0.)
+        theta = 0.;
+
+    return vector_added;
+}
+
+void spect_schur_augment_transf(const DenseMatrix& Tt, int part, int agg_id,
+         int agg_size, const int *aggregates, const Table& AE_to_dof,
+         DenseMatrix& augTt)
+{
+    const int h = Tt.Height();
+    const int w = Tt.Width();
+    const int AE_minus_agg = h - agg_size;
+    const int W = w + AE_minus_agg;
+    const int * const AE_dofs = AE_to_dof.GetRow(part);
+    int i, j;
+    SA_ASSERT(AE_to_dof.RowSize(part) == h);
+    SA_ASSERT(W <= h);
+
+    augTt.SetSize(h, W);
+
+    const double *ptr = Tt.Data();
+    double *aptr = augTt.Data();
+
+    // Restrict the base vectors to the aggregate.
+    for (i=0; i < w; ++i)
+    {
+        for (j=0; j < h; (++j), (++ptr), (++aptr))
+        {
+            if (aggregates[AE_dofs[j]] == agg_id)
+                *aptr = *ptr;
+            else
+                *aptr = 0.;
+        }
+    }
+    SA_ASSERT(Tt.Data() + h*w == ptr);
+    SA_ASSERT(augTt.Data() + h*w == aptr);
+
+    // Take identity outside the aggregate.
+    SA_ASSERT(w == i);
+    for (int k=0; k < AE_minus_agg; ++k)
+    {
+        int row = 0;
+#ifdef SA_ASSERTS
+        int p = 0;
+#endif
+        SA_ASSERT(i < W);
+        SA_ASSERT(i - w == k);
+        for (j=0; j < h; (++j), (++aptr))
+        {
+            if (aggregates[AE_dofs[j]] != agg_id)
+            {
+                SA_ASSERT(row < h - agg_size);
+                if (k == row)
+                {
+                    *aptr = 1.;
+#ifdef SA_ASSERTS
+                    ++p;
+#endif
+                } else
+                    *aptr = 0.;
+                ++row;
+            } else
+                *aptr = 0.;
+        }
+        SA_ASSERT(AE_minus_agg == row);
+        SA_ASSERT(1 == p);
+#ifdef SA_ASSERTS
+        ++i;
+#endif
+    }
+    SA_ASSERT(W == i);
+    SA_ASSERT(augTt.Data() + h*W == aptr);
+}
+
+bool spect_schur_local_prob_solve_sparse(const SparseMatrix& A,
+         SparseMatrix *& B, int part, int agg_id, int agg_size,
+         const int *aggregates,
+         const agg_partititoning_relations_t& agg_part_rels,
+         double& theta, DenseMatrix& cut_evects,
+         const DenseMatrix *Tt,
+         bool transf, bool all_eigens)
+{
+    DenseMatrix *cut_ptr, cut_helper;
+    DenseMatrix deA, deB, augTt;
+    Vector evals;
+    const double lmax = 1.; // Special choice which is good when the weighted
+                            // l1-smoother is used
+    const int cut_evects_num_beg = cut_evects.Width(); // Number of vectors in
+                                                       // old basis (w/o xbad)
+    bool vector_added = false;
+    double skipped = 0.;
+    const double *sqnorms;
+    int meaningful_size = 0;
+
+    SA_ASSERT(A.Width() == A.Size());
+
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(theta >= 0.);
+
+    // Compute the lower bound for sigma (the eigenvalues of the modified
+    // problem). They are always not larger than 1.
+    const double bound = 1. / (1. + lmax * theta);
+
+    // Build the restricted weighted l1-smoother for the eigenvalue problem if
+    // not given.
+    if(!B)
+    {
+        B = mbox_restr_snd_D_sparse_from_sparse(A, aggregates,
+                *agg_part_rels.AE_to_dof, agg_id, part, agg_size);
+    }
+    SA_ASSERT(B->Width() == B->Size());
+    SA_ASSERT(B->Width() == A.Width());
+
+    SparseMatrix *newA = mbox_add_diag_to_sparse(*B, A);
+
+    if (transf)
+    {
+        // Transform the matrices for the eigenproblem.
+        SA_ASSERT(Tt);
+        meaningful_size = Tt->Width();
+        spect_schur_augment_transf(*Tt, part, agg_id, agg_size, aggregates,
+                                   *agg_part_rels.AE_to_dof, augTt);
+        Tt = &augTt;
+        DenseMatrix T(*Tt, 't');
+        mbox_transform_sparse(*newA, *Tt, deA);
+        mbox_transform_diag(T, *B, deB);
+        cut_ptr = &cut_helper;
+    } else
+    {
+        // Take the matrices without transforming them.
+        mbox_convert_sparse_to_dense(*newA, deA);
+        mbox_convert_sparse_to_dense(*B, deB);
+        cut_ptr = &cut_evects;
+        meaningful_size = agg_size;
+    }
+    delete newA;
+    SA_ASSERT(deA.Width() == deA.Height());
+    SA_ASSERT(deB.Width() == deB.Height());
+    SA_ASSERT(deB.Width() == deA.Width());
+    SA_ASSERT((transf && &cut_helper == cut_ptr) ||
+              (!transf && &cut_evects == cut_ptr));
+    SA_PRINTF_L(9, "Meaningful number of vectors: %d\n", meaningful_size);
+    SA_ASSERT(0 < meaningful_size);
+
+    if (all_eigens)
+    {
+        DenseMatrix evects;
+
+        // Solve the local eigenvalue problem computing all eigenvalues and
+        // eigenvectors
+        xpacks_calc_all_gen_eigens_dense(deB, evals, evects, deA);
+#if (SA_IS_DEBUG_LEVEL(12))
+        helpers_write_vector_for_gnuplot(part, evals);
+#endif
+
+        // Take only the eigenvectors with eigenvalue >= bound.
+        // Store them in *cut_ptr
+        skipped = xpack_cut_evects_large(evals, evects, bound, *cut_ptr);
+        SA_PRINTF_L(9, "skipped = %g, smallest: %g\n", skipped, evals(0));
+
+        SA_ASSERT(evals.Size() >= meaningful_size);
+        SA_ASSERT(cut_ptr->Width() <= meaningful_size);
+        // Fix this skipped value so it is meaningful.
+        if (cut_ptr->Width() == meaningful_size)
+            skipped = evals(evals.Size() - meaningful_size);
+        SA_PRINTF_L(9, "meaningful skipped: %g, meaningful smallest: %g\n",
+                    skipped, evals(evals.Size() - meaningful_size));
+
+        SA_ASSERT(SA_REAL_ALMOST_LE(skipped, 1.));
+        SA_ASSERT(SA_REAL_ALMOST_LE(0., skipped));
+
+        // Get the beginning of the eigenvalues for the taken vectors.
+        SA_ASSERT(evals.Size() - cut_ptr->Width() >= 0);
+        sqnorms = evals.GetData() + (evals.Size() - cut_ptr->Width());
+    } else
+    {
+        // Solve the local eigenvalue problem computing the necessary
+        // eigenvalues and eigenvectors
+        xpacks_calc_upper_eigens_dense(deB, evals, *cut_ptr, deA, bound, true);
+        SA_ASSERT(cut_ptr->Width() <= meaningful_size);
+
+        // Get the beginning of the eigenvalues for the taken vectors.
+        sqnorms = evals.GetData();
+    }
+    if (SA_IS_OUTPUT_LEVEL(9))
+    {
+        PROC_STR_STREAM << "Actual Evals = [ ";
+        for (int i=1; i <= meaningful_size && i <= evals.Size(); ++i)
+            PROC_STR_STREAM << 1./evals(evals.Size() - i) - 1. << " ";
+        PROC_STR_STREAM << "]\n";
+        SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
+        PROC_CLEAR_STR_STREAM;
+    }
+
+    // Normalize the taken vectors.
+    mbox_sqnormalize_vects(*cut_ptr, sqnorms);
+
+    if (SA_IS_OUTPUT_LEVEL(9))
+    {
+        SA_PRINTF("theta * lmax: %g, bound: %g\n", theta * lmax, bound);
+        SA_PRINTF("total eigens: %d, taken: %d\n", deA.Size(),
+                  cut_ptr->Width());
+    }
+
+    // If width of matrix *cut_ptr is greater than the original number
+    // of vects, then throw vector_added flag
+    vector_added = (cut_evects_num_beg < cut_ptr->Width());
+    SA_PRINTF_L(9, "cut_evects before: %d, after: %d, added (true/false): %d\n",
+                cut_evects_num_beg, cut_ptr->Width(), vector_added);
+    SA_ALERT_COND_MSG(cut_evects_num_beg <= cut_ptr->Width(),
+                      "Dimension decreased for %d!", part);
+    SA_ASSERT(vector_added || transf);
+
+    if (transf)
+    {
+        // Transform back the computed eigenvectors
+        SA_PRINTF_L(9, "%s", "Transforming back eigenvectors...\n");
+        SA_ASSERT(Tt);
+        SA_ASSERT(&cut_helper == cut_ptr);
+        mbox_transform_vects(*Tt, cut_helper, cut_evects);
+    }
+
+    // Return the skipped eigenvalue using the argument (variable) theta
+    if (all_eigens)
+    {
+        theta = 1. / skipped - 1.;
+        SA_PRINTF_L(9, "Locally suggested theta: %g\n", theta);
+    }
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(SA_REAL_ALMOST_LE(0.,theta));
+    if (theta < 0.)
+        theta = 0.;
+
+    return vector_added;
+}

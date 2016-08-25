@@ -1,0 +1,66 @@
+These are additional and specific instructions for compiling and building.
+
+1. License and copyright notice
+
+SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
+        and solvers.
+
+Copyright (c) 2015, Lawrence Livermore National Security,
+LLC. Developed under the auspices of the U.S. Department of Energy by
+Lawrence Livermore National Laboratory under Contract
+No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
+and Panayot S. Vassilevski. Released under LLNL-CODE-667453.
+
+This file is part of SAAMGE. 
+
+Please also read the full notice of copyright and license in the file
+LICENSE.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License (as
+published by the Free Software Foundation) version 2.1 dated February
+1999.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the IMPLIED WARRANTY OF
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the terms and
+conditions of the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this program; if not, see
+<http://www.gnu.org/licenses/>.
+
+2. Instruction for building needed libraries
+
+In case LAPACK is not available it can be built from its sources in
+'BASE/proj/libraries/lapack'. Have in mind that some care,
+e.g. setting up LAPACK's makefiles, may be necessary to accomplish
+this. Only the library is needed, not the test programs, thus
+executing 'make lib' should be sufficient.
+
+Similarly, MFEM can be built from its sources in
+'BASE/proj/libraries/mfem'. MFEM can be compiled by simply executing
+'make parallel'. Another option is to use 'make pdebug'. While it
+results in significantly slower program execution, it sometimes can
+help uncovering not desired behavior. Before compiling MFEM in
+parallel, go to 'BASE/proj/libraries' and execute 'source thelibs.csh'
+or 'source thelibs.csh', depending on your shell.
+
+METIS sources are in 'BASE/proj/libraries/metis'. Do NOT execute 'make
+install' for METIS! Run 'make config' and then just 'make' should be
+sufficient.
+
+HYPRE sources are in 'BASE/proj/libraries/hypre'. Do NOT execute 'make
+install' for HYPRE! Run './configure' and then just 'make' should be
+sufficient, both in the 'src' subdirectory.
+
+NOTE: Simply building the libraries above in the denoted locations is
+sufficient. No additional symbolic links in 'BASE/proj/libraries/bulk'
+are required in case they are built in the described way.
+
+If GLVIS is not available, it can be built from its sources in
+'BASE/proj/libraries/glvis'. Usually just executing 'make' will be
+enough and an executable 'glvis' will be generated. To avoid dealing
+with library dependencies, first compile MFEM in serial (i.e. using
+just 'make'), then compile GLVIS, and finally MFEM can be "cleaned"
+and recompiled with parallel support.
