@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -220,13 +220,19 @@ void smpr_tg(HypreParMatrix& A, const Vector& b, Vector& x, void *data)
 
     SA_ASSERT(tg_data);
     SA_ASSERT(tg_data->Ac);
+    SA_ASSERT(tg_data->coarse_solver);
 
-    HypreParVector X(A.GetGlobalNumCols(), x.GetData(), A.GetColStarts());
-    HypreParVector B(A.GetGlobalNumRows(), b.GetData(), A.GetRowStarts());
+    HypreParVector X(PROC_COMM, A.GetGlobalNumCols(), x.GetData(), A.GetColStarts());
+    HypreParVector B(PROC_COMM, A.GetGlobalNumRows(), b.GetData(), A.GetRowStarts());
 
-    tg_cycle(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), B,
-             tg_data->pre_smoother, tg_data->post_smoother, X,
-             tg_data->coarse_solver, tg_data->poly_data);
+    SA_ASSERT(!tg_data->use_w_cycle);
+
+    // SA_RPRINTF(0,"---> smpr_tg runs with size %d, tg_data->tag = %d\n",
+    //        A.M(), tg_data->tag);
+
+    tg_cycle_atb(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), B,
+                 tg_data->pre_smoother, tg_data->post_smoother, X,
+                 *tg_data->coarse_solver, tg_data->poly_data);
 }
 
 double *smpr_oneminusx_poly_roots(int& nu, int *degree)
@@ -377,7 +383,7 @@ smpr_poly_data_t *smpr_init_poly_data(HypreParMatrix& A, int nu, double param)
             break;
     }
 
-    if (SA_IS_OUTPUT_LEVEL(5))
+    if (SA_IS_OUTPUT_LEVEL(6))
     {
         SA_PRINTF("degree: %d\n", poly_data->degree);
         PROC_STR_STREAM << "roots: ";

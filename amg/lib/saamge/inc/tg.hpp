@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -35,54 +35,16 @@
 #define _TG_HPP
 
 #include "common.hpp"
+#include "tg_data.hpp"
 #include <mfem.hpp>
 #include "smpr.hpp"
 #include "solve.hpp"
 #include "mbox.hpp"
 #include "interp.hpp"
 
+using namespace mfem;
+
 /* Types */
-/*! \brief TG data -- interpolation, smoothers etc.
-*/
-typedef struct {
-    interp_data_t *interp_data; /*!< Parameters and data for the
-                                     interpolant. */
-
-    HypreParMatrix *Ac; /*!< The coarse-grid operator. */
-    HypreParMatrix *interp; /*!< The interpolator. */
-    HypreParMatrix *restr; /*!< The restriction operator. */
-    SparseMatrix *ltent_interp; /*!< The local (for the process) tentative
-                                     interpolant. */
-    HypreParMatrix *tent_interp; /*!< The global (among all processes)
-                                      tentative interpolant. */
-
-    bool smooth_interp; /*!< Whether to smooth the tentative interpolator or
-                             simply copy it and use it as a final
-                             prolongator. */
-
-    double theta; /*!< Spectral tolerance. */
-
-    smpr_ft pre_smoother; /*!< The smoother for the pre-smoothing step. */
-    smpr_ft post_smoother; /*!< The smoother for the post-smoothing step. */
-    solve_t coarse_solver; /*!< The solver for the coarse-grid correction.
-                                \a coarse_solver.solve_init can be \em NULL and
-                                in that case it is ignored. Otherwise, it will
-                                be called whenever the coarse matrix is
-                                computed. The purpose is to initialize the
-                                coarse solver for the new coarse matrix.
-                                \a coarse_solver.solve_free can be \em NULL and
-                                in that case it is ignored. Otherwise, it will
-                                be called whenever the coarse matrix is
-                                freed (only if \a Ac is not NULL, i.e. if there
-                                is something to be freed).
-                                \a coarse_solver.solve_copy can be \em NULL and
-                                in that case it is ignored. Otherwise, it will
-                                be called whenever the coarse matrix is
-                                copied (only if \a Ac is not NULL, i.e. if there
-                                is something to be copied). */
-
-    smpr_poly_data_t *poly_data; /*< The data for the polynomial smoother. */
-} tg_data_t;
 
 /*! \brief The type of functions that compute (r, r).
 
@@ -160,61 +122,6 @@ CONFIG_BEGIN_CLASS_DECLARATION(TG)
                  corresponding fields in the respective structure(s). */
     CONFIG_DECLARE_OPTION(smpr_ft, post_smoother);
 
-    /*! The coarse solver initialization routine. It can be \em NULL and in
-        that case it is ignored. Otherwise, it will be called whenever the
-        coarse matrix is computed. The purpose is to initialize the coarse
-        solver for the new coarse matrix.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(solve_init_ft, coarse_solver_solve_init);
-
-    /*! The coarse solver destruction routine. It can be \em NULL and in that
-        case it is ignored. Otherwise, it will be called whenever the coarse
-        matrix is freed (only if \a Ac is not NULL, i.e. if there is something
-        to be freed). The purpose is to clear the coarse solver's work data.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(solve_free_ft, coarse_solver_solve_free);
-
-    /*! The coarse solver copy routine. It can be \em NULL and in
-        that case it is ignored. Otherwise, it will be called whenever the
-        coarse matrix is copied (only if \a Ac is not NULL, i.e. if there is
-        something to be copied). The purpose is to copy the coarse solver's
-        work data.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(solve_copy_ft, coarse_solver_solve_copy);
-
-    /*! The coarse solver routine
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(solve_ft, coarse_solver_solver);
-
-    /*! The coarse solver's data.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(void *, coarse_solver_data);
-
     /*! Whether to smooth the tentative interpolator or simply copy it and use
         it as a final prolongator.
 
@@ -228,6 +135,7 @@ CONFIG_BEGIN_CLASS_DECLARATION(TG)
 CONFIG_END_CLASS_DECLARATION(TG)
 
 /* Functions */
+
 /*! \brief The TG algorithm.
 
     Computes an TG iteration. It computes
@@ -247,11 +155,19 @@ CONFIG_END_CLASS_DECLARATION(TG)
                       output.
     \param coarse_solver (IN) The solver for the coarse-grid correction.
     \param data (IN/OUT) The data for \a pre_smoother and \a post_smoother.
+    \param mu (IN) 1 for V-cycle, 2 for W-cycle
 */
+/*
 void tg_cycle(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
-              HypreParMatrix& restr, HypreParVector& b, smpr_ft pre_smoother,
+              HypreParMatrix& restr, const HypreParVector& b, smpr_ft pre_smoother,
               smpr_ft post_smoother, HypreParVector& x, solve_t& coarse_solver,
-              void *data);
+              void *data, int mu=1);
+*/
+
+void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
+                  HypreParMatrix& restr, const Vector& b, smpr_ft pre_smoother,
+                  smpr_ft post_smoother, Vector& x, Solver& coarse_solver,
+                  void *data);
 
 /*! \brief Computes \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
 
@@ -439,7 +355,7 @@ int tg_pcg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
              residuals and their norms are computed and recomputed.
 */
 int tg_run(HypreParMatrix& A,
-           const agg_partititoning_relations_t *agg_part_rels,
+           const agg_partitioning_relations_t *agg_part_rels,
            HypreParVector& x, HypreParVector& b, int maxiter, double rtol/*=10e-12*/,
            double atol/*=10e-24*/, double reducttol/*=1.*/, tg_data_t *tg_data, bool zero_rhs/*=0*/,
            bool output=true);
@@ -468,9 +384,11 @@ int tg_run(HypreParMatrix& A,
 
     \returns The number of iterations done. If a desired convergence criteria
              was not reached, then this number is negative.
+
+    semi-DEPRECATED
 */
 int tg_pcg_run(HypreParMatrix& A,
-           const agg_partititoning_relations_t *agg_part_rels,
+           const agg_partitioning_relations_t *agg_part_rels,
            HypreParVector& x, HypreParVector& b, int maxiter, double rtol/*=10e-12*/,
            double atol/*=10e-24*/, tg_data_t *tg_data, bool zero_rhs/*=0*/,
            bool output=true);
@@ -482,12 +400,14 @@ int tg_pcg_run(HypreParMatrix& A,
     \param A (IN) The matrix of the system being solved (usually the global
                   stiffness matrix).
     \param agg_part_rels (IN) The partitioning relations.
-    \param nu_interp (IN) The degree of the polynomial smoother if the
+    \param nu_pro (IN) The degree of the polynomial smoother if the
                           tentative interpolant will be smoothed by a
                           polynomial.
     \param nu_relax (IN) nu of the polynomial relaxation.
     \param param_relax (IN) Extra parameter for the relaxation smoother.
     \param theta (IN) The spectral threshold.
+    \param smooth_interp (IN) whether or not to smooth the tentative interpolator
+    \param use_arpack (IN) whether or not to use ARPACK iterative eigensolver
 
     \returns The initialized TG data.
 
@@ -497,9 +417,11 @@ int tg_pcg_run(HypreParMatrix& A,
              \b coarse_solver_solve_init, \b coarse_solver_solver, and
              \b coarse_solver_data.
 */
-tg_data_t *tg_init_data(HypreParMatrix& A,
-    const agg_partititoning_relations_t& agg_part_rels, int nu_interp,
-    int nu_relax, double param_relax, double theta);
+tg_data_t *tg_init_data(
+    HypreParMatrix& A,
+    const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
+    int nu_relax, double theta,
+    bool smooth_interp, bool use_arpack);
 
 /*! \brief Builds the coarse level.
 
@@ -508,7 +430,7 @@ tg_data_t *tg_init_data(HypreParMatrix& A,
 
     \param Al (IN) The matrix of the system being solved (usually the local
                    (on the current process) stiffness matrix). It must have the
-                   boundary conditions imposed.
+                   boundary conditions imposed. NULL on coarser levels.
     \param Ag (IN) The matrix of the system being solved (usually the global
                    (among all processes) stiffness matrix). It must have the
                    boundary conditions imposed.
@@ -526,10 +448,74 @@ tg_data_t *tg_init_data(HypreParMatrix& A,
 
     \warning \a A and \a elem_data_* must correspond to each other.
 */
-void tg_build_hierarchy(const SparseMatrix& Al, HypreParMatrix& Ag,
+void tg_build_hierarchy(SparseMatrix const * Al, HypreParMatrix& Ag,
                         tg_data_t& tg_data,
-                        const agg_partititoning_relations_t& agg_part_rels,
-                        void *elem_data_finest);
+                        const agg_partitioning_relations_t& agg_part_rels,
+                        ElementMatrixProvider *elem_data_coarse, 
+                        ElementMatrixProvider *elem_data_finest);
+
+/*! \brief Extends an identity block to top-left of tg_data.interp
+
+  This is a very dirty hack, does not work in parallel, involves way
+  too much deleteion / recreation, is a general mess.
+
+  We use this to for example when we eliminate a degree of freedom
+  for a pure Neumann problem, build the hierarchy for the smaller
+  matrix without the dof, and then do this so we can solve the whole
+  problem with one constrained dof.
+*/
+void tg_augment_interp_with_identity(tg_data_t& tg_data, int k);
+
+/*! \brief For algebraic interface, extracts submatrices from A and modifies diagonal
+  so submatrices represent Neumann problems.
+
+  In PSV's note, this is referred to as the "diagonal compensation" strategy,
+  in contrast to the window AMG strategy in WindowSubMatrices()
+
+  Probably this does not really belong in tg, maybe in part.hpp or something?
+
+  A and agg_part_rels are input, agglomerate_element_matrices is output.
+*/
+void ExtractSubMatrices(const SparseMatrix& A, 
+                        const agg_partitioning_relations_t& agg_part_rels,
+                        Array<SparseMatrix*>& agglomerate_element_matrices);
+
+void TestWindowSubMatrices();
+
+void WindowSubMatrices(const SparseMatrix& A,
+                       const agg_partitioning_relations_t& agg_part_rels,
+                       Array<SparseMatrix*>& agglomerate_element_matrices);
+
+/*! \brief Builds a tg_data from some agglomerate element matrices.
+
+  The AE matrices could come from ExtractSubMatrices, or they could be
+  assembled somehow independently (eg, with a finite volume method
+  that MFEM does not know.  
+*/
+tg_data_t *tg_produce_data_with_ae_matrices(
+    HypreParMatrix& Ag,
+    const agg_partitioning_relations_t& agg_part_rels,
+    int nu_pro, int nu_relax, double spectral_tol,
+    bool smooth_interp, bool minimal_coarse_arg,
+    const Array<SparseMatrix* > &agglomerate_element_matrices);
+
+/*! \brief Essentially wraps ExtractSubMatrices and
+  tg_produce_data_with_ae_matrices.
+*/
+tg_data_t *tg_produce_data_algebraic(
+    const SparseMatrix &Alocal,
+    HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
+    int nu_pro, int nu_relax, double spectral_tol,
+    bool smooth_interp, bool minimal_coarse_arg, bool use_window, bool use_arpack);
+
+/*! \brief Switch from window to diagonal compensation matrices, or vice versa.
+
+  We may want to use window AMG for eigenvectors, and diagonal compensation
+  for local corrections, so we use this.
+*/
+void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal, 
+                            const agg_partitioning_relations_t& agg_part_rels,
+                            bool use_window);
 
 /*! \brief Produces the TG data.
 
@@ -544,11 +530,10 @@ void tg_build_hierarchy(const SparseMatrix& Al, HypreParMatrix& Ag,
                    (among all processes) stiffness matrix). It must have the
                    boundary conditions imposed.
     \param agg_part_rels (IN) The partitioning relations.
-    \param nu_interp (IN) The degree of the polynomial smoother if the
+    \param nu_pro (IN) The degree of the polynomial smoother if the
                           tentative interpolant will be smoothed by a
                           polynomial.
     \param nu_relax (IN) nu of the polynomial relaxation.
-    \param param_relax (IN) Extra parameter for the relaxation smoother.
     \param elem_data_finest (IN) Data corresponding to the finest element
                                  matrices callback
                                  \a interp_data.finest_elmat_callback. If the
@@ -565,9 +550,11 @@ void tg_build_hierarchy(const SparseMatrix& Al, HypreParMatrix& Ag,
              \b tg_free_data.
     \warning \a A and \a elem_data_* must correspond to each other.
 */
-tg_data_t *tg_produce_data(const SparseMatrix& Al, HypreParMatrix& Ag,
-    const agg_partititoning_relations_t& agg_part_rels, int nu_interp,
-    int nu_relax, double param_relax, void *elem_data_finest, double theta);
+tg_data_t *tg_produce_data(
+    const SparseMatrix& Al, HypreParMatrix& Ag,
+    const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
+    int nu_relax, ElementMatrixProvider *elem_data_finest, double theta,
+    bool smooth_interp);
 
 /*! \brief Frees the TG data.
 
@@ -692,13 +679,13 @@ void tg_smooth_interp(HypreParMatrix& A, tg_data_t& tg_data)
 static inline
 HypreParMatrix *tg_coarse_matr(HypreParMatrix& A, HypreParMatrix& interp)
 {
-    SA_PRINTF_L(5, "%s", "Computing coarse operator...\n");
+    SA_RPRINTF_L(0, 5, "%s", "Computing coarse operator...\n");
     HypreParMatrix *Ac = RAP(&A, &interp);
     SA_ASSERT(Ac);
     SA_ASSERT(Ac->GetGlobalNumRows() == Ac->GetGlobalNumCols());
     SA_ASSERT(Ac->GetGlobalNumRows() == interp.GetGlobalNumCols());
 
-    SA_PRINTF_L(3, "Ac nnz: %d, A nnz: %d, OC: %g\n", Ac->NNZ(),
+    SA_RPRINTF_L(0, 3, "Ac nnz: %d, A nnz: %d, OC: %g\n", Ac->NNZ(),
                 A.NNZ(), ((double)Ac->NNZ()) / ((double)A.NNZ()) + 1.);
 
     return Ac;
@@ -715,12 +702,16 @@ void tg_fillin_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
     if (!(tg_data->Ac))
     {
         tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
+        /*
         if (perform_solve_init && tg_data->coarse_solver.solve_init)
         {
-            SA_PRINTF_L(5, "%s", "Initializing coarse solver...\n");
+            SA_RPRINTF_L(0, 5, "%s", "Initializing (fillin) coarse solver...\n");
             tg_data->coarse_solver.data =
-                tg_data->coarse_solver.solve_init(*tg_data->Ac);
+                tg_data->coarse_solver.solve_init(*tg_data->Ac, tg_data->coarse_solver.data);
         }
+        */
+        if (perform_solve_init)
+            tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
     }
 }
 
@@ -733,13 +724,23 @@ void tg_update_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
     SA_ASSERT(tg_data->restr);
 
     tg_free_coarse_operator(*tg_data);
+    delete tg_data->coarse_solver;
 
     tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
+    /*
     if (perform_solve_init && tg_data->coarse_solver.solve_init)
     {
-        SA_PRINTF_L(5, "%s", "Initializing coarse solver...\n");
+        SA_RPRINTF_L(0, 5, "%s", "Initializing (update) coarse solver...\n");
         tg_data->coarse_solver.data =
-            tg_data->coarse_solver.solve_init(*tg_data->Ac);
+            tg_data->coarse_solver.solve_init(*tg_data->Ac, tg_data->coarse_solver.data);
+    }
+    */
+    if (perform_solve_init)
+    {
+        // tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
+        HypreBoomerAMG * hbamg = new HypreBoomerAMG(*tg_data->Ac);
+        hbamg->SetPrintLevel(0);
+        tg_data->coarse_solver = hbamg;
     }
 }
 
@@ -751,13 +752,16 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
     if (!tg_data.Ac)
         return;
 
+    /*
     if (tg_data.coarse_solver.solve_free)
     {
-        SA_PRINTF_L(5, "%s", "Freeing coarse solver...\n");
+        SA_RPRINTF_L(0, 5, "%s", "Freeing coarse solver...\n");
         tg_data.coarse_solver.data =
             tg_data.coarse_solver.solve_free(*tg_data.Ac,
                                              tg_data.coarse_solver.data);
     }
+    */
+    delete tg_data.coarse_solver;
 
     delete tg_data.Ac;
     tg_data.Ac = NULL;
@@ -766,10 +770,10 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
 static inline
 void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data)
 {
-    SA_PRINTF("%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-                    ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    SA_PRINTF("%s", "\tTwo-grid data:\n");
-    SA_PRINTF("Level 0 dimension: %d, Operator nnz: %d\n", A.GetGlobalNumRows(),
+    SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+               ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    SA_RPRINTF(0,"%s", "\tTwo-grid data:\n");
+    SA_RPRINTF(0,"Level 0 dimension: %d, Operator nnz: %d\n", A.GetGlobalNumRows(),
               A.NNZ());
     SA_ASSERT(tg_data);
     SA_ASSERT(tg_data->interp);
@@ -780,10 +784,10 @@ void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data)
     if (tg_data->Ac)
     {
         PROC_STR_STREAM << ", Operator nnz: " << tg_data->Ac->NNZ() << "\n";
-        SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
+        SA_RPRINTF(0,"%s", PROC_STR_STREAM.str().c_str());
         PROC_CLEAR_STR_STREAM;
-        SA_PRINTF("Operator complexity: %g\n",
-                  1. + tg_data->Ac->NNZ() / (double)A.NNZ());
+        SA_RPRINTF(0,"Operator complexity: %g\n",
+                   1. + tg_data->Ac->NNZ() / (double)A.NNZ());
         SA_ASSERT(tg_data->Ac->GetGlobalNumRows() ==
                   tg_data->Ac->GetGlobalNumCols());
         SA_ASSERT(tg_data->interp->GetGlobalNumCols() ==
@@ -791,11 +795,11 @@ void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data)
     } else
     {
         PROC_STR_STREAM << "\n";
-        SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
+        SA_RPRINTF(0,"%s", PROC_STR_STREAM.str().c_str());
         PROC_CLEAR_STR_STREAM;
     }
-    SA_PRINTF("%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-                    ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+               ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
 }
 
 #endif // _TG_HPP

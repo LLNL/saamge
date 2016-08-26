@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,6 +37,8 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include "aggregates.hpp"
+
+using namespace mfem;
 
 /* Functions */
 /*! \brief Randomly perturbs the values in \a x using uniform distribution.
@@ -71,7 +73,7 @@ void helpers_random_gen(Vector &x, double interval_len);
 
     \warning \a x must be constructed prior to calling this function.
 */
-void helpers_random_vect(const agg_partititoning_relations_t& agg_part_rels,
+void helpers_random_vect(const agg_partitioning_relations_t& agg_part_rels,
                          Vector &x);
 
 /*! \brief Creates a copy of an array of doubles.

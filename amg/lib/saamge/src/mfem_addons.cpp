@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -84,9 +84,24 @@ void construct_elem_to_vert(Mesh& mesh, Table& elem_to_vert)
     elem_to_vert.ShiftUpI();
 }
 
-int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
-        HypreParVector &x, int print_iter, int max_num_iter, double RTOLERANCE,
-        double ATOLERANCE, bool zero_rhs)
+HypreParMatrix * FakeParallelMatrix(const SparseMatrix *A)
+{
+    SA_ASSERT(A->Height() == A->Width()); // I don't trust MFEM's rectangular HypreParMatrix constructor
+    SA_ASSERT(PROC_NUM == 1);
+
+    HYPRE_Int * row_starts = hypre_CTAlloc(HYPRE_Int, 2);
+    row_starts[0] = 0;
+    row_starts[1] = A->Height();
+    HypreParMatrix * out = new HypreParMatrix(PROC_COMM, A->Height(), row_starts,
+                                              const_cast<SparseMatrix*>(A));
+    hypre_ParCSRMatrixSetRowStartsOwner((*out),1);
+    hypre_ParCSRMatrixSetColStartsOwner((*out),0); // ??
+    return out;
+}
+
+int kalchev_pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
+                HypreParVector &x, int print_iter, int max_num_iter, double RTOLERANCE,
+                double ATOLERANCE, bool zero_rhs)
 {
     int i, dim = x.Size(), iters=0;
     double r0, den, nom, nom0, betanom=0., alpha, beta;
@@ -95,10 +110,10 @@ int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
     double norm_x_prev=0., norm_x=0., norm_x_initial=0.;
 
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
-    HypreParVector R(A.GetGlobalNumRows(), r.GetData(), A.GetRowStarts());
-    HypreParVector D(A.GetGlobalNumRows(), d.GetData(), A.GetRowStarts());
-    HypreParVector Z(A.GetGlobalNumRows(), z.GetData(), A.GetRowStarts());
-    HypreParVector TMP(A.GetGlobalNumRows(), tmp.GetData(), A.GetRowStarts());
+    HypreParVector R(PROC_COMM, A.GetGlobalNumRows(), r.GetData(), A.GetRowStarts());
+    HypreParVector D(PROC_COMM, A.GetGlobalNumRows(), d.GetData(), A.GetRowStarts());
+    HypreParVector Z(PROC_COMM, A.GetGlobalNumRows(), z.GetData(), A.GetRowStarts());
+    HypreParVector TMP(PROC_COMM, A.GetGlobalNumRows(), tmp.GetData(), A.GetRowStarts());
 
     A.Mult(x, r);
     if (zero_rhs)
@@ -176,6 +191,13 @@ int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
             PROC_CLEAR_STR_STREAM;
         }
 
+        if (betanom < 0.0)
+        {
+            SA_RPRINTF(0,"%s","SPD breakdown!\n");
+            iters = -i;
+            break;
+        }
+
         if ((betanom < r0 && !zero_rhs) || (norm_x < r0 && zero_rhs))
         {
             if (print_iter == 2)
@@ -205,7 +227,7 @@ int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
         SA_PRINTF("Number of PCG iterations: %d\n", i-1);
         iters = -(i-1);
     }
-    if (print_iter >= 1 || i > max_num_iter)
+    if (0 == PROC_RANK && (print_iter >= 1 || i > max_num_iter))
     {
         if (i > max_num_iter)
             i--;
@@ -219,4 +241,66 @@ int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
         PROC_CLEAR_STR_STREAM;
     }
     return iters;
+}
+
+SparseMatrix * IdentitySparseMatrix(int n)
+{
+    SparseMatrix * out = new SparseMatrix(n,n);
+    for (int i=0; i<n; ++i)
+        out->Add(i,i,1.0);
+    out->Finalize();
+    return out;
+}
+
+Table * TableFromSparseMatrix(const SparseMatrix& A)
+{
+    Table * out = new Table();
+    out->SetDims(A.Size(), A.NumNonZeroElems());
+    int * outI = out->GetI();
+    int * outJ = out->GetJ();
+    if (A.Finalized())
+    {
+        const int * AI = A.GetI();
+        const int * AJ = A.GetJ();
+        outI[0] = 0;
+        for (int i=0; i<A.Size(); ++i)
+        {
+            outI[i+1] = AI[i+1];
+            for (int j=AI[i]; j<AI[i+1]; ++j)
+                outJ[j] = AJ[j];
+        }
+        out->Finalize();
+    }
+    else
+    {
+        Array<int> cols;
+        Vector srow;
+        outI[0] = 0;
+        int j = 0;
+        for (int i=0; i<A.Size(); ++i)
+        {
+            A.GetRow(i, cols, srow);
+            outI[i+1] = outI[i] + cols.Size();
+            for (int kk=0; kk<cols.Size(); ++kk)
+                outJ[j++] = cols[kk];
+        }
+        out->Finalize();
+    }
+    return out;
+}
+
+Table * IdentityTable(int n)
+{
+    Table * out = new Table();
+    out->SetDims(n, n);
+    int * outI = out->GetI();
+    int * outJ = out->GetJ();
+    for (int i=0; i<n; ++i)
+    {
+        outI[i] = i;
+        outJ[i] = i;
+    }
+    outI[n] = n;
+    out->Finalize();
+    return out;
 }

@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -35,18 +35,87 @@
 #include <mfem.hpp>
 #include "aggregates.hpp"
 #include "xpacks.hpp"
+#include "arpacks.hpp"
 #include "helpers.hpp"
 #include "mbox.hpp"
 
-/* Functions */
+using namespace mfem;
 
-bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
-         SparseMatrix *& B, int part, int agg_id, int agg_size,
-         const int *aggregates,
-         const agg_partititoning_relations_t& agg_part_rels,
-         double& theta, DenseMatrix& cut_evects,
-         const DenseMatrix *Tt,
-         bool transf, bool all_eigens)
+Eigensolver::Eigensolver(
+    const int * aggregates, 
+    const agg_partitioning_relations_t &agg_part_rels,
+    int threshold)
+    :
+    aggregates(aggregates),
+    agg_part_rels(agg_part_rels),
+    threshold(threshold),
+    transf(false),
+    all_eigens(false),
+    max_arpack_vectors(10),
+    count_solves(0),
+    count_direct_solves(0),
+    count_max_used(0),
+    smallest_eigenvalue_skipped(std::numeric_limits<double>::max())
+{
+}
+
+void Eigensolver::GetStatistics(
+    int &o_count_solves, int &o_count_direct_solves,
+    int &o_count_max_used, double &o_smallest_eigenvalue_skipped)
+{
+    o_count_solves = count_solves;
+    o_count_direct_solves = count_direct_solves;
+    o_count_max_used = count_max_used;
+    o_smallest_eigenvalue_skipped = smallest_eigenvalue_skipped;
+}
+
+void Eigensolver::PrintStatistics()
+{
+    if (PROC_RANK == 0)
+    {
+        std::cout << "  [" << PROC_RANK << "] count_solves = " 
+                  << count_solves << std::endl;
+        std::cout << "  [" << PROC_RANK << "] count_direct_solves = " 
+                  << count_direct_solves << std::endl;
+        std::cout << "  [" << PROC_RANK << "] count_max_used = " 
+                  << count_max_used << std::endl;
+        std::cout << "  [" << PROC_RANK << "] smallest_eigenvalue_skipped = " 
+                  << smallest_eigenvalue_skipped << std::endl;
+    }
+}
+
+bool Eigensolver::Solve(
+    const mfem::SparseMatrix& A, mfem::SparseMatrix *& B, 
+    int part, int agg_id, int aggregate_size, double& theta,
+    mfem::DenseMatrix& cut_evects)
+{
+    int problem_size = A.Width();
+    count_solves++;
+    if (problem_size <= threshold)
+    {
+        count_direct_solves++;
+        return SolveDirect(A, B, part, agg_id, aggregate_size,
+                           theta, cut_evects, 
+                           NULL, transf, all_eigens);
+    }
+    else
+    {
+        return SolveIterative(A, B, part, agg_id, aggregate_size,
+                              theta, cut_evects, 
+                              NULL, transf, all_eigens);
+    }
+}
+
+/**
+   This is the standard eigenvalue solver for multilevel runs.
+   We are transitioning to using ARPACK by default.
+*/
+bool Eigensolver::SolveDirect(
+    const mfem::SparseMatrix& A,
+    mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
+    double& theta, mfem::DenseMatrix& cut_evects,
+    const mfem::DenseMatrix *Tt,
+    bool transf, bool all_eigens)
 {
     DenseMatrix *cut_ptr, cut_helper;
     DenseMatrix deA, deB;
@@ -63,24 +132,11 @@ bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
     SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
     SA_ASSERT(theta >= 0.);
     // Build the weighted l1-smoother for the eigenvalue problem if not given.
-    if(!B) B = mbox_snd_D_sparse_from_sparse(A);
+    if (!B) 
+        B = mbox_snd_D_sparse_from_sparse(A);
 
     SA_ASSERT(B->Width() == B->Size());
     SA_ASSERT(B->Width() == A.Width());
-#if 0 //(SA_IS_DEBUG_LEVEL(10))
-    {
-        int lmaxiters;
-        DenseMatrix Aa, Bb;
-        mbox_convert_sparse_to_dense(A, Aa);
-        mbox_convert_sparse_to_dense(*B, Bb);
-        PROC_STR_STREAM << "compute lmax: "
-                        << xpacks_calc_largest_eval_dense(Aa, Bb, &lmaxiters,
-                                                          theta / 10., INT_MAX);
-        PROC_STR_STREAM << ", iterations: " << lmaxiters << "\n";
-        SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
-        PROC_CLEAR_STR_STREAM;
-    }
-#endif
     if (transf)
     {
         // Transform the matrices for the eigenproblem.
@@ -89,7 +145,8 @@ bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
         mbox_transform_sparse(A, *Tt, deA);
         mbox_transform_diag(T, *B, deB);
         cut_ptr = &cut_helper;
-    } else
+    } 
+    else
     {
         // Take the matrices without transforming them.
         mbox_convert_sparse_to_dense(A, deA);
@@ -120,7 +177,8 @@ bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
                     evals(evals.Size() - 1));
         SA_ASSERT(SA_REAL_ALMOST_LE(skipped, lmax));
         SA_ASSERT(SA_REAL_ALMOST_LE(0., skipped));
-    } else
+    } 
+    else
     {
         // Solve the local eigenvalue problem computing the necessary
         // eigenvalues and eigenvectors
@@ -132,6 +190,10 @@ bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
         SA_PRINTF("theta * lmax: %g\n", theta * lmax);
         SA_PRINTF("total eigens: %d, taken: %d\n", deA.Size(),
                   cut_ptr->Width());
+        // SA_PRINTF("%s","evalues: ");
+        // for (int j=0; j<cut_ptr->Width(); ++j)
+        //    SA_PRINTF("%e  ",evals[j]);
+        // SA_PRINTF("%s","\n");
     }
 
     // If width of matrix *cut_ptr is greater than the original number
@@ -163,9 +225,100 @@ bool spect_simple_local_prob_solve_sparse(const SparseMatrix& A,
     return vector_added;
 }
 
-void spect_schur_augment_transf(const DenseMatrix& Tt, int part, int agg_id,
-         int agg_size, const int *aggregates, const Table& AE_to_dof,
-         DenseMatrix& augTt)
+bool Eigensolver::SolveIterative(
+    const mfem::SparseMatrix& A,
+    mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
+    double& theta, mfem::DenseMatrix& cut_evects,
+    const mfem::DenseMatrix *Tt,
+    bool transf, bool all_eigens)
+{
+    SA_ASSERT(!transf); // not implemented, but possible if you want
+    SA_ASSERT(!all_eigens); // not implemented, and difficult with ARPACK
+
+    DenseMatrix *cut_ptr, cut_helper;
+    Vector evals;
+    const double lmax = 1.; // Special choice which is good when the weighted
+                            // l1-smoother is used
+    const int cut_evects_num_beg = cut_evects.Width(); // Number of vectors in
+                                                       // old basis (w/o xbad)
+    bool vector_added = false;
+
+    SA_ASSERT(A.Width() == A.Size());
+
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(theta >= 0.);
+    // Build the weighted l1-smoother for the eigenvalue problem if not given.
+    if(!B) B = mbox_snd_D_sparse_from_sparse(A);
+
+    SA_ASSERT(B->Width() == B->Size());
+    SA_ASSERT(B->Width() == A.Width());
+
+    // Solve the local eigenvalue problem computing the necessary
+    // eigenvalues and eigenvectors
+
+    int min_vectors = 1;
+    double arpack_tol = 1.e-4;
+    int max_arpack_its = 200;
+    int num_arnoldi = (A.Width() < 4*max_arpack_vectors) ? A.Width() : 4*max_arpack_vectors;
+    if (A.Width() < max_arpack_vectors) max_arpack_vectors = A.Width();
+    cut_ptr = &cut_helper;
+    int numvectors = arpacks_calc_portion_eigens_sparse_diag(A,
+                                                             evals,
+                                                             *cut_ptr,
+                                                             *B,
+                                                             max_arpack_vectors,
+                                                             true,
+                                                             max_arpack_its,
+                                                             num_arnoldi,
+                                                             arpack_tol);
+    int vectors_got = min_vectors;
+    for (int ev=min_vectors; ev<max_arpack_vectors; ++ev)
+    {
+        if (evals[ev] < theta)
+            vectors_got++;
+    }
+    if (vectors_got == max_arpack_vectors)
+    {
+        count_max_used++;
+    }
+    else
+    {
+        // this may not be quite the right eigenvalue, what with smoothers / preconditioners / transformations...
+        double eigenvalue_skipped = evals[vectors_got];
+        smallest_eigenvalue_skipped = 
+            (eigenvalue_skipped < smallest_eigenvalue_skipped) ? eigenvalue_skipped : smallest_eigenvalue_skipped;
+    }   
+    cut_evects.SetSize(A.Height(), vectors_got);
+    memcpy(cut_evects.Data(), cut_ptr->Data(), sizeof(double) * A.Height() * vectors_got);
+
+    if (SA_IS_OUTPUT_LEVEL(9))
+    {
+        SA_PRINTF("theta * lmax: %g\n", theta * lmax);
+        SA_PRINTF("system size: %d, eigens computed: %d, eigens taken: %d\n",
+                  A.Height(), numvectors, vectors_got);
+    }
+
+    // If width of matrix *cut_ptr is greater than the original number
+    // of vects, then throw vector_added flag
+    vector_added = (cut_evects_num_beg < cut_ptr->Width());
+    SA_PRINTF_L(9, "cut_evects before: %d, after: %d, added (true/false): %d\n",
+                cut_evects_num_beg, cut_ptr->Width(), vector_added);
+    SA_ALERT_COND_MSG(cut_evects_num_beg <= cut_ptr->Width(),
+                      "Dimension decreased for %d!", part);
+    SA_ASSERT(vector_added || transf);
+
+    SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
+    SA_ASSERT(SA_REAL_ALMOST_LE(0., theta));
+    if (theta < 0.)
+        theta = 0.;
+
+    return vector_added;
+}
+
+void spect_schur_augment_transf(
+    const DenseMatrix& Tt, int part, int agg_id,
+    int agg_size, const int *aggregates, const Table& AE_to_dof,
+    DenseMatrix& augTt)
 {
     const int h = Tt.Height();
     const int w = Tt.Width();
@@ -232,13 +385,24 @@ void spect_schur_augment_transf(const DenseMatrix& Tt, int part, int agg_id,
     SA_ASSERT(augTt.Data() + h*W == aptr);
 }
 
-bool spect_schur_local_prob_solve_sparse(const SparseMatrix& A,
-         SparseMatrix *& B, int part, int agg_id, int agg_size,
-         const int *aggregates,
-         const agg_partititoning_relations_t& agg_part_rels,
-         double& theta, DenseMatrix& cut_evects,
-         const DenseMatrix *Tt,
-         bool transf, bool all_eigens)
+/**
+   Not normally used, was used for two-level SAAMGe when
+   number of aggregates == number of agglomerates but 
+   agglomerates overlapped and aggregates didn't; now we
+   use MISes instead, generally.
+
+   (In principle you can still do a Schur-like thing with
+   MISes but it gets pretty complicated and we have not gone 
+   there.)
+*/
+bool spect_schur_local_prob_solve_sparse(
+    const SparseMatrix& A,
+    SparseMatrix *& B, int part, int agg_id, int agg_size,
+    const int *aggregates,
+    const agg_partitioning_relations_t& agg_part_rels,
+    double& theta, DenseMatrix& cut_evects,
+    const DenseMatrix *Tt,
+    bool transf, bool all_eigens)
 {
     DenseMatrix *cut_ptr, cut_helper;
     DenseMatrix deA, deB, augTt;

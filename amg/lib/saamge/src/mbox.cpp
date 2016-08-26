@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -44,6 +44,136 @@ using std::fabs;
 using std::sqrt;
 
 /* Functions */
+
+
+void hypre_par_matrix_ownership(HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts)
+{
+    hypre_ParCSRMatrix * hmat = (hypre_ParCSRMatrix*) mat;
+    data = hmat->owns_data;
+    row_starts = hmat->owns_row_starts;
+    col_starts = hmat->owns_col_starts;
+}
+
+/**
+   Copied from Parelag hypreExtension/hypre_CSRFactory.c
+*/
+hypre_CSRMatrix * hypre_ZerosCSRMatrix( HYPRE_Int nrows, HYPRE_Int ncols)
+{
+    hypre_CSRMatrix * A = hypre_CSRMatrixCreate( nrows, ncols, 0);
+    hypre_CSRMatrixInitialize( A );
+
+    HYPRE_Int * i_A = hypre_CSRMatrixI(A);
+
+    HYPRE_Int i;
+    for( i = 0; i < nrows+1; ++i)
+        i_A[i] = 0;
+
+    return A;
+}
+
+/**
+   Copied from Parelag hypreExtension/hypre_CSRFactory.c
+*/
+hypre_CSRMatrix * hypre_IdentityCSRMatrix( HYPRE_Int nrows)
+{
+    hypre_CSRMatrix * A = hypre_CSRMatrixCreate( nrows, nrows, nrows);
+    hypre_CSRMatrixInitialize( A );
+
+    HYPRE_Int * i_A = hypre_CSRMatrixI(A);
+    HYPRE_Int * j_A = hypre_CSRMatrixJ(A);
+    double    * a_A = hypre_CSRMatrixData(A);
+
+    HYPRE_Int i;
+    for( i = 0; i < nrows+1; ++i)
+        i_A[i] = i;
+
+    for( i = 0; i < nrows; ++i)
+    {
+        j_A[i] = i;
+        a_A[i] = 1.;
+    }
+
+    return A;
+}
+
+/**
+   Copied from Parelag hypreExtension/hypre_CSRFactory.c
+*/
+hypre_ParCSRMatrix * hypre_IdentityParCSRMatrix( 
+    MPI_Comm comm, HYPRE_Int global_num_rows, HYPRE_Int * row_starts)
+{
+    HYPRE_Int num_nonzeros_diag;
+    if(HYPRE_AssumedPartitionCheck())
+    {
+        num_nonzeros_diag = row_starts[1] - row_starts[0];
+        // hypre_assert(row_starts[2] == global_num_rows);
+    }
+    else
+    {
+        HYPRE_Int pid;
+        HYPRE_Int np;
+
+        MPI_Comm_rank(comm, &pid);
+        MPI_Comm_size(comm, &np);
+
+        num_nonzeros_diag = row_starts[pid+1] - row_starts[pid];
+        hypre_assert(row_starts[np] == global_num_rows);
+    }
+    hypre_ParCSRMatrix * mat = hypre_ParCSRMatrixCreate ( 
+        comm , global_num_rows , global_num_rows ,
+        row_starts , row_starts , 0 , num_nonzeros_diag, 0 );
+
+    hypre_ParCSRMatrixSetRowStartsOwner(mat, 0);
+    hypre_ParCSRMatrixSetColStartsOwner(mat, 0);
+
+    hypre_ParCSRMatrixColMapOffd(mat) = NULL;
+
+    hypre_CSRMatrixDestroy( hypre_ParCSRMatrixDiag(mat) );
+    hypre_CSRMatrixDestroy( hypre_ParCSRMatrixOffd(mat) );
+
+    hypre_ParCSRMatrixDiag(mat) = hypre_IdentityCSRMatrix(num_nonzeros_diag);
+    hypre_ParCSRMatrixOffd(mat) = hypre_ZerosCSRMatrix(num_nonzeros_diag, 0);
+
+    hypre_ParCSRMatrixSetDataOwner(mat, 1);
+
+    return mat;
+}
+
+/**
+   Copied from Parelag hypreExtension/deleteZeros.c
+*/
+HYPRE_Int hypre_ParCSRMatrixDeleteZeros( hypre_ParCSRMatrix *A , double tol )
+{
+    hypre_CSRMatrix * diag = hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixDiag(A), tol );
+    hypre_CSRMatrix * offd = hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixOffd(A), tol );
+
+    if(diag)
+    {
+        hypre_CSRMatrixDestroy( hypre_ParCSRMatrixDiag(A) );
+        hypre_ParCSRMatrixDiag(A) = diag;
+    }
+
+    if(offd)
+    {
+        hypre_CSRMatrixDestroy( hypre_ParCSRMatrixOffd(A) );
+        hypre_ParCSRMatrixOffd(A) = offd;
+    }
+
+    if( hypre_ParCSRMatrixCommPkg(A) )
+    {
+        hypre_MatvecCommPkgDestroy(hypre_ParCSRMatrixCommPkg(A));
+        hypre_MatvecCommPkgCreate(A);
+    }
+
+    if( hypre_ParCSRMatrixCommPkgT(A) )
+    {
+        hypre_MatvecCommPkgDestroy(hypre_ParCSRMatrixCommPkgT(A));
+    }
+
+    hypre_ParCSRMatrixSetNumNonzeros(A);
+
+    return 0;
+}
 
 double mbox_energy_inner_prod_sparse(const SparseMatrix& A, const Vector& x,
                                      const Vector& y)
@@ -795,10 +925,12 @@ SparseMatrix *mbox_snd_D_sparse_from_sparse(const SparseMatrix& A)
         beg = A.GetI()[i];
         row = A.GetJ() + beg;
         a = A.GetData() + beg;
+        // if (diag <= 0.0) SA_PRINTF("!!! diag = %e\n", diag);
         SA_ASSERT(diag > 0.);
         const int a_rsz = const_cast<SparseMatrix&>(A).RowSize(i);
         for (int j=0; j < a_rsz; ++j)
         {
+            // if (A(row[j], row[j]) <= 0.0) SA_PRINTF("!!! j diag = %e\n", A(row[j], row[j]));
             SA_ASSERT(A(row[j], row[j]) > 0.);
             sum += fabs(a[j]) * sqrt(diag / A(row[j], row[j]));
         }
@@ -1591,10 +1723,10 @@ void mbox_make_owner_rowstarts_colstarts(HypreParMatrix& A)
     if (!hypre_ParCSRMatrixOwnsRowStarts(hA))
     {
         SA_ASSERT(hypre_ParCSRMatrixRowStarts(hA));
-        HYPRE_Int *row_starts = hypre_CTAlloc(HYPRE_Int, PROC_NUM + 1);
+        HYPRE_Int *row_starts = hypre_CTAlloc(HYPRE_Int, 2);
         SA_ASSERT(row_starts);
         memcpy(row_starts, hypre_ParCSRMatrixRowStarts(hA),
-               sizeof(*row_starts) * (PROC_NUM + 1));
+               sizeof(*row_starts) * (2));
         hypre_ParCSRMatrixRowStarts(hA) = row_starts;
         hypre_ParCSRMatrixSetRowStartsOwner(hA, 1);
     }
@@ -1602,10 +1734,10 @@ void mbox_make_owner_rowstarts_colstarts(HypreParMatrix& A)
     if (!hypre_ParCSRMatrixOwnsColStarts(hA))
     {
         SA_ASSERT(hypre_ParCSRMatrixColStarts(hA));
-        HYPRE_Int *col_starts = hypre_CTAlloc(HYPRE_Int, PROC_NUM + 1);
+        HYPRE_Int *col_starts = hypre_CTAlloc(HYPRE_Int, 2);
         SA_ASSERT(col_starts);
         memcpy(col_starts, hypre_ParCSRMatrixColStarts(hA),
-               sizeof(*col_starts) * (PROC_NUM + 1));
+               sizeof(*col_starts) * (2));
         hypre_ParCSRMatrixColStarts(hA) = col_starts;
         hypre_ParCSRMatrixSetColStartsOwner(hA, 1);
     }
@@ -1618,10 +1750,10 @@ void mbox_make_owner_partitioning(HypreParVector& v)
     if (!hypre_ParVectorOwnsPartitioning(hv))
     {
         SA_ASSERT(hypre_ParVectorPartitioning(hv));
-        HYPRE_Int *partitioning = hypre_CTAlloc(HYPRE_Int, PROC_NUM + 1);
+        HYPRE_Int *partitioning = hypre_CTAlloc(HYPRE_Int, 2);
         SA_ASSERT(partitioning);
         memcpy(partitioning, hypre_ParVectorPartitioning(hv),
-               sizeof(*partitioning) * (PROC_NUM + 1));
+               sizeof(*partitioning) * (2));
         hypre_ParVectorPartitioning(hv) = partitioning;
         hypre_ParVectorSetPartitioningOwner(hv, 1);
     }
@@ -1656,15 +1788,21 @@ HypreParVector *mbox_get_diag_parallel_matrix(HypreParMatrix& A)
     mbox_vector_initialize_for_hypre(ldiag,
         hypre_CSRMatrixNumRows(hypre_ParCSRMatrixDiag((hypre_ParCSRMatrix *)
                                                       A)));
-    SA_ASSERT(ldiag.Size() == A.ColPart()[PROC_RANK + 1] -
-                              A.ColPart()[PROC_RANK]);
+    /*
+    std::cout << "[" << PROC_RANK << "] A.ColPart()[0] = " << A.ColPart()[0] << std::endl;
+    std::cout << "[" << PROC_RANK << "] ldiag.Size() = " << ldiag.Size() 
+              << ", A.ColPart()[PROC_RANK + 1] = " << A.ColPart()[PROC_RANK + 1] 
+              << ", A.ColPart()[PROC_RANK] = " << A.ColPart()[PROC_RANK] << std::endl;
+    */
+    SA_ASSERT(ldiag.Size() == A.ColPart()[1] -
+                              A.ColPart()[0]);
     A.GetDiag(ldiag);
-    SA_ASSERT(ldiag.Size() == A.ColPart()[PROC_RANK + 1] -
-                              A.ColPart()[PROC_RANK]);
+    SA_ASSERT(ldiag.Size() == A.ColPart()[1] -
+                              A.ColPart()[0]);
     double *p;
     ldiag.StealData(&p);
     HypreParVector *diag =
-        new HypreParVector(A.GetGlobalNumCols(), p, A.ColPart());
+        new HypreParVector(PROC_COMM, A.GetGlobalNumCols(), p, A.ColPart());
     hypre_SeqVectorSetDataOwner(hypre_ParVectorLocalVector((hypre_ParVector *)
                                                            *diag), 1);
     mbox_make_owner_partitioning(*diag);
@@ -1676,15 +1814,22 @@ HypreParMatrix *mbox_create_diag_parallel_matrix(HypreParVector& diag)
     hypre_ParVector *hdiag = (hypre_ParVector *)diag;
     SparseMatrix *diag_sp = mbox_create_diag_sparse_for_hypre(diag);
     HypreParMatrix *diag_mat =
-        new HypreParMatrix(hypre_ParVectorGlobalSize(hdiag),
+        new HypreParMatrix(PROC_COMM, hypre_ParVectorGlobalSize(hdiag),
                            hypre_ParVectorPartitioning(hdiag), diag_sp);
     diag_sp->LoseData();
     delete diag_sp;
-    hypre_CSRMatrixSetDataOwner(hypre_ParCSRMatrixDiag((hypre_ParCSRMatrix *)
-                                                       *diag_mat), 1);
+    hypre_CSRMatrixSetDataOwner(
+        hypre_ParCSRMatrixDiag((hypre_ParCSRMatrix *) *diag_mat), 1);
+
+    diag_mat->SetOwnerFlags(-1,-1,-1); // new ATB 8 March 2016 for MFEM 3.1
+
     return diag_mat;
 }
 
+/**
+   this is the l1 smoother, which we use as something spectrally equivalent
+   to the diagonal of A, also with other nice properties
+*/
 HypreParVector *mbox_build_Dinv_neg_parallel_matrix(HypreParMatrix& A)
 {
     HypreParMatrix *Aabs = mbox_abs_clone_parallel_matrix(A);
@@ -1720,7 +1865,7 @@ HypreParVector *mbox_clone_parallel_vector(HypreParVector *v)
     hypre_ParVectorLocalVector(hclone) =
         hypre_SeqVectorCloneDeep(hypre_ParVectorLocalVector(hv));
     HypreParVector *clone = new HypreParVector((HYPRE_ParVector)hclone);
-    clone->BecomeVectorOwner();
+    // clone->BecomeVectorOwner(); // ATB 19 December 2014 [this change very likely causes a memory leak!]
     mbox_make_owner_partitioning(*clone);
     return clone;
 }
@@ -1737,14 +1882,14 @@ void mbox_project_parallel(HypreParMatrix& interp, HypreParVector& v)
 
     Vector lrv(mbox_rows_in_current_process(*restr));
     restr->Mult(v, lrv);
-    HypreParVector RV(interp.GetGlobalNumCols(), lrv.GetData(),
+    HypreParVector RV(PROC_COMM, interp.GetGlobalNumCols(), lrv.GetData(),
                       interp.GetColStarts());
     pcg->SetTol(1e-12);
     pcg->SetMaxIter(10 * coarse->GetGlobalNumRows());
     pcg->SetPrintLevel(1);
     pcg->SetPreconditioner(*amg);
     Vector lcv(mbox_rows_in_current_process(*restr));
-    HypreParVector CV(interp.GetGlobalNumCols(), lcv.GetData(),
+    HypreParVector CV(PROC_COMM, interp.GetGlobalNumCols(), lcv.GetData(),
                       interp.GetColStarts());
     pcg->Mult(RV, CV);
     interp.Mult(CV, v);
@@ -1771,14 +1916,14 @@ void mbox_project_parallel(HypreParMatrix& A, HypreParMatrix& interp,
     A.Mult(v, lbv);
     Vector lrv(mbox_rows_in_current_process(*restr));
     restr->Mult(lbv, lrv);
-    HypreParVector RV(interp.GetGlobalNumCols(), lrv.GetData(),
+    HypreParVector RV(PROC_COMM, interp.GetGlobalNumCols(), lrv.GetData(),
                       interp.GetColStarts());
     pcg->SetTol(1e-12);
     pcg->SetMaxIter(10 * coarse->GetGlobalNumRows());
     pcg->SetPrintLevel(1);
     pcg->SetPreconditioner(*amg);
     Vector lcv(mbox_rows_in_current_process(*restr));
-    HypreParVector CV(interp.GetGlobalNumCols(), lcv.GetData(),
+    HypreParVector CV(PROC_COMM, interp.GetGlobalNumCols(), lcv.GetData(),
                       interp.GetColStarts());
     pcg->Mult(RV, CV);
     interp.Mult(CV, v);

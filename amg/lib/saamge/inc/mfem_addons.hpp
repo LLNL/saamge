@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,6 +40,8 @@
 #include "aggregates.hpp"
 #include "elmat.hpp"
 #include "mbox.hpp"
+
+using namespace mfem;
 
 /* Types */
 /*! \brief A coefficient function type.
@@ -110,7 +112,7 @@ public:
 
         \param in (IN) Input stream.
     */
-    virtual void Read(istream &in)
+    virtual void Read(std::istream &in)
     {
     }
 
@@ -157,7 +159,7 @@ public:
 
         \param in (IN) Input stream.
     */
-    virtual void Read(istream &in)
+    virtual void Read(std::istream &in)
     {
     }
 
@@ -174,6 +176,8 @@ private:
 /*! \brief Wraps \b smpr_ft preconditioners to be usable in MFEM.
 
     Wraps \b smpr_ft preconditioners to be usable as MFEM preconditioners.
+
+    DEPRECATED
 */
 class CFunctionSmoother : public Operator
 {
@@ -220,128 +224,6 @@ private:
     void *data; /*!< The smoother-specific data. */
 };
 
-/*! \brief Wraps \b agg_elmat_callback_ft to be usable as MFEM integrators.
-*/
-class WrapperIntegrator: public BilinearFormIntegrator
-{
-public:
-
-    /*! \brief Constructor.
-
-        \param elmat_callbacka (IN) Callback returning element matrices.
-        \param agg_part_relsa (IN) The partitioning relations.
-        \param dataa (IN/OUT) \a elmat_callbacka specific data.
-     */
-    WrapperIntegrator(agg_elmat_callback_ft elmat_callbacka,
-                      const agg_partititoning_relations_t *agg_part_relsa,
-                      void *dataa, int NEa) :
-        elmat_callback(elmat_callbacka), agg_part_rels(agg_part_relsa),
-        data(dataa), NE(NEa), matr_type(0)
-    {
-        SA_ASSERT(0 < NE);
-    }
-
-    /*! \brief Computes the element stiffness matrix.
-
-        Given a particular Finite Element computes the element stiffness matrix
-        \a elmat.
-
-        \param el (IN) A finite element.
-        \param Trans (IN) An element transformation.
-        \param elmat (OUT) The computed element matrix.
-     */
-    virtual void AssembleElementMatrix(const FiniteElement &el,
-                                       ElementTransformation &Trans,
-                                       DenseMatrix &elmat)
-    {
-        bool free_matr;
-        SA_ASSERT(0 <= Trans.ElementNo && Trans.ElementNo < NE);
-        Matrix *elem_matr = elmat_callback(Trans.ElementNo, agg_part_rels,
-                                           data, free_matr);
-        SA_ASSERT(elem_matr);
-
-        if (!matr_type)
-        {
-            if (dynamic_cast<SparseMatrix *>(elem_matr))
-                matr_type = -1;
-            else
-            {
-                SA_ASSERT(dynamic_cast<DenseMatrix *>(elem_matr));
-                matr_type = 1;
-            }
-        }
-
-        if (0 > matr_type) // Sparse element matrices.
-        {
-            SparseMatrix *spm = static_cast<SparseMatrix *>(elem_matr);
-            SA_ASSERT(spm);
-            mbox_convert_sparse_to_dense(*spm, elmat);
-            if (free_matr)
-                delete spm;
-        } else // Dense element matrices.
-        {
-            SA_ASSERT(0 < matr_type);
-            DenseMatrix *dm = static_cast<DenseMatrix *>(elem_matr);
-            SA_ASSERT(dm);
-            if (free_matr)
-            {
-                mbox_swap_data_dense(*dm, elmat);
-                delete dm;
-            } else
-                elmat = *dm;
-        }
-    }
-
-    /*! Not implemented and not used currently. */
-    virtual void AssembleElementMatrix2(const FiniteElement &trial_fe,
-                                        const FiniteElement &test_fe,
-                                        ElementTransformation &Trans,
-                                        DenseMatrix &elmat)
-    {
-        SA_ASSERT(false);
-    }
-
-    /*! Not implemented and not used currently. */
-    virtual void AssembleFaceMatrix(const FiniteElement &el1,
-                                    const FiniteElement &el2,
-                                    FaceElementTransformations &Trans,
-                                    DenseMatrix &elmat)
-    {
-        SA_ASSERT(false);
-    }
-
-    /*! Not implemented and not used currently. */
-    virtual void ComputeElementFlux(const FiniteElement &el,
-                                    ElementTransformation &Trans,
-                                    Vector &u,
-                                    const FiniteElement &fluxelem,
-                                    Vector &flux, int wcoef)
-    {
-        SA_ASSERT(false);
-    }
-
-    /*! Not implemented and not used currently. */
-    virtual double ComputeFluxEnergy(const FiniteElement &fluxelem,
-                                     ElementTransformation &Trans,
-                                     Vector &flux)
-    {
-        SA_ASSERT(false);
-        return 0.;
-    }
-
-private:
-    agg_elmat_callback_ft elmat_callback; /*!< Callback returning element
-                                                     matrices. */
-    const agg_partititoning_relations_t *agg_part_rels; /*!< The partitioning
-                                                             relations. */
-    void *data; /*!< Function specific data. */
-    const int NE; /*!< The number of elements */
-    int matr_type; /*!< The type the matrices returned by the callback:
-                       == 0 -- Not known, to be determined;
-                        < 0 -- Sparse;
-                        > 0 -- Dense. */
-};
-
 /* Functions */
 /*! \brief Generates the relation table that relates elements to vertices.
 
@@ -349,6 +231,15 @@ private:
     \param elem_to_vert (OUT) The constructed relation.
 */
 void construct_elem_to_vert(Mesh& mesh, Table& elem_to_vert);
+
+/**
+   Returns a pointer to a HypreParMatrix on one processor that
+   is the same as A.
+
+   SparseMatrix A owns the data, so if you delete it the
+   returned HypreParMatrix is SOL.
+*/
+HypreParMatrix * FakeParallelMatrix(const SparseMatrix *A);
 
 /*! \brief PCG solver.
 
@@ -370,8 +261,16 @@ void construct_elem_to_vert(Mesh& mesh, Table& elem_to_vert);
     \returns The number of iterations done. If a solution was not successfully
              computed, then this number is negative.
 */
-int pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
-        HypreParVector &x, int print_iter/*=0*/, int max_num_iter/*=1000*/, double RTOLERANCE/*=10e-12*/,
-        double ATOLERANCE/*=10e-24*/, bool zero_rhs/*=false*/);
+int kalchev_pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
+                HypreParVector &x, int print_iter/*=0*/, int max_num_iter/*=1000*/, double RTOLERANCE/*=10e-12*/,
+                double ATOLERANCE/*=10e-24*/, bool zero_rhs/*=false*/);
+
+SparseMatrix * IdentitySparseMatrix(int n);
+
+Table * TableFromSparseMatrix(const SparseMatrix& A);
+
+/*! \brief Makes an mfem::Table of size n that is the identity permutation
+ */
+Table * IdentityTable(int n);
 
 #endif // _MFEM_ADDONS_HPP

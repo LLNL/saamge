@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -39,6 +39,8 @@
 #include "mfem_addons.hpp"
 #include "aggregates.hpp"
 #include "elmat.hpp"
+
+using namespace mfem;
 
 /* Options */
 
@@ -444,6 +446,22 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
 static inline
 int *fem_partition_mesh(Mesh& mesh, int *nparts);
 
+/*! \brief Utility routine, to deal with vector-valued problems.
+
+    Converts an mfem elem_to_dof table to one that SAAMGe can use
+    algebraically without knowing about the vector structure.
+*/
+Table* vector_valued_elem_to_dof(const Table& mfem_elem_to_dof,
+                                 const int vdim, const int ordering);
+
+/*! \brief Partitions a Cartesian 2D mesh into rectangles.
+
+    This function is used to do element agglomeration on slices of
+    the SPE10 test problem.
+*/
+int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
+                                  int *nparts_y);
+
 /*! \brief Creates all relations on the finest (geometric) mesh.
 
     The function is a wrapper that uses several other functions to do the
@@ -466,10 +484,16 @@ int *fem_partition_mesh(Mesh& mesh, int *nparts);
     \warning The returned structure must be freed by the caller by calling
              \b agg_free_partitioning.
 */
-static inline
-agg_partititoning_relations_t *
-fem_create_partitioning(const SparseMatrix& A, ParFiniteElementSpace& fes,
-                        const agg_dof_status_t *bdr_dofs, int *nparts);
+agg_partitioning_relations_t *
+fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
+                        const agg_dof_status_t *bdr_dofs, int *nparts,
+                        bool do_aggregates);
+
+agg_partitioning_relations_t *
+fem_create_partitioning_from_matrix(const SparseMatrix& A,
+                                    int *nparts,
+                                    HypreParMatrix *dof_truedof,
+                                    Array<int>& isolated_cells);
 
 /* Function Templates Definitions */
 template <class T>
@@ -478,13 +502,13 @@ ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
                                         bool bdr_cond_impose,
                                         Array<int> *ess_bdr)
 {
-    SA_PRINTF_L(4, "%s", "Assembling global stiffness matrix...\n");
+    SA_RPRINTF_L(0, 4, "%s", "Assembling global stiffness matrix...\n");
     ParBilinearForm *a = new ParBilinearForm(fespace);
     a->AddDomainIntegrator(new DiffusionIntegrator(coeff));
     a->Assemble(/*0*/);
     if (bdr_cond_impose)
     {
-        SA_PRINTF_L(4, "%s", "Imposing boundary conditions...\n");
+        SA_RPRINTF_L(0, 4, "%s", "Imposing boundary conditions...\n");
         /* Imposing Dirichlet boundary conditions. */
         SA_ASSERT(ess_bdr->Size() == fespace->GetMesh()->bdr_attributes.Max());
         Array<int> ess_dofs;
@@ -492,7 +516,7 @@ ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
         a->EliminateEssentialBCFromDofs(ess_dofs, x, b,
                                     (int)CONFIG_ACCESS_OPTION(FEM, keep_diag));
     }
-    SA_PRINTF_L(4, "%s", "Finalizing global stiffness matrix...\n");
+    SA_RPRINTF_L(0, 4, "%s", "Finalizing global stiffness matrix...\n");
     a->Finalize(0);
 
     return a;
@@ -506,7 +530,7 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
                                 ParLinearForm*& b, ParBilinearForm*& a,
                                 Array<int> *ess_bdr)
 {
-    SA_PRINTF_L(4, "%s", "Building discrete problem...\n");
+    SA_RPRINTF_L(0, 4, "%s", "Building discrete problem...\n");
 
     // Define the solution vector x as a finite element grid function
     // corresponding to fespace. Initialize x in such a way that it satisfies
@@ -514,8 +538,11 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
     if (bdr_cond_impose)
     {
         fem_init_with_bdr_cond(x, fespace, bdr_coeff);
-    } else
+    } 
+    else
+    {
         x.Update(fespace);
+    }
 
     // Set up the linear form b(.) which corresponds to the right-hand side
     // of the FEM linear system, which in this case is (rhs_func,phi_i), where
@@ -533,30 +560,7 @@ static inline
 int *fem_partition_mesh(Mesh& mesh, int *nparts)
 {
     //XXX: This will stay allocated in MESH till the end.
-    return part_generate_partitioning(mesh.ElementToElementTable(), nparts);
-}
-
-static inline
-agg_partititoning_relations_t *
-fem_create_partitioning(const SparseMatrix& A, ParFiniteElementSpace& fes,
-                        const agg_dof_status_t *bdr_dofs, int *nparts)
-{
-    Table *elem_to_dof, *elem_to_elem;
-    Mesh *mesh = fes.GetMesh();
-
-    //XXX: This will stay allocated in MESH till the end.
-    elem_to_elem = mbox_copy_table(&(mesh->ElementToElementTable()));
-
-    fes.BuildElementToDofTable(); //XXX: This remains allocated in FES till the
-                                  //     end.
-    elem_to_dof = mbox_copy_table(&(fes.GetElementToDofTable()));
-
-    agg_partititoning_relations_t *agg_part_rels =
-        agg_create_partitioning_fine(A, fes.GetNE(), elem_to_dof, elem_to_elem,
-                                     NULL, bdr_dofs, nparts, &fes);
-
-    SA_ASSERT(agg_part_rels);
-    return agg_part_rels;
+    return part_generate_partitioning_unweighted(mesh.ElementToElementTable(), nparts);
 }
 
 #endif // _FEM_HPP

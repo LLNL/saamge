@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -53,11 +53,31 @@ void proc_init(MPI_Comm comm)
     PROC_CLEAR_STR_STREAM;
 }
 
+
+/*!
+  DEPRECATED, moving to Hypre 2.10.0b which uses no global partition
+  by default, which is probably what we want anyway
+  see proc_determine_offsets
+*/
 void proc_allgather_offsets(int my_size, Array<int>& offsets)
 {
+    SA_ASSERT(false);
     offsets.SetSize(PROC_NUM + 1);
     MPI_Allgather(&my_size, 1, MPI_INT, &offsets[1], 1, MPI_INT, PROC_COMM);
     offsets[0] = 0;
     for (int i=1; i < PROC_NUM; ++i)
         offsets[i+1] += offsets[i];
+}
+
+/*!
+  determine offsets (of length 2) for no global partition
+  ATB 11 February 2015
+*/
+void proc_determine_offsets(int my_size, Array<int>& offsets, int& total)
+{
+    offsets.SetSize(2); // an Array<int> may be overkill here
+    MPI_Scan(&my_size, &offsets[1], 1, MPI_INT, MPI_SUM, PROC_COMM);
+    offsets[0] = offsets[1] - my_size;
+    total = offsets[1];
+    MPI_Bcast(&total, 1, MPI_INT, PROC_NUM-1, PROC_COMM);
 }

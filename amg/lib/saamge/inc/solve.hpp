@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -35,96 +35,97 @@
 #define _SOLVE_HPP
 
 #include "common.hpp"
+#include "smpr.hpp"
+#include "tg_data.hpp"
 #include <mfem.hpp>
 
+using namespace mfem;
+
 /* Types */
-/*! \brief A function type for a (coarse) solver execution.
 
-    It is called whenever systems with the matrix on the coarsest level have to
-    be solved.
+/**
+   This class is really just a V-cycle that we only use with
+   a particularly chosen interp matrix, so we believe it is
+   somehow a different class...
 
-    \param A (IN) The sparse matrix of the linear system to be solved.
-    \param b (IN) The right-hand side.
-    \param x (IN/OUT) The approximated solution. It might be used as an input,
-                      to the solver, of the initial guess (depends on the
-                      solver).
-    \param data (IN/OUT) Solver specific data (see \b solve_t).
+   some of the options are basicaly deprecated/inactive:
+     use_hypre_smoother
+     spectral_cycles (always == 1)
 */
-typedef void (*solve_ft)(HypreParMatrix& A, HypreParVector& b,
-                         HypreParVector& x, void *data);
+class CorrectNullspace : public mfem::Solver
+{
+public:
+    CorrectNullspace(HypreParMatrix& A,
+                     HypreParMatrix * interp,
+                     int smoother_steps,
+                     bool smooth_phat,
+                     bool v_cycle,
+                     bool iterative_mode);
+    ~CorrectNullspace();
+    virtual void SetOperator(const Operator &op);
+    virtual void Mult(const Vector &x, Vector &y) const;
+private:
+    int smoother_steps; // two purposes: if use_hypre_smoother, gives number of GS steps,
+                        // otherwise, gives nu (which is more like degree than steps) for Delyan's Chebyshev smoother
+    bool v_cycle; // this is for the nulspace (coarsest) level, whether to do CG-HYPRE or just HYPRE
+    bool use_hypre_smoother;
+    bool smooth_phat;
 
-/*! \brief A function type for a (coarse) solver initialization.
+    smpr_ft smoother;
+    void * smoother_data;
 
-    It is called whenever the matrix on the coarsest level is computed
-    (created).
+    HypreParMatrix * A;
+    HypreParMatrix * Ac; // this is matrix at nulspace level
+    HypreParMatrix * interp;
+    HypreParMatrix * restr;
 
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
+    Solver * correct_nullspace_coarse;
 
-    \returns Solver specific data (see \b solve_t).
+    int spectral_cycles; // only makes sense without --spectral-cg option
+    int cumulative_spectral_cg; // only makes sense with --spectral-cg option
+    double spectral_cg_tol; // for use with --spectral-cg option
+};
 
-    \warning The returned data would probably need to be deallocated.
+/**
+   This solves with Hypre CG preconditioned with Hypre BoomerAMG
+
+   In many places I am moving away from HyprePCG, towards
+   mfem::CGSolver because the latter allows more flexible 
+   preconditioning. However, this version is still normally
+   used as a solver on the coarsest level.
+
+   This class intended to replace solve_spd_amg(),
+   solve_spd_amg_init(), etc. as a solve_t
 */
-typedef void *(*solve_init_ft)(HypreParMatrix& A);
-
-/*! \brief A function type for a (coarse) solver destruction.
-
-    It is called whenever the matrix on the coarsest level is being freed
-    (destroyed).
-
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
-    \param data (IN/OUT) Solver specific data (see \b solve_t).
-
-    \returns A pointer that will replace the current \b data (see \b solve_t).
-             It should normally be NULL.
-*/
-typedef void *(*solve_free_ft)(HypreParMatrix& A, void *data);
-
-/*! \brief A function type for a (coarse) solver data copying.
-
-    It is called whenever the matrix on the coarsest level is being copied.
-
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
-    \param data (IN/OUT) Solver specific data (see \b solve_t).
-
-    \returns A copy of \a data.
-
-    \warning The returned data would probably need to be deallocated.
-*/
-typedef void *(*solve_copy_ft)(HypreParMatrix& A, void *data);
-
-/*! \brief A (coarse) solver structure combining functions and data together.
-
-    A typical use of this structure is in \b tg_data_t in 'tg.*'.
-
-    XXX: It may look a bit like a class (in OOP). However, while a class (its
-         C++ implementation) "encapsulates" data in a structure that is passed
-         implicitly to the class's methods, here the functions are also in the
-         structure's data. So it looks more like defining interface. This is a
-         spot where inheritance with its polymorphic capabilities seems to be
-         an appropriate and nice alternative.
-*/
-typedef struct {
-    solve_init_ft solve_init; /*!< A solver initialization routine. */
-    solve_free_ft solve_free; /*!< A solver destructor routine. */
-    solve_copy_ft solve_copy; /*!< A solver copy routine. */
-    solve_ft solver; /*!< A solver. */
-    void *data; /*!< Solver's data. Not owned by this structure and it is not
-                     freed and/or allocated here. */
-} solve_t;
-
-/*! \brief Data for the AMG solver.
-*/
-typedef struct {
+class AMGSolver : public mfem::Solver
+{
+public:
+    AMGSolver(HypreParMatrix& A, bool iterative_mode);
+    ~AMGSolver();
+    virtual void SetOperator(const Operator &op) {};
+    virtual void Mult(const Vector &x, Vector &y) const;
+private:
     HypreSolver *amg; /*!< AMG preconditioner. */
     HyprePCG *pcg; /*!< PCG solver. */
+    mutable int cumulative_iterations; 
     int ref_cntr; /*!< Reference counter. */
-} solve_amg_t;
+};
+
+/**
+   this class intended to replace solve_spd_Vcycle() as a solve_t
+*/
+class VCycleSolver : public mfem::Solver
+{
+public:
+    VCycleSolver(tg_data_t * tg_data, bool iterative_mode);
+    ~VCycleSolver();
+    virtual void SetOperator(const Operator &op);
+    virtual void Mult(const Vector &x, Vector &y) const;
+private:
+    tg_data_t * tg_data;
+    HypreParMatrix * A;
+};
+
 
 /* Options */
 
@@ -164,53 +165,22 @@ CONFIG_END_CLASS_DEFAULTS
 void solve_empty(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
                  void *data);
 
-/*! \brief AMG solver initialization.
+/*! \brief Inexact coarse solve by a TG(or V)-cycle.
 
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
-
-    \returns Solver specific data of type \b solve_amg_t.
-
-    \warning The returned data will be deallocated by \b solve_spd_AMG_free.
-    \warning \a A must be an s.p.d. matrix.
-    \warning The tolerances and maximal number of iterations are determined
-             using options \b rtol and \b iters_coeff.
-*/
-void *solve_spd_AMG_init(HypreParMatrix& A);
-
-/*! \brief AMG solver destruction.
-
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
-    \param data (IN/OUT) Of type \b solve_amg_t.
-
-    \returns NULL.
-*/
-void *solve_spd_AMG_free(HypreParMatrix& A, void *data);
-
-/*! \brief AMG solver data copying.
-
-    \param A (IN) The sparse matrix of the linear system (being solved with
-                  this solver). That is, it is the operator on the coarsest
-                  level.
-    \param data (IN/OUT) Of type \b solve_amg_t.
-
-    \returns A copy of \a data.
-
-    \warning The returned data will be deallocated by \b solve_spd_AMG_free.
-*/
-void *solve_spd_AMG_copy(HypreParMatrix& A, void *data);
-
-/*! \brief Solves a system using AMG.
-
-    \param A (IN) The sparse matrix of the linear system to be solved.
-    \param b (IN) The right-hand side.
+    \param A (IN) The sparse matrix of the coarse linear system.
+    \param b (IN) The right-hand side (some residual).
     \param x (OUT) The approximated solution.
-    \param data (IN) Of type \b solve_amg_t.
+    \param data (IN) Must be of type \b tg_data_t. This is the TG data for the
+                     next (coarser) level where \a A lives.
+
+    \warning \a A must be an s.p.d. matrix.
+    \warning The coarse matrix (\b Ac) in \a data must be already computed.
+             This function does not produce the coarse operator.
 */
-void solve_spd_AMG(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
-                   void *data);
+void solve_spd_Vcycle(HypreParMatrix& A, const HypreParVector& b, HypreParVector& x,
+                      void *data);
+void solve_spd_Wcycle(HypreParMatrix& A, const HypreParVector& b, HypreParVector& x,
+                      void *data);
+
 
 #endif // _SOLVE_HPP

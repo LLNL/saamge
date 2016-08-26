@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -54,7 +54,7 @@ void helpers_random_gen(Vector &x, double interval_len)
         x(i) = interval_len * drand48();
 }
 
-void helpers_random_vect(const agg_partititoning_relations_t& agg_part_rels,
+void helpers_random_vect(const agg_partitioning_relations_t& agg_part_rels,
                          Vector &x)
 {
     srand48(time(NULL) + PROC_RANK);
@@ -99,7 +99,7 @@ void helpers_write_vector_for_gnuplot(int num, const Vector& v)
     SA_ASSERT(vect_ofs);
     vect_ofs.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
     for (int i=0; i < v.Size(); ++i)
-        vect_ofs << i << "\t\t" << v(i) << endl;
+        vect_ofs << i << "\t\t" << v(i) << std::endl;
     vect_ofs.close();
 }
 

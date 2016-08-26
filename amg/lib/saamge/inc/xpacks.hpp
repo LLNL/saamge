@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -36,6 +36,8 @@
 
 #include "common.hpp"
 #include <mfem.hpp>
+
+using namespace mfem;
 
 /* Functions */
 /*! \brief Computes the inverse of an s.p.d. dense matrix.
@@ -219,6 +221,10 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
 */
 void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
                     DenseMatrix& orth_set, double eps);
+
+/*! \brief solves least squares problem Ax = b for possibly rectangular A.
+ */
+void xpack_solve_lls(const DenseMatrix& A, const Vector &rhs, Vector &x);
 
 /*! \brief Solves a linear system using the Cholesky decomposition.
 

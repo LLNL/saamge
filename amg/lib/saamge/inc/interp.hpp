@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,7 +41,11 @@
 #include "aggregates.hpp"
 #include "spectral.hpp"
 #include "smpr.hpp"
-#include "elmat.hpp"
+
+using namespace mfem;
+
+// forward declaration
+class ElementMatrixProvider;
 
 /* Types */
 /*! \brief Parameters and data for the interpolant.
@@ -59,25 +63,13 @@ typedef struct {
                                     local stiffness matrices are saved and if
                                     necessary reused. */
 
-    agg_elmat_callback_ft finest_elmat_callback; /*!< What element callback
-                                                      will be used for the
-                                                      finest (usually
-                                                      geometric) level when
-                                                      assembling local (AE)
-                                                      stiffness matrices. */
-
-    int nu_interp; /*!< Nu for the interpolant smoother. */
+    int nu_pro; /*!< Nu for the interpolant smoother. */
     int interp_smoother_degree; /*!< The degree of the polynomial of the
                                      interpolant smoother. */
     double *interp_smoother_roots; /*!< The roots of the polynomial of the
                                         interpolant smoother. */
     int times_apply_smoother; /*!< How many times the prolongator smoother is
                                    to be applied. */
-
-    spect_local_prob_solve_sparse_ft local_prob_solve; /*!< The method used
-                                                            for finding
-                                                            near-kernel
-                                                            vectors. */
 
     contrib_agg_ft contrib_agg; /*!< The function distributing vectors among
                                      (big or refined) aggregates. */
@@ -91,9 +83,29 @@ typedef struct {
                                          (within the process) tentative
                                          prolongator w.r.t. the global
                                          numbering across all processes. */
+
+    Array<double> * local_coarse_one_representation; /*! ATB building coarse_one_representation on the fly */
+
+    bool use_arpack; /*! ATB whether to use ARPACK or do direct eigensolver */
+    bool scaling_P; /*! ATB whether or not to do the coarse_one_representation, scaling_P business */
+
+    int * mis_numcoarsedof;
+
+    int coarse_truedof_offset; /*!< TODO this may be the same as tent_interp_offsets... */
+    int num_mises;
+    DenseMatrix ** mis_tent_interps; /*!< tentative interpolants localized to each MIS, (a) a waste of memory if we also have tent_interp and (b) maybe belongs in interp_data_t or contrib_ or something? */
 } interp_data_t;
 
 /* Options */
+
+/*! The function distributing vectors among (big or refined) aggregates.
+
+  \warning This parameter is used during the construction of objects
+           (structure instances) so if modified it will only have effect
+           for new objects and will NOT modify the behavior of existing
+           ones. For altering the option for existing objects look at the
+           corresponding fields in the respective structure(s). */
+//    CONFIG_DECLARE_OPTION(contrib_agg_ft, contrib_agg);
 
 /*! \brief The configuration class of this module.
 
@@ -102,24 +114,6 @@ typedef struct {
              options.
 */
 CONFIG_BEGIN_CLASS_DECLARATION(INTERP)
-
-    /*! The method used for finding near-kernel vectors.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(spect_local_prob_solve_sparse_ft, local_prob_solve);
-
-    /*! The function distributing vectors among (big or refined) aggregates.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(contrib_agg_ft, contrib_agg);
 
     /*! A parameter of \b interp_data_t::contrib_agg. Usually SVD tolerance.
 
@@ -172,30 +166,19 @@ CONFIG_BEGIN_CLASS_DECLARATION(INTERP)
         during the global imposition of essential boundary conditions. */
     CONFIG_DECLARE_OPTION(bool, assemble_ess_diag);
 
-    /*! What element callback will be used for the finest (usually geometric)
-        level when assembling local (AE) stiffness matrices.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(agg_elmat_callback_ft, finest_elmat_callback);
-
 CONFIG_END_CLASS_DECLARATION(INTERP)
 
+// default local_prob_solve changed ATB 7 April 2015 in preparation to doing MISes instead of aggregates
+
+//     CONFIG_DEFINE_OPTION_DEFAULT(contrib_agg, contrib_big_aggs_nosvd),
+
 CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(INTERP)
-    CONFIG_DEFINE_OPTION_DEFAULT(local_prob_solve,
-                                 spect_schur_local_prob_solve_sparse),
-    CONFIG_DEFINE_OPTION_DEFAULT(contrib_agg, contrib_big_aggs_nosvd),
     CONFIG_DEFINE_OPTION_DEFAULT(eps_svd, 1e-10),
     CONFIG_DEFINE_OPTION_DEFAULT(eps_lin, 1e-12),
     CONFIG_DEFINE_OPTION_DEFAULT(smoother_roots, smpr_sa_poly_roots),
     CONFIG_DEFINE_OPTION_DEFAULT(times_apply_smoother, 1),
     CONFIG_DEFINE_OPTION_DEFAULT(bdr_cond_imposed, true),
-    CONFIG_DEFINE_OPTION_DEFAULT(assemble_ess_diag, true),
-    CONFIG_DEFINE_OPTION_DEFAULT(finest_elmat_callback,
-                                 elmat_standard_geometric_dense)
+    CONFIG_DEFINE_OPTION_DEFAULT(assemble_ess_diag, true)
 CONFIG_END_CLASS_DEFAULTS
 
 /* Functions */
@@ -228,6 +211,7 @@ HypreParMatrix *interp_smooth(int degree, double *roots,
     \param agg_part_rels (IN) The partitioning relations.
     \param nu (IN) The degree of the polynomial smoother if the tentative
                    interpolant will be smoothed by a polynomial.
+    \param scaling_P whether or not to build the coarse_ones_representation, scaling_P business
 
     \returns A structure with the interpolant data.
 
@@ -247,13 +231,15 @@ HypreParMatrix *interp_smooth(int degree, double *roots,
     \warning It uses the options \b finest_elmat_callback.
 */
 interp_data_t *interp_init_data(
-    const agg_partititoning_relations_t& agg_part_rels, double nu);
+    const agg_partitioning_relations_t& agg_part_rels, int nu_pro, 
+    bool use_arpack, bool scaling_P = false);
 
 /*! \brief Frees interpolant data.
 
     \param interp_data (IN) To be freed.
 */
-void interp_free_data(interp_data_t *interp_data);
+void interp_free_data(interp_data_t *interp_data,
+                      bool minimal_coarse_space);
 
 /*! \brief Copies interpolant data.
 
@@ -265,6 +251,25 @@ void interp_free_data(interp_data_t *interp_data);
              \b interp_free_data.
 */
 interp_data_t *interp_copy_data(const interp_data_t *src);
+
+/**
+   This is a version of interp_compute_vectors() for the
+   algebraic calling sequence/stack, it has a lot of copied
+   code from interp_compute_vectors and TODO we should 
+   eventually combine them in a more rational way.
+
+   It does not support readapting or spect_update, and probably 
+   does not behave quite correctly with respect to transf, or
+   all_eigens. 
+
+   It is only tested with: transf=false, readapting=false,
+   all_eigens=false, spect_update=true
+*/
+void interp_compute_vectors_given_agg_matrices(
+   const agg_partitioning_relations_t& agg_part_rels,
+   const interp_data_t& interp_data, double& tol,
+   double& theta, 
+   bool transf, bool all_eigens);
 
 /*! \brief Computes the vectors used for building the tentative interpolant.
 
@@ -308,8 +313,6 @@ interp_data_t *interp_copy_data(const interp_data_t *src);
                                  \a interp_data.finest_elmat_callback. If the
                                  current level is not the finest this MUST be
                                  NULL to invoke coarse level construction.
-                                 Usually this is a MFEM \em BilinearForm used
-                                 for assembling \a A (on a geometric level).
     \param tol (IN/OUT) The tolerance for adding vectors when
                         \a spect_update = \em false. A suggestion for future
                         tolerance is returned here.
@@ -349,16 +352,25 @@ interp_data_t *interp_copy_data(const interp_data_t *src);
              \b agg_build_AE_stiffm_with_global).
     \warning \a A and \a elem_data_* must correspond to each other.
 */
-void interp_compute_vectors(const SparseMatrix& A,
-    const agg_partititoning_relations_t& agg_part_rels,
-    const interp_data_t& interp_data, void *elem_data_finest, double& tol,
-    double& theta, bool *xbad_lin_indep/*=NULL*/, bool *vector_added/*=NULL*/, const Vector *xbad/*=NULL*/,
-    bool transf/*=0*/, bool readapting/*=0*/, bool all_eigens/*=0*/, bool spect_update/*=1*/);
+void interp_compute_vectors(SparseMatrix const * A,
+                            const agg_partitioning_relations_t& agg_part_rels,
+                            const interp_data_t& interp_data, 
+                            ElementMatrixProvider *elem_data_coarse, ElementMatrixProvider *elem_data_finest, 
+                            double& tol, double& theta, 
+                            bool *xbad_lin_indep, bool *vector_added, const Vector *xbad,
+                            bool transf, bool readapting, bool all_eigens, bool spect_update);
+
+/*! experimental replacement for interp_sparse_tent_build()
+  that uses "minimal" coarse space of all ones
+*/
+SparseMatrix *interp_build_minimal(
+    const agg_partitioning_relations_t &agg_part_rels,
+    interp_data_t& interp_data);
 
 /*! \brief Generates the tentative interpolant.
 
     \param A (IN) The global stiffness matrix (with imposed boundary
-                  conditions if on geometric level).
+                  conditions if on geometric level), NULL on coarser levels
     \param agg_part_rels (IN) The partitioning relations.
     \param interp_data (IN) Parameters and data for the interpolant.
     \param elem_data_finest (IN/OUT) See \b interp_compute_vectors.
@@ -380,9 +392,10 @@ void interp_compute_vectors(const SparseMatrix& A,
              the zero elements in \a A.
     \warning \a A and \a elem_data_* must correspond to each other.
 */
-SparseMatrix *interp_sparse_tent_build(const SparseMatrix& A,
-    const agg_partititoning_relations_t& agg_part_rels,
-    const interp_data_t& interp_data, void *elem_data_finest, double& tol,
+SparseMatrix *interp_sparse_tent_build(
+    SparseMatrix const *A, const agg_partitioning_relations_t& agg_part_rels,
+    interp_data_t& interp_data, 
+    ElementMatrixProvider * elem_data_coarse, ElementMatrixProvider *elem_data_finest, double& tol,
     double& theta, bool *xbad_lin_indep/*=NULL*/, bool *vector_added/*=NULL*/, const Vector *xbad/*=NULL*/,
     bool transf/*=0*/, bool readapting/*=0*/, bool all_eigens/*=0*/, bool spect_update/*=1*/);
 
@@ -403,8 +416,8 @@ SparseMatrix *interp_sparse_tent_build(const SparseMatrix& A,
     \warning The returned sparse matrix must be freed by the caller.
 */
 SparseMatrix *interp_sparse_tent_assemble(
-     const agg_partititoning_relations_t& agg_part_rels,
-     const interp_data_t& interp_data);
+     const agg_partitioning_relations_t& agg_part_rels,
+     interp_data_t& interp_data);
 
 /*! \brief Assembles the global parallel tentative interpolant.
 
@@ -418,8 +431,28 @@ SparseMatrix *interp_sparse_tent_assemble(
     \warning The returned parallel sparse matrix must be freed by the caller.
 */
 HypreParMatrix *interp_global_tent_assemble(
-     const agg_partititoning_relations_t& agg_part_rels,
+     const agg_partitioning_relations_t& agg_part_rels,
      interp_data_t& interp_data, SparseMatrix *local_tent_interp);
+
+/*! \brief assembles global coarse representation of ones (ie, near null space)
+
+  DEPRECATED
+
+  added ATB 7 October 2014
+*/
+HypreParVector *interp_global_coarse_one_assemble(
+    const agg_partitioning_relations_t& agg_part_rels,
+    interp_data_t& interp_data, SparseMatrix *local_tent_interp,
+    Array<double> * local_coarse_one_representation);
+
+/*! \brief assembles scaling P 
+
+  added ATB 20 February 2015
+*/
+HypreParMatrix * interp_scaling_P_assemble(
+    const agg_partitioning_relations_t& agg_part_rels,
+    interp_data_t& interp_data, SparseMatrix *local_tent_interp,
+    Array<double> * local_coarse_one_representation);
 
 /* Inline Functions */
 /*! \brief Smooths the tentative interpolant to produce the final one.

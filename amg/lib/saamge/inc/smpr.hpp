@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,6 +37,8 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include "mbox.hpp"
+
+using namespace mfem;
 
 /* Types */
 /*! \brief A function type for a smoother/preconditioner.
@@ -192,6 +194,8 @@ void smpr_sym_poly(HypreParMatrix& A, const Vector& b, Vector& x, void *data);
 
     \warning \em Ac in the TG data (\a data) must be already computed and
              present.
+
+    DEPRECATED
 */
 void smpr_tg(HypreParMatrix& A, const Vector& b, Vector& x, void *data);
 

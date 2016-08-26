@@ -1,9 +1,8 @@
-/*! \file
-
+/*
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -27,9 +26,14 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this program; if not, see
     <http://www.gnu.org/licenses/>.
-
-    This file was contributed by Umberto Villa.
 */
+
+/*
+ * InversePermeabilityFunction.cpp
+ *
+ *  Created on: Apr 11, 2012
+ *      Author: uvilla
+ */
 
 #include <fstream>
 #include <mfem.hpp>
@@ -43,16 +47,22 @@ void InversePermeabilityFunction::SetNumberCells(int Nx_, int Ny_, int Nz_)
 }
 
 void InversePermeabilityFunction::SetMeshSizes(double hx_, double hy_, 
-					       double hz_)
+                                               double hz_)
 {
     hx = hx_;
     hy = hy_;
     hz = hz_;
 }
 
+void InversePermeabilityFunction::Set2DSlice(SliceOrientation o, int npos_ )
+{
+    orientation = o;
+    npos = npos_;
+}
+
 void InversePermeabilityFunction::SetConstantInversePermeability(double ipx, 
-								 double ipy, 
-								 double ipz)
+                                                                 double ipy, 
+                                                                 double ipz)
 {
     int compSize = Nx*Ny*Nz;
     int size = 3*compSize;
@@ -60,109 +70,141 @@ void InversePermeabilityFunction::SetConstantInversePermeability(double ipx,
     double *ip = inversePermeability;
     // double * end = inversePermeability + size;
 
-    for(int i(0); i < compSize; ++i)
+    for (int i(0); i < compSize; ++i)
     {
-    	ip[i] = ipx;
-    	ip[i+compSize] = ipy;
-    	ip[i+2*compSize] = ipz;
+        ip[i] = ipx;
+        ip[i+compSize] = ipy;
+        ip[i+2*compSize] = ipz;
     }
 
 }
 
-void InversePermeabilityFunction::ReadPermeabilityFile(
-    const std::string fileName)
+void InversePermeabilityFunction::ReadPermeabilityFile(const std::string fileName)
 {
     std::ifstream permfile(fileName.c_str());
 
-    if(!permfile.is_open())
-    	mfem_error("File do not exists");
+    if (!permfile.is_open())
+    {
+        std::cout << "Error in opening file " << fileName << std::endl;
+        mfem_error("File does not exist");
+    }
 
     inversePermeability = new double [3*Nx*Ny*Nz];
     double *ip = inversePermeability;
     double tmp;
     for(int l = 0; l < 3; l++)
     {
-	for (int k = 0; k < Nz; k++)
-	{
-	    for (int j = 0; j < Ny; j++)
-	    {
-		for (int i = 0; i < Nx; i++)
-		{
-		    permfile >> *ip;
-		    *ip = 1./(*ip);
-		    ip++;
-		}
-		for (int i = 0; i < 60-Nx; i++)
-		    permfile >> tmp; // skip unneeded part
-	    }
-	    for (int j = 0; j < 220-Ny; j++)
-		for (int i = 0; i < 60; i++)
-		    permfile >> tmp;  // skip unneeded part
-	}
+        for (int k = 0; k < Nz; k++)
+        {
+            for (int j = 0; j < Ny; j++)
+            {
+                for (int i = 0; i < Nx; i++)
+                {
+                    permfile >> *ip;
+                    *ip = 1./(*ip);
+                    ip++;
+                }
+                for (int i = 0; i < 60-Nx; i++)
+                    permfile >> tmp; // skip unneeded part
+            }
+            for (int j = 0; j < 220-Ny; j++)
+                for (int i = 0; i < 60; i++)
+                    permfile >> tmp;  // skip unneeded part
+        }
 
-	if (l < 2) // if not processing Kz, skip unneeded part
-	    for (int k = 0; k < 85-Nz; k++)
-		for (int j = 0; j < 220; j++)
-		    for (int i = 0; i < 60; i++)
-			permfile >> tmp;
+        if (l < 2) // if not processing Kz, skip unneeded part
+            for (int k = 0; k < 85-Nz; k++)
+                for (int j = 0; j < 220; j++)
+                    for (int i = 0; i < 60; i++)
+                        permfile >> tmp;
     }
 
 }
 
+void InversePermeabilityFunction::ReadPermeabilityFile(const std::string fileName, 
+                                                       MPI_Comm comm)
+{
+    int num_procs, myid;
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm, &myid);
+
+    StopWatch chrono;
+
+    chrono.Start();
+    if (myid == 0)
+        ReadPermeabilityFile(fileName);
+    else
+        inversePermeability = new double [3*Nx*Ny*Nz];
+    chrono.Stop();
+
+    if (myid==0)
+        std::cout<<"Permeability file read in " << chrono.RealTime() << ".s \n";
+
+    chrono.Clear();
+
+    chrono.Start();
+    MPI_Bcast(inversePermeability, 3*Nx*Ny*Nz, MPI_DOUBLE, 0, comm);
+    chrono.Stop();
+
+    if (myid==0)
+        std::cout<<"Permeability field distributed in " << chrono.RealTime() << ".s \n";
+
+}
+
 void InversePermeabilityFunction::InversePermeability(const Vector & x, 
-						      Vector & val)
+                                                      Vector & val)
 {
     val.SetSize(x.Size());
 
     unsigned int i=0,j=0,k=0;
 
-    switch(orientation)
+    switch (orientation)
     {
     case NONE:
-	i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
-	j = (int)floor(x[1]/hy/(1.+3e-16));
-	k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
-	break;
+        i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
+        j = (int)floor(x[1]/hy/(1.+3e-16));
+        k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
+        break;
     case XY:
-	i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
-	j = (int)floor(x[1]/hy/(1.+3e-16));
-	k = npos;
-	break;
+        i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
+        j = (int)floor(x[1]/hy/(1.+3e-16));
+        k = npos;
+        break;
     case XZ:
-	i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
-	j = npos;
-	k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
-	break;
+        i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
+        j = npos;
+        k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
+        break;
     case YZ:
-	i = npos;
-	j = (int)floor(x[1]/hy/(1.+3e-16));
-	k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
-	break;
+        i = npos;
+        j = (int)floor(x[1]/hy/(1.+3e-16));
+        k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
+        break;
     default:
-	mfem_error("InversePermeabilityFunction::InversePermeability");
+        mfem_error("InversePermeabilityFunction::InversePermeability");
     }
 
     val[0] = inversePermeability[Ny*Nx*k + Nx*j + i];
     val[1] = inversePermeability[Ny*Nx*k + Nx*j + i + Nx*Ny*Nz];
 
-    if(orientation == NONE)
-	val[2] = inversePermeability[Ny*Nx*k + Nx*j + i + 2*Nx*Ny*Nz];
+    if (orientation == NONE)
+        val[2] = inversePermeability[Ny*Nx*k + Nx*j + i + 2*Nx*Ny*Nz];
 
 }
 
-double InversePermeabilityFunction::PermeabilityXComponent(Vector &x)
+double InversePermeabilityFunction::PermeabilityXY(Vector &x)
 {
-    unsigned int i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
-    unsigned int j = (int)floor(x[1]/hy/(1.+3e-16));
-    unsigned int k = Nz-1-(int)floor(x[2]/hz/(1.+3e-16));
-    
-    double out = 1.0/inversePermeability[Ny*Nx*k + Nx*j + i];
-    // std::cout << "perm = " << out << std::endl;
-    return out;
+    unsigned int i=0,j=0,k=0;
+
+    i = Nx-1-(int)floor(x[0]/hx/(1.+3e-16));
+    j = (int)floor(x[1]/hy/(1.+3e-16));
+    k = npos;
+
+    return 1.0/inversePermeability[Ny*Nx*k + Nx*j + i];
 }
 
 void InversePermeabilityFunction::NegativeInversePermeability(const Vector & x,
-							      Vector & val)
+                                                              Vector & val)
 {
     InversePermeability(x,val);
     val *= -1.;
@@ -173,7 +215,7 @@ void InversePermeabilityFunction::Permeability(const Vector & x, Vector & val)
 {
     InversePermeability(x,val);
     for (double * it = val.GetData(), *end = val.GetData()+val.Size(); it != end; ++it )
-	(*it) = 1./ (*it);
+        (*it) = 1./ (*it);
 }
 
 void InversePermeabilityFunction::PermeabilityTensor(const Vector & x, DenseMatrix & val)
@@ -182,7 +224,7 @@ void InversePermeabilityFunction::PermeabilityTensor(const Vector & x, DenseMatr
     Permeability(x,tmp);
     val = 0.0;
     for (int i=0; i<val.Size(); ++i)
-	val.Elem(i,i) = tmp(i);
+        val.Elem(i,i) = tmp(i);
 }
 
 double InversePermeabilityFunction::Norm2InversePermeability(const Vector & x)

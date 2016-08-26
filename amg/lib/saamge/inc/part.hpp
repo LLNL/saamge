@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,27 +37,24 @@
 #include "common.hpp"
 #include <mfem.hpp>
 
-/* Options */
-
-/*! \brief The configuration class of this module.
-*/
-CONFIG_BEGIN_CLASS_DECLARATION(PART)
-
-    /*! Whether connected partitions are required. */
-    CONFIG_DECLARE_OPTION(bool, connected_parts);
-
-CONFIG_END_CLASS_DECLARATION(PART)
-
-CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(PART)
-    CONFIG_DEFINE_OPTION_DEFAULT(connected_parts, true)
-CONFIG_END_CLASS_DEFAULTS
-
 /* Functions */
-/*! \brief Partitions an unweighted graph.
+
+/*! \brief separates partitioning into connected components.
+
+  modifies partitioning, ensures all partitions are connected,
+  and removes empty partitions
+
+  this routine stolen from Parelag, which stole it from some old MFEM
+*/
+int connectedComponents(mfem::Array<int>& partitioning, const mfem::Table& conn);
+
+/*! \brief Partitions a graph.
 
     Calls METIS.
 
     \param graph (IN) The unweighted graph as a relation table.
+    \param weights (IN) the weights on the vertices of the graph (for us this 
+                        means the number of DOF per element)
     \param parts (IN/OUT) The desired number of partitions in the partitioning,
                           as input. As output: the number of non-empty
                           partitions, which is the number of actually generated
@@ -67,19 +64,13 @@ CONFIG_END_CLASS_DEFAULTS
 
     \warning The returned array must be freed by the caller.
 */
-int *part_generate_partitioning(const Table& graph, int *parts);
+int *part_generate_partitioning(const mfem::Table& graph, int *weights, int *parts);
 
-/*! \brief Fixes a partitioning by removing empty partitions.
+/*! \brief Partitions an unweighted graph.
 
-    \param partitioning (IN/OUT) The partitioning to be fixed as input and the
-                                 fixed one as output.
-    \param empty_parts (IN) A SORTED array of the indices of the empty
-                            partitions.
-    \param nodes_number (IN) The number of nodes of the partitioned graph.
-    \param target_parts (IN) The initially desired number of partitions.
+    See part_generate_partitioning()
 */
-void part_remove_empty(int *partitioning, const Array<int>& empty_parts,
-                       int nodes_number, int target_parts);
+int *part_generate_partitioning_unweighted(const Table& graph, int *parts);
 
 /*! \brief Checks the integrity of the partitioning.
 
@@ -87,7 +78,9 @@ void part_remove_empty(int *partitioning, const Array<int>& empty_parts,
 
     \param graph (IN) The unweighted graph as a relation table.
     \param partitioning (IN) The partitioning.
+
+    DEPRECATED
 */
-void part_check_partitioning(const Table& graph, const int *partitioning);
+void part_check_partitioning(const mfem::Table& graph, const int *partitioning);
 
 #endif // _PART_HPP

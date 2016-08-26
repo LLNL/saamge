@@ -1,3 +1,4 @@
+
 This file includes instructions and information on how to build and use libraries and tools here present.
 
 1. License and Disclaimer Statements
@@ -5,7 +6,7 @@ This file includes instructions and information on how to build and use librarie
 SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
         and solvers.
 
-Copyright (c) 2015, Lawrence Livermore National Security,
+Copyright (c) 2016, Lawrence Livermore National Security,
 LLC. Developed under the auspices of the U.S. Department of Energy by
 Lawrence Livermore National Laboratory under Contract
 No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -35,10 +36,10 @@ License along with this program; if not, see
 The code almost entirely relies on standard language (C++) features. Additionally, a few POSIX functions are used but only for less important functionalities in the code. It is tested for:
 
 GCC 4.4.7 20120313 (http://gcc.gnu.org/)
-MFEM 2.0 (http://code.google.com/p/mfem/)
+MFEM 3.1 (http://code.google.com/p/mfem/)
 GLVIS 2.0 (http://code.google.com/p/glvis/)
 METIS 5.0.2 (http://glaros.dtc.umn.edu/gkhome/views/metis)
-HYPRE 2.9.0b (https://computation-rnd.llnl.gov/linear_solvers/)
+HYPRE 2.10.0b (https://computation-rnd.llnl.gov/linear_solvers/)
 
 The build system relies on UNIX-like properties of the environment. It is not tested if it would work properly when emulated environments like CYGWIN are used. It also uses functionalities provided by GNU MAKE (http://www.gnu.org/software/make/).
 

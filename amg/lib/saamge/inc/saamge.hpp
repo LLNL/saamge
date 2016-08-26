@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,12 +37,15 @@
 #include <common.hpp>
 #include <adapt.hpp>
 #include <aggregates.hpp>
+#include <arpacks.hpp>
 #include <contrib.hpp>
 #include <elmat.hpp>
 #include <fem.hpp>
 #include <helpers.hpp>
 #include <interp.hpp>
+#include <levels.hpp>
 #include <mbox.hpp>
+#include <ml.hpp>
 #include <mfem_addons.hpp>
 #include <part.hpp>
 #include <process.hpp>
@@ -51,5 +54,6 @@
 #include <spectral.hpp>
 #include <tg.hpp>
 #include <xpacks.hpp>
+#include <DoubleCycle.hpp>
 
 #endif // _SAAMGE_HPP

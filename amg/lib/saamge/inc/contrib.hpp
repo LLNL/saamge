@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,6 +38,10 @@
 #include <mfem.hpp>
 #include "aggregates.hpp"
 
+#include "SharedEntityCommunication.hpp"
+
+using namespace mfem;
+
 /* Types */
 /*! \brief The data used for building the tentative interpolant.
 */
@@ -47,6 +51,12 @@ typedef struct {
                           interpolant matrix. */
     SparseMatrix *tent_interp; /*!< The partially built matrix of the tentative
                                     interpolant. */
+    Array<double> * local_coarse_one_representation; /*! ATB building coarse_one_representation on the fly (we are going to just copy this pointer to interp_data) */
+    // int coarse_ones_values_per_agg; /*! ATB number of values per agg to use in construction of coarse_one_representation (larger means larger coarse space on coarsest of three levels) */
+    int coarse_truedof_offset;
+    int * mis_numcoarsedof;
+
+    DenseMatrix ** mis_tent_interps;
 } contrib_tent_struct_t;
 
 /*! \brief Functions inputing aggregates contributions to tentative prolongator.
@@ -60,7 +70,7 @@ typedef struct {
     \param eps (IN) Tolerance for the SVD and probably also for something else.
 */
 typedef void (*contrib_agg_ft)(contrib_tent_struct_t *tent_int_struct,
-                          const agg_partititoning_relations_t& agg_part_rels,
+                          const agg_partitioning_relations_t& agg_part_rels,
                           DenseMatrix * const *cut_evects_arr, double eps);
 
 /* Options */
@@ -111,12 +121,22 @@ contrib_tent_struct_t *contrib_tent_init(int ND);
 */
 SparseMatrix *contrib_tent_finalize(contrib_tent_struct_t *tent_int_struct);
 
+void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
+                             const agg_partitioning_relations_t& agg_part_rels,
+                             DenseMatrix& local, 
+                             const int *restriction);
+
+void contrib_tent_insert_simple(contrib_tent_struct_t *tent_int_struct,
+                                const agg_partitioning_relations_t& agg_part_rels,
+                                DenseMatrix& local, 
+                                const int *restriction);
+
 /*! \brief Inserts (embeds) the local tentative interpolant in the global one.
 
     \param tent_int_struct (IN) The structure returned by a call to
                                 \b contrib_tent_init.
     \param agg_part_rels (IN) The partitioning relations.
-    \param local (IN) The local tentative interpolant.
+    \param local (IN/OUT) The local tentative interpolant, this may also be modified by boundary conditions (new ATB 11 May 2015)
     \param restriction (IN) The array that for each DoF of the aggregate
                             maps its global number (as returned by
                             \b agg_restrict_to_agg).
@@ -126,36 +146,29 @@ SparseMatrix *contrib_tent_finalize(contrib_tent_struct_t *tent_int_struct);
              the call.
 */
 void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
-                            const agg_partititoning_relations_t& agg_part_rels,
-                            const DenseMatrix& local, const int *restriction);
+                            const agg_partitioning_relations_t& agg_part_rels,
+                            DenseMatrix& local, const int *restriction);
 
-
-/*! \brief Loops over all big aggregates and fills in the tentative interpolant.
-
-    SVD is performed every time vectors are restricted to aggregates.
-
-    \param tent_int_struct (IN) The structure returned by a call to
-                                \b contrib_tent_init.
-    \param agg_part_rels (IN) The partitioning relations.
-    \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
-    \param eps (IN) Tolerance for the SVD.
+/*!
+  like contrib_mises, assume no eigenvalue problem, just use constant
+  vector
 */
-void contrib_big_aggs_svd(contrib_tent_struct_t *tent_int_struct,
-                          const agg_partititoning_relations_t& agg_part_rels,
-                          DenseMatrix * const *cut_evects_arr, double eps);
+void contrib_ones(contrib_tent_struct_t *tent_int_struct,
+                  const agg_partitioning_relations_t& agg_part_rels);
 
-/*! \brief Loops over all big aggregates and fills in the tentative interpolant.
+/*! \brief Visits all MISes and fills in the tentative interpolant.
 
-    SVD is NOT performed.
+  this was originally copied from serial SAAMGE's contrib_ref_aggs
 
-    \param tent_int_struct (IN) The structure returned by a call to
-                                \b contrib_tent_init.
-    \param agg_part_rels (IN) The partitioning relations.
-    \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
-    \param eps (IN) Not used.
+  \param tent_int_struct (IN) The structure returned by a call to
+         \b contrib_tent_init.
+  \param agg_part_rels (IN) The partitioning relations.
+  \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
+  \param eps (IN) Tolerance for the SVD.
 */
-void contrib_big_aggs_nosvd(contrib_tent_struct_t *tent_int_struct,
-                            const agg_partititoning_relations_t& agg_part_rels,
-                            DenseMatrix * const *cut_evects_arr, double eps);
+void contrib_mises(contrib_tent_struct_t *tent_int_struct,
+                   const agg_partitioning_relations_t& agg_part_rels,
+                   DenseMatrix * const *cut_evects_arr,
+                   double eps, bool scaling_P);
 
 #endif // _CONTRIB_HPP

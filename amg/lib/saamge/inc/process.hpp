@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,6 +41,7 @@
 #include "config_mgr.hpp"
 using std::stringstream;
 using std::string;
+using namespace mfem;
 
 /* Defines */
 /*! \brief Returns the rank of the current process.
@@ -94,11 +95,19 @@ extern stringstream PROC_STR_STREAM;
 */
 void proc_init(MPI_Comm comm);
 
-/*! \brief Retruns global offsets for all processes.
+/*! \brief Returns global offsets for all processes. DEPRECATED.
 
     \param my_size (IN) How many entities the current process has.
     \param offsets (OUT) Offsets on all processes in global entities numbering.
 */
 void proc_allgather_offsets(int my_size, Array<int>& offsets);
+
+/*! \brief Returns non-global offsets for all processes.
+
+  \param my_size (IN) How many entities the current process has.
+  \param offsets (OUT) size 2, offsets of current process in global numbering
+  \param total (OUT) total number of entities
+*/
+void proc_determine_offsets(int my_size, Array<int>& offsets, int& total);
 
 #endif // _PROCESS_HPP

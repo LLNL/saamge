@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,10 +40,12 @@
 using std::pow;
 using std::sqrt;
 
+using namespace mfem;
+
 /* Functions */
 
 int adapt_approx_xbad(HypreParMatrix& A,
-    const agg_partititoning_relations_t& agg_part_rels, int maxiter,
+    const agg_partitioning_relations_t& agg_part_rels, int maxiter,
     tg_data_t *tg_data, HypreParVector& xbad, double *cf, double *acf,
     double *err, double *err0, int *executed_iters, double rtol, double atol,
     bool normalize, bool output/*=true*/)
@@ -57,7 +59,7 @@ int adapt_approx_xbad(HypreParMatrix& A,
     double ende, acf_=0.;
     Vector lb(n);
     lb = 0.;
-    HypreParVector b(A.GetGlobalNumRows(), lb.GetData(), A.GetRowStarts());
+    HypreParVector b(PROC_COMM, A.GetGlobalNumRows(), lb.GetData(), A.GetRowStarts());
 
     SA_ASSERT(iters >= 0);
     SA_ASSERT(maxiter > 0);
@@ -94,7 +96,8 @@ int adapt_approx_xbad(HypreParMatrix& A,
     {
         if (SA_IS_OUTPUT_LEVEL(3) && output)
             l2_err = sqrt(mbox_parallel_inner_product(xbad, xbad));
-        if (SA_IS_OUTPUT_LEVEL(2) && output && 0 == PROC_RANK)
+        // if (SA_IS_OUTPUT_LEVEL(2) && output && 0 == PROC_RANK)
+        if (output && 0 == PROC_RANK)
         {
             PROC_STR_STREAM << "Stationary iteration: after " << i-1
                             << " iterations";
@@ -141,9 +144,12 @@ int adapt_approx_xbad(HypreParMatrix& A,
 
         err_prev = err_;
 
+        /*
         tg_cycle(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), b,
                  tg_data->pre_smoother, tg_data->post_smoother, xbad,
                  tg_data->coarse_solver, tg_data->poly_data);
+        */
+        SA_ASSERT(false);
 
         err_ = mbox_energy_norm_parallel(A, xbad);
         cf_ = err_/err_prev;

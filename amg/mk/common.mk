@@ -1,7 +1,7 @@
 # SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
 #         and solvers.
 # 
-# Copyright (c) 2015, Lawrence Livermore National Security,
+# Copyright (c) 2016, Lawrence Livermore National Security,
 # LLC. Developed under the auspices of the U.S. Department of Energy by
 # Lawrence Livermore National Laboratory under Contract
 # No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -26,7 +26,7 @@
 # License along with this program; if not, see
 # <http://www.gnu.org/licenses/>.
 
-LIB = m mfem metis blas lapack gfortran HYPRE #arpack
+LIB = m mfem metis blas lapack gfortran HYPRE umfpack cholmod amd colamd suitesparseconfig arpack
 BLDLIB = saamge
 
 ##Enable OpenMP support
@@ -56,10 +56,11 @@ CC = mpicxx
 CFLAGS = -g -O3 \
          -Wall -Wno-unused-parameter -Wextra \
          -fdata-sections -ffunction-sections \
-         -I$(ROOT)/inc -I$(ROOT)/extinc $(INCS) $(EINCS) $(BLDLIBINCS) \
+         -I$(ROOT)/inc -I$(ROOT)/extinc $(INCS) $(BLDLIBINCS) $(EINCS) \
          $(MOREINCS)
 LDFLAGS = -Wl,--gc-sections -L$(ROOT)/lib -L$(ROOT)/extlib $(LIBS) $(ELIBS) \
           $(THELIB)
+
 OPENMP_FLAGS = -fopenmp
 
 ifeq ($(USE_OPENMP), YES)

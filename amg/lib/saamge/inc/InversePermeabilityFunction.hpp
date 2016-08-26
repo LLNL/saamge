@@ -1,9 +1,8 @@
-/*! \file
-
+/*
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -27,12 +26,21 @@
     You should have received a copy of the GNU Lesser General Public
     License along with this program; if not, see
     <http://www.gnu.org/licenses/>.
-
-    This file was contributed by Umberto Villa.
 */
+
+/*
+ * InversePermeabilityFunction.hpp
+ *
+ *  Created on: Apr 11, 2012
+ *      Author: uvilla
+ */
 
 #ifndef INVERSEPERMEABILITYFUNCTION_HPP_
 #define INVERSEPERMEABILITYFUNCTION_HPP_
+
+#include <mpi.h>
+
+using namespace mfem;
 
 class InversePermeabilityFunction
 {
@@ -45,12 +53,19 @@ public:
     static void Set2DSlice(SliceOrientation o, int npos );
 
     static void ReadPermeabilityFile(const std::string fileName);
-    static void SetConstantInversePermeability(double ipx, double ipy, 
-					       double ipz);
+    static void ReadPermeabilityFile(const std::string fileName, MPI_Comm comm);
+    static void SetConstantInversePermeability(double ipx, double ipy, double ipz);
+
+    template<class F>
+    static void Transform(const F & f)
+    {
+        for (int i = 0; i < 3*Nx*Ny*Nz; ++i)
+            inversePermeability[i] = f(inversePermeability[i]);
+    }
 
     static void InversePermeability(const Vector & x, Vector & val);
-    static double PermeabilityXComponent(Vector &x);
     static void PermeabilityTensor(const Vector & x, DenseMatrix & val);
+    static double PermeabilityXY(Vector &x);
     static void NegativeInversePermeability(const Vector & x, Vector & val);
     static void Permeability(const Vector & x, Vector & val);
 

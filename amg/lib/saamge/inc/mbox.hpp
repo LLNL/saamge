@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -42,6 +42,8 @@
 #include <mfem.hpp>
 using std::ofstream;
 using std::ifstream;
+using namespace mfem;
+
 
 /* Types */
 /*! \brief A function type for generators of a matrix from another matrix.
@@ -169,6 +171,17 @@ typedef double (*mbox_inner_prod_ft)(const Matrix& A, const Vector& x,
                                      const Vector& y);
 
 /* Functions */
+
+void hypre_par_matrix_ownership(
+    HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts);
+
+/*! Copied from Parelag hypreExtension/hypre_CSRFactory.c */
+hypre_ParCSRMatrix * hypre_IdentityParCSRMatrix( 
+    MPI_Comm comm, HYPRE_Int global_num_rows, HYPRE_Int * row_starts);
+
+/*! copied from Parelag hypreExtension/deleteZeros.c */
+HYPRE_Int hypre_ParCSRMatrixDeleteZeros(hypre_ParCSRMatrix *A , double tol);
+
 /*! \brief Computes the energy inner product with sparse \a A.
 
     \a y'\a A\a x.
@@ -1526,15 +1539,21 @@ int mbox_parallel_vector_size(HypreParVector &v)
 }
 
 static inline
+int mbox_parallel_vector_size(const HypreParVector &v)
+{
+    return hypre_ParVectorGlobalSize((hypre_ParVector *)v);
+}
+
+static inline
 int mbox_rows_in_current_process(HypreParMatrix& A)
 {
-    return A.RowPart()[PROC_RANK + 1] - A.RowPart()[PROC_RANK];
+    return A.RowPart()[1] - A.RowPart()[0];
 }
 
 static inline
 int mbox_cols_in_current_process(HypreParMatrix& A)
 {
-    return A.ColPart()[PROC_RANK + 1] - A.ColPart()[PROC_RANK];
+    return A.ColPart()[1] - A.ColPart()[0];
 }
 
 static inline
@@ -1559,7 +1578,7 @@ double mbox_energy_inner_product_parallel(HypreParMatrix& A, HypreParVector& x,
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
     Vector tmp(x.Size());
     A.Mult(x, tmp);
-    HypreParVector TMP(A.GetGlobalNumRows(), tmp.GetData(),
+    HypreParVector TMP(PROC_COMM, A.GetGlobalNumRows(), tmp.GetData(),
                        A.GetRowStarts());
     return mbox_parallel_inner_product(TMP, y);
 }

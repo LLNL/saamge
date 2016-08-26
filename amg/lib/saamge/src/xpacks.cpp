@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2015, Lawrence Livermore National Security,
+    Copyright (c) 2016, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,6 +38,8 @@ extern "C" {
 }
 
 /* Functions */
+
+
 
 void xpacks_calc_spd_inverse_dense(const DenseMatrix& Ain, DenseMatrix& invA)
 {
@@ -187,7 +189,7 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 {
     integer itype = 1;
     char jobz = 'V';
-    char range = 'V';
+    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with integers il, iu for which eigenvectors to take
     char uplo = 'U';
     integer n = Ain.Height();
     integer lda = n;
@@ -281,7 +283,7 @@ int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 {
     integer itype = 1;
     char jobz = 'V';
-    char range = 'V';
+    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with integers il, iu for which eigenvectors to take
     char uplo = 'U';
     integer n = Ain.Height();
     integer lda = n;
@@ -458,7 +460,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
 {
     SA_ASSERT(arr);
     SA_ASSERT(0 < arr_size);
-    int i;
+    int i,j;
     char jobu = 'S';
     char jobvt = 'N';
     integer m = arr[0].Height();
@@ -480,7 +482,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
     doublereal *a = new doublereal[m*n];
     doublereal *s;
     doublereal *u;
-    const int minimal = min(m, n);
+    int minimal = min(m, n);
 
     if (SA_IS_OUTPUT_LEVEL(9))
     {
@@ -488,30 +490,35 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
         SA_PRINTF("number of singulars: %d\n", minimal);
     }
 
+    if (minimal <= 0)
+        SA_PRINTF("%s","ERROR: empty eigenvalue array!\n");
     SA_ASSERT(minimal > 0);
 
     doublereal *ptr = a;
-    for (i=0; i < arr_size; ++i)
-    {
-        SA_ASSERT(a + m*n > ptr);
-        const int sz = arr[i].Width() * m;
-        SA_ASSERT(a + m*n >= ptr + sz);
-        memcpy(ptr, arr[i].Data(), sizeof(*ptr)*sz);
-        ptr += sz;
-    }
-    SA_ASSERT(a + m*n == ptr);
-
+    Vector vect(NULL, m);
     if (SA_IS_OUTPUT_LEVEL(9))
         PROC_STR_STREAM << "Norms = [ ";
-    Vector vect(NULL, m);
-    for ((i=0), (ptr=a); i < n; (++i), (ptr += m))
+    for (i=0; i < arr_size; ++i)
     {
-        vect.SetData(ptr);
-        const double norm = vect.Norml2();
-        if (SA_IS_OUTPUT_LEVEL(9))
-            PROC_STR_STREAM << norm << " ";
-        SA_ALERT(!SA_REAL_ALMOST_LE(norm, 0.));
-        vect /= norm;
+        for (j=0; j<arr[i].Width(); ++j)
+        {
+            vect.SetData(arr[i].Data() + j*m);
+            const double norm = vect.Norml2();
+            if (SA_IS_OUTPUT_LEVEL(9))
+                PROC_STR_STREAM << norm << " ";
+            if (SA_REAL_ALMOST_LE(norm, 0.))
+            {
+                SA_PRINTF("      arr_size = %d, minimal = %d, m = %d, n = %d, i = %d, norm = %e\n",
+                          arr_size, minimal, m, n, i, norm);
+                n = n - 1;
+            }
+            else
+            {
+                vect /= norm;
+                memcpy(ptr, arr[i].Data() + j*m, sizeof(*ptr)*m);
+                ptr += m;
+            }
+        }
     }
     if (SA_IS_OUTPUT_LEVEL(9))
     {
@@ -519,6 +526,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
         SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
         PROC_CLEAR_STR_STREAM;
     }
+    minimal = min(m, n);
 
     svals.SetSize(minimal);
     s = (doublereal *)svals.GetData();
@@ -572,6 +580,41 @@ void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
 
     orth_set.SetSize(h, i);
     memcpy(orth_set.Data(), lsvects.Data(), sizeof(double)*i*h);
+}
+
+/**
+   this routine added ATB 7 October 2014
+
+   to solve linear least squares problem
+*/
+void xpack_solve_lls(const DenseMatrix& A, const Vector &rhs, Vector &x)
+{
+    char trans = 'N';
+    integer m = A.Height();
+    integer n = A.Width();
+    integer nrhs = 1;
+    doublereal *a = new doublereal[m*n];
+    integer lda = m;
+    doublereal *b = new doublereal[m];
+    integer ldb = m;
+    integer info;
+    integer lwork = 2*(m+n);
+    doublereal *work = new doublereal[2*(m+n)];
+    
+    SA_ASSERT(A.Height() == rhs.Size());
+    SA_ASSERT(A.Width() == x.Size());
+
+    memcpy(b, rhs.GetData(), sizeof(*b)*m);
+    memcpy(a, A.Data(), sizeof(*a)*m*n);
+
+    dgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, &info);
+    SA_ASSERT(!info);
+    
+    for (int i=0; i<n; ++i)
+        x(i) = b[i];
+    delete[] b;
+    delete[] work;
+    delete[] a;
 }
 
 void xpack_solve_spd_Cholesky(const DenseMatrix& A, const Vector &rhs,
