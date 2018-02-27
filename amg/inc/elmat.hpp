@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -44,72 +44,8 @@
 #include "aggregates.hpp"
 #include "levels.hpp"
 
-using namespace mfem;
-
-/* Functions */
-/*! \brief A function returning element matrices for a non-geometric level.
-
-    It uses a prolongator to define coarse DoFs, and respectively
-    the coarse element matrices.
-
-    It is a 'general' implementation that can use 'any' intergrid operators. It
-    simply restricts the prolongator (or, equivalently, the restriction
-    operator) to the AE and performs RAP.
-
-    We want to compute an element matrix on a 'current' level using 'fine'
-    information.
-
-    TODO: Almost surely a more efficient approach exists but currently we use
-          this simple implementation.
-
-    \param elno (IN) The element number.
-    \param finer_agg_part_rels (IN) The partitioning relations for the 'fine'
-                                    level.
-    \param finer_AE_stiffm (IN) The local stiffness matrix of the corresponding
-                                AE on the 'fine' level. It MUST be the one
-                                corresponding to \a elno.
-    \param restr (IN) The global restriction operator defining the transfer
-                      from the 'fine' to the 'current' level.
-    \param elem_to_dof (IN) The relation between elements and DoFs on the
-                            'current' level.
-    \param ND (IN) The number of DoFs on the 'current' level.
-
-    \returns The element matrix.
-
-    \warning The returned sparse matrix must be freed by the caller.
-
-    ORPHAN CODE---never called
-
-    DEPRECATED
-*/
-SparseMatrix *elmat_using_interp_restr(
-    int elno,
-    const agg_partitioning_relations_t& finer_agg_part_rels,
-    const SparseMatrix& finer_AE_stiffm, const SparseMatrix& restr,
-    const Table& elem_to_dof, int ND);
-
-/*! \brief A function returning standard element matrices in a geometric level.
-
-    \param elno (IN) The element number.
-    \param agg_part_rels (IN) The partitioning relations. Can be NULL.
-    \param data (IN) Simply a BilinearForm pointer.
-                     Type: \b ELMAT_DATA_TYPE_BILINEAR_FORM.
-    \param free_matr (OUT) Indicates whether the returned matrix must be freed
-                           by the caller.
-
-    \returns A sparse element matrix.
-
-    \warning It must be compiled with Run-Time Type Information (RTTI) enabled
-             for \em dynamic_cast to work.
-
-    ORPHAN CODE --- never called
-
-    DEPRECATED
-*/
-Matrix *elmat_standard_geometric_sparse(
-    int elno,
-    const agg_partitioning_relations_t *agg_part_rels,
-    void *data, bool& free_matr);
+namespace saamge
+{
 
 /**
    Provides element matrices for the construction of agglomerate matrices.
@@ -117,12 +53,27 @@ Matrix *elmat_standard_geometric_sparse(
 class ElementMatrixProvider
 {
 public:
-    ElementMatrixProvider(const agg_partitioning_relations_t& agg_part_rels) : agg_part_rels(agg_part_rels) {}
+    ElementMatrixProvider(
+        const agg_partitioning_relations_t& agg_part_rels) 
+        : agg_part_rels(agg_part_rels) {}
     virtual ~ElementMatrixProvider() {};
     
-    virtual Matrix * GetMatrix(int elno, bool& free_matr) const = 0;
+    /**
+       Returns mfem::Matrix, always builds the whole matrix.
+    */
+    virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const = 0;
+
+    /**
+       Returns SparseMatrix, does some magic with boundary conditions, sometimes
+       copies from global SparseMatrix (if available) rather than doing its own
+       assembly.
+    */
+    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const = 0;
+
+    bool IsGeometric() {return is_geometric;}
 protected:
     const agg_partitioning_relations_t& agg_part_rels;
+    bool is_geometric;
 };
 
 /**
@@ -132,10 +83,34 @@ protected:
 class ElementMatrixStandardGeometric : public ElementMatrixProvider
 {
 public:
-    ElementMatrixStandardGeometric(const agg_partitioning_relations_t& agg_part_rels, ParBilinearForm* form);
-    virtual Matrix * GetMatrix(int elno, bool& free_matr) const;
+    /**
+       @param assembled_processor_matrix usually comes from a->GetSparseMatrix(),
+       used to always go in the tg_ calling sequence but we are trying to move
+       away from that.
+    */
+    ElementMatrixStandardGeometric(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::SparseMatrix& assembled_processor_matrix,
+        mfem::ParBilinearForm* form);
+    virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
+    /**
+       Just copies (or calls?) agg_build_AE_stiffm_with_global
+     */
+    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+    mfem::ParBilinearForm* GetParBilinearForm() const {return form;}
+    void SetBdrCondImposed(bool val) {bdr_cond_imposed_ = val;}
 private:
-    ParBilinearForm* form;
+    mfem::ParBilinearForm* form;
+    mfem::SparseMatrix& assembled_processor_matrix_;
+    /**
+       Used to be a CONFIG_CLASS, we will want to set this to false
+       for upscaling (should be true for a solver)
+    */
+    bool bdr_cond_imposed_;
+    /**
+       In all my time with this code this has always been true
+    */
+    bool assemble_ess_diag_;
 };
 
 /**
@@ -147,8 +122,14 @@ private:
 class ElementMatrixParallelCoarse : public ElementMatrixProvider
 {
 public:
-    ElementMatrixParallelCoarse(const agg_partitioning_relations_t& agg_part_rels, levels_level_t * level);
-    virtual Matrix * GetMatrix(int elno, bool& free_matr) const;
+    ElementMatrixParallelCoarse(
+        const agg_partitioning_relations_t& agg_part_rels,
+        levels_level_t * level);
+    virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
+    /**
+       Basically copies (or calls?)  agg_build_AE_stiffm()
+    */
+    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
 private:
     levels_level_t * level;
 };
@@ -161,10 +142,33 @@ private:
 class ElementMatrixArray : public ElementMatrixProvider
 {
 public:
-    ElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels, const Matrix * const *elem_matrs);
-    virtual Matrix * GetMatrix(int elno, bool& free_matr) const;
+    ElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels,
+                       const mfem::Array<mfem::SparseMatrix *>& elem_matrs);
+    virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
+    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
 private:
-    const Matrix * const *elem_matrs;
+    const mfem::Array<mfem::SparseMatrix *>& elem_matrs;
 };
+
+/**
+   Provider for element (GetMatrix) and agglomerate (BuildAEStiff) matrices
+   Note that this class is different from ElementMatrixArray in the sense that
+   both the GetMatrix and BuildAEStiff method in ElementMatrixArray returns
+   agglomerate matrix
+
+   Requires element matrices and partition relations as input
+*/
+class ElementMatrixDenseArray : public ElementMatrixProvider
+{
+public:
+    ElementMatrixDenseArray(const agg_partitioning_relations_t& agg_part_rels,
+                       const mfem::Array<mfem::DenseMatrix *>& elem_matrs);
+    virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
+    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+private:
+    const mfem::Array<mfem::DenseMatrix *>& elem_matrs;
+};
+
+} // namespace saamge
 
 #endif // _ELMAT_HPP

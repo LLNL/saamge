@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,7 +38,8 @@
 #include <mfem.hpp>
 #include "aggregates.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Functions */
 /*! \brief Randomly perturbs the values in \a x using uniform distribution.
@@ -49,7 +50,7 @@ using namespace mfem;
     \param x (IN/OUT) The vector to perturb.
     \param interval_len (IN) The length of the interval for the perturbation.
 */
-void helpers_perturb(Vector &x, double interval_len);
+void helpers_perturb(mfem::Vector &x, double interval_len);
 
 /*! \brief Randomly fills in \a x using uniform distribution.
 
@@ -61,7 +62,7 @@ void helpers_perturb(Vector &x, double interval_len);
 
     \warning \a x must be constructed prior to calling this function.
 */
-void helpers_random_gen(Vector &x, double interval_len);
+void helpers_random_gen(mfem::Vector &x, double interval_len);
 
 /*! \brief Randomly fills in a vector using uniform distribution.
 
@@ -74,7 +75,7 @@ void helpers_random_gen(Vector &x, double interval_len);
     \warning \a x must be constructed prior to calling this function.
 */
 void helpers_random_vect(const agg_partitioning_relations_t& agg_part_rels,
-                         Vector &x);
+                         mfem::Vector &x);
 
 /*! \brief Creates a copy of an array of doubles.
 
@@ -120,7 +121,7 @@ char *helpers_copy_char_arr(const char *src, int n);
 
     \warning The precision of the output is determined by the \b prec option.
 */
-void helpers_write_vector_for_gnuplot(int num, const Vector& v);
+void helpers_write_vector_for_gnuplot(int num, const mfem::Vector& v);
 
 /*! \brief Loads an array of doubles from a file.
 
@@ -173,5 +174,7 @@ int *helpers_read_int_arr(const char *filename, int *n);
     \param n (IN) The number of integers in the array.
 */
 void helpers_write_int_arr(const char *filename, const int *arr, int n);
+
+} // namespace saamge
 
 #endif // _HELPERS_HPP

@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -49,6 +49,10 @@
    implement SendData(), ReceiveData(), and CopyData() routines
    yourself.
 
+   Significant improvements to handling the "tags" argument to honor
+   the MPI_TAG_UB constraint are due to Alex Druinsky from Lawrence
+   Berkeley (adruinksy@lbl.gov).
+
    Andrew T. Barker
    atb@llnl.gov
    17 July 2015
@@ -63,6 +67,9 @@
 #include <fstream>
 #include <limits>
 #include <vector>
+
+namespace saamge
+{
 
 template <class T>
 class SharedEntityCommunication
@@ -189,6 +196,8 @@ private:
     void BroadcastSizes(T ** data);
     void BroadcastData(T ** data);
 
+    enum { ENTITY_HEADER_TAG, ENTITY_MESSAGE_TAG, };
+
     MPI_Comm comm;
     hypre_ParCSRMatrix * entity_trueentity;
     /**
@@ -217,16 +226,23 @@ private:
     int * ete_offd_J;
     int * ete_colmap;
 
+    hypre_CSRMatrix * ete_diagT;
+    hypre_CSRMatrix * ete_offdT;
+    int * ete_diagT_I;
+    int * ete_diagT_J;
+    int * ete_offdT_I;
+    int * ete_offdT_J;
+
     int * entity_slaveid;
 
     int num_entities;
     int send_counter;
     int num_slave_comms; // where this processor plays role of slave
     int num_master_comms; // where this processor plays role of master
-    MPI_Request * size_requests;
+    MPI_Request * header_requests;
     MPI_Request * data_requests;
-    int * send_sizes;
-    int * receive_sizes;
+    int * send_headers;
+    int * receive_headers;
 
     // calling these DenseMatrix is starting to suggest Templates...
     int size_specifier;
@@ -245,6 +261,13 @@ void SharedEntityCommunication<T>::ETEPointers()
     ete_offd_I = ete_offd->i;
     ete_offd_J = ete_offd->j;
     ete_colmap = entity_trueentity->col_map_offd;
+
+    hypre_CSRMatrixTranspose(ete_diag, &ete_diagT, 0);
+    hypre_CSRMatrixTranspose(ete_offd, &ete_offdT, 0);
+    ete_diagT_I = ete_diagT->i;
+    ete_diagT_J = ete_diagT->j;
+    ete_offdT_I = ete_offdT->i;
+    ete_offdT_J = ete_offdT->j;
 }
 
 template <class T>
@@ -329,7 +352,7 @@ SharedEntityCommunication<T>::SharedEntityCommunication(
              ++j)
         {
             int trueentity = comm_pkg->send_map_elmts[j]; 
-            trueentity_proc.push_back(std::make_pair<int, int>(trueentity, proc));
+            trueentity_proc.push_back(std::make_pair(trueentity, proc));
         }
     }
     for (int entity=0; entity<num_entities; ++entity)
@@ -427,6 +450,8 @@ SharedEntityCommunication<T>::SharedEntityCommunication(
 template <class T>
 SharedEntityCommunication<T>::~SharedEntityCommunication()
 {
+    hypre_CSRMatrixDestroy(ete_diagT);
+    hypre_CSRMatrixDestroy(ete_offdT);
     delete [] entity_slaveid;
     if (owns_entity_proc)
         delete entity_proc;
@@ -466,15 +491,17 @@ void SharedEntityCommunication<T>::ReducePrepare()
     std::memset(reduce_receive_buffer, 0, sizeof(T*) * num_entities);
 
     send_counter = 0;
-    send_sizes = new int[size_specifier * num_slave_comms];
-    receive_sizes = new int[size_specifier * num_master_comms];
-    size_requests = new MPI_Request[num_master_comms + num_slave_comms]; // receives come first
+    // A header consists of the dimensions of the entity, followed by its
+    // true-entity id.
+    const int header_length = size_specifier + 1;
+    send_headers = new int[header_length * num_slave_comms];
+    receive_headers = new int[header_length * num_master_comms];
+    header_requests = new MPI_Request[num_master_comms + num_slave_comms]; // receives come first
     data_requests = new MPI_Request[num_slave_comms + num_master_comms]; // sends come first
 
-    int size_receive_counter = 0;
+    int header_receive_counter = 0;
     for (int i=0; i<num_entities; ++i)
     {
-        int trueentity = GetTrueEntity(i);
         if (entity_master[i] == comm_rank) // I own this entity
         {
             // loop over other processors that have this entity, see how big the object each will give you is
@@ -485,10 +512,12 @@ void SharedEntityCommunication<T>::ReducePrepare()
             {
                 if (neighbor_row[neighbor] != comm_rank)
                 {
-                    MPI_Irecv(&receive_sizes[size_receive_counter*size_specifier], 
-                              size_specifier, MPI_INT, neighbor_row[neighbor], 
-                              trueentity, comm, &size_requests[size_receive_counter]);
-                    size_receive_counter++;
+                    MPI_Irecv(
+                        &receive_headers[header_receive_counter*header_length],
+                        header_length, MPI_INT, neighbor_row[neighbor],
+                        ENTITY_HEADER_TAG, comm,
+                        &header_requests[header_receive_counter]);
+                    header_receive_counter++;
                 }
             }
         }
@@ -498,49 +527,59 @@ void SharedEntityCommunication<T>::ReducePrepare()
                         "reduce_receive_buffer not NULL!");
         }
     }
-    MFEM_ASSERT(size_receive_counter == num_master_comms,
-                "Not performing the right number of size receives!");
+    MFEM_ASSERT(header_receive_counter == num_master_comms,
+                "Not performing the right number of header receives!");
 }
 
 template <class T>
 void SharedEntityCommunication<T>::BroadcastFixedSize(int * values, int n_per_entity)
 {
-    int send_counter = 0;
-    int receive_counter = 0;
     data_requests = new MPI_Request[num_master_comms + num_slave_comms];
-    MPI_Status * data_statuses = 
-        new MPI_Status[num_master_comms + num_slave_comms];
-    for (int entity=0; entity<num_entities; ++entity)
+    MPI_Status * data_statuses = new MPI_Status[num_master_comms + num_slave_comms];
+
+    // Receive slave entities in true-entity order. This code assumes that
+    // ete_col_map is sorted in increasing order.
+    // Currently, Hypre's par_csr_matrix.c:GenerateDiagAndOffd() routine seems
+    // to generate the colmap in sorted form. Not sure if this is actually
+    // guaranteed by the ParCSRMatrix interface
+    int receive_counter = 0;
+    for (int j = 0; j < ete_offd->num_cols; ++j)
     {
+        int entity = ete_offdT_J[j];
         int owner = entity_master[entity];
-        int trueentity = GetTrueEntity(entity);
-        if (owner == comm_rank)
+        MPI_Irecv(
+            &(values[entity * n_per_entity]), n_per_entity,
+            MPI_INT, owner, ENTITY_MESSAGE_TAG, comm,
+            &(data_requests[j]));
+        receive_counter++;
+    }
+
+    // Send master entities in true-entity order.
+    int count_master_entities = ete_col_starts[1] - ete_col_starts[0];
+    int send_counter = 0;
+    for (int j = 0; j < count_master_entities; ++j)
+    {
+        int entity = ete_diagT_J[j];
+        int neighbor_row_size = entity_proc->RowSize(entity);
+        int * neighbor_row = entity_proc->GetRow(entity);
+        for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
         {
-            int neighbor_row_size = entity_proc->RowSize(entity);
-            int * neighbor_row = entity_proc->GetRow(entity);
-            for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
+            if (neighbor_row[neighbor] != comm_rank)
             {
-                if (neighbor_row[neighbor] != comm_rank)
-                {
-                    MPI_Isend(&(values[entity*n_per_entity]), n_per_entity, MPI_INT, 
-                              neighbor_row[neighbor], trueentity, 
-                              comm, &data_requests[send_counter]);
-                    send_counter++;
-                }
+                MPI_Isend(
+                    &(values[entity * n_per_entity]), n_per_entity,
+                    MPI_INT, neighbor_row[neighbor], ENTITY_MESSAGE_TAG, comm,
+                    &data_requests[num_slave_comms + send_counter]);
+                send_counter++;
             }
         }
-        else
-        {
-            MPI_Irecv(&(values[n_per_entity*entity]), n_per_entity, 
-                      MPI_INT, owner, trueentity, comm, 
-                      &data_requests[num_master_comms + receive_counter]);
-            receive_counter++;
-        }
     }
+
     MFEM_ASSERT(send_counter == num_master_comms,
                 "Not sending the right amount of data!");
     MFEM_ASSERT(receive_counter == num_slave_comms,
                 "Not receiving the right amount of data!");
+
     MPI_Waitall(num_master_comms + num_slave_comms, data_requests, data_statuses);
     delete [] data_requests;
     delete [] data_statuses;
@@ -549,49 +588,54 @@ void SharedEntityCommunication<T>::BroadcastFixedSize(int * values, int n_per_en
 template <class T>
 void SharedEntityCommunication<T>::BroadcastSizes(T ** mats)
 {
-    size_requests = new MPI_Request[num_master_comms + num_slave_comms];
-    MPI_Status * size_statuses = new MPI_Status[num_master_comms + num_slave_comms];
-    send_sizes = new int[size_specifier*num_master_comms];
-    receive_sizes = new int[size_specifier*num_slave_comms];
+    header_requests = new MPI_Request[num_master_comms + num_slave_comms];
+    MPI_Status * header_statuses = new MPI_Status[num_master_comms + num_slave_comms];
+    send_headers = new int[size_specifier*num_master_comms];
+    receive_headers = new int[size_specifier*num_slave_comms];
     int send_counter = 0;
     int receive_counter = 0;
-    for (int entity=0; entity<num_entities; ++entity)
+
+    for (int j = 0; j < ete_offd->num_cols; ++j)
     {
+        int entity = ete_offdT_J[j];
         int owner = entity_master[entity];
-        int trueentity = GetTrueEntity(entity);
-        if (owner == comm_rank)
+        MPI_Irecv(
+            &(receive_headers[j * size_specifier]), size_specifier,
+            MPI_INT, owner, ENTITY_HEADER_TAG, comm,
+            &(header_requests[j]));
+        receive_counter++;
+    }
+
+    int count_master_entities = ete_col_starts[1] - ete_col_starts[0];
+    for (int j = 0; j < count_master_entities; ++j)
+    {
+        int entity = ete_diagT_J[j];
+        int neighbor_row_size = entity_proc->RowSize(entity);
+        int * neighbor_row = entity_proc->GetRow(entity);
+        for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
         {
-            int neighbor_row_size = entity_proc->RowSize(entity);
-            int * neighbor_row = entity_proc->GetRow(entity);
-            for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
+            if (neighbor_row[neighbor] != comm_rank)
             {
-                if (neighbor_row[neighbor] != comm_rank)
-                {
-                    PackSendSizes(*mats[entity], 
-                                  &(send_sizes[size_specifier*send_counter]));
-                    MPI_Isend(&send_sizes[size_specifier*send_counter], size_specifier, 
-                              MPI_INT, neighbor_row[neighbor], 
-                              trueentity, comm, &size_requests[send_counter]);
-                    send_counter++;
-                }
+                PackSendSizes(
+                    *mats[entity],
+                    &(send_headers[send_counter * size_specifier]));
+                MPI_Isend(
+                    &(send_headers[send_counter * size_specifier]), size_specifier,
+                    MPI_INT, neighbor_row[neighbor], ENTITY_HEADER_TAG, comm,
+                    &header_requests[num_slave_comms + send_counter]);
+                send_counter++;
             }
         }
-        else
-        {
-            MPI_Irecv(&receive_sizes[size_specifier*receive_counter], 
-                      size_specifier, MPI_INT, owner, trueentity, comm, 
-                      &size_requests[num_master_comms + receive_counter]);
-            receive_counter++;
-        }
     }
+
     MFEM_ASSERT(send_counter == num_master_comms,
                 "Not sending the right amount of data!");
     MFEM_ASSERT(receive_counter == num_slave_comms,
                 "Not receiving the right amount of data!");
-    MPI_Waitall(num_master_comms + num_slave_comms, size_requests, size_statuses);
-    delete [] size_requests;
-    delete [] size_statuses;
-    delete [] send_sizes;
+    MPI_Waitall(num_master_comms + num_slave_comms, header_requests, header_statuses);
+    delete [] header_requests;
+    delete [] header_statuses;
+    delete [] send_headers;
 }
 
 template <class T>
@@ -601,34 +645,38 @@ void SharedEntityCommunication<T>::BroadcastData(T ** mats)
     int receive_counter = 0;
     data_requests = new MPI_Request[num_master_comms + num_slave_comms];
     MPI_Status * data_statuses = new MPI_Status[num_master_comms + num_slave_comms];
-    for (int entity=0; entity<num_entities; ++entity)
+
+    for (int j = 0; j < ete_offd->num_cols; ++j)
     {
+        int entity = ete_offdT_J[j];
         int owner = entity_master[entity];
-        int trueentity = GetTrueEntity(entity);
-        if (owner == comm_rank)
+        ReceiveData(
+            *mats[entity], &(receive_headers[j * size_specifier]),
+            owner, ENTITY_MESSAGE_TAG,
+            &data_requests[j]);
+        receive_counter++;
+    }
+
+    int count_master_entities = ete_col_starts[1] - ete_col_starts[0];
+    for (int j = 0; j < count_master_entities; ++j)
+    {
+        int entity = ete_diagT_J[j];
+        int neighbor_row_size = entity_proc->RowSize(entity);
+        int * neighbor_row = entity_proc->GetRow(entity);
+        for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
         {
-            int neighbor_row_size = entity_proc->RowSize(entity);
-            int * neighbor_row = entity_proc->GetRow(entity);
-            for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
+            if (neighbor_row[neighbor] != comm_rank)
             {
-                if (neighbor_row[neighbor] != comm_rank)
-                { 
-                    SendData(*mats[entity], neighbor_row[neighbor], 
-                             trueentity, &data_requests[send_counter]);
-                    send_counter++;
-                }
+                SendData(
+                    *mats[entity],
+                    neighbor_row[neighbor], ENTITY_MESSAGE_TAG,
+                    &data_requests[num_slave_comms + send_counter]);
+                send_counter++;
             }
-        } 
-        else
-        {
-            ReceiveData(*mats[entity],
-                        &(receive_sizes[size_specifier*receive_counter]),
-                        owner, trueentity,
-                        &data_requests[num_master_comms + receive_counter]);
-            receive_counter++;
         }
     }
-    delete [] receive_sizes;
+
+    delete [] receive_headers;
     MFEM_ASSERT(send_counter == num_master_comms,
                 "Not sending the right amount of data!");
     MFEM_ASSERT(receive_counter == num_slave_comms,
@@ -653,13 +701,20 @@ void SharedEntityCommunication<T>::ReduceSend(int entity, const T& mat)
         int trueentity = GetTrueEntity(entity);
         int sendid = entity_slaveid[entity];
         MFEM_ASSERT(sendid >= 0, "Master/slave is confused for this entity!");
-        PackSendSizes(mat, &(send_sizes[sendid*size_specifier]));
-        MPI_Isend(&send_sizes[sendid*size_specifier], size_specifier, 
-                  MPI_INT, owner, trueentity, comm, 
-                  &size_requests[num_master_comms + sendid]);
+
+        const int header_length = size_specifier + 1;
+        int *header = &(send_headers[sendid*header_length]);
+        int *size = header;
+        int *true_id = size + size_specifier;
+        PackSendSizes(mat, size);
+        *true_id = trueentity;
+
+        MPI_Isend(header, header_length, 
+                  MPI_INT, owner, ENTITY_HEADER_TAG, comm, 
+                  &header_requests[num_master_comms + sendid]);
 
         CopyData(reduce_send_buffer[sendid], mat);
-        SendData(reduce_send_buffer[sendid], owner, trueentity, &data_requests[sendid]);
+        SendData(reduce_send_buffer[sendid], owner, ENTITY_MESSAGE_TAG, &data_requests[sendid]);
         send_counter++;
     }
 }
@@ -670,33 +725,36 @@ T ** SharedEntityCommunication<T>::Collect()
     MFEM_ASSERT(send_counter == num_slave_comms, 
                 "Have not called ReduceSend() for every entity!");
 
-    MPI_Status * size_statuses = new MPI_Status[num_slave_comms + num_master_comms];
-    MPI_Waitall(num_slave_comms + num_master_comms, size_requests, size_statuses);
-    delete [] size_requests;
-    delete [] size_statuses;
+    MPI_Status * header_statuses = new MPI_Status[num_slave_comms + num_master_comms];
+    MPI_Waitall(num_slave_comms + num_master_comms, header_requests, header_statuses);
+    delete [] header_requests;
+    delete [] header_statuses;
 
     int data_receive_counter = 0;
+    std::vector<int> received_entities(num_entities);
     for (int i=0; i<num_entities; ++i)
     {
         int owner = entity_master[i];
-        int trueentity = GetTrueEntity(i);
         if (owner == comm_rank)
         {
-            int indicator = 0; // whether or not we have seen ourselves in lproc...
             int neighbor_row_size = entity_proc->RowSize(i);
             int * neighbor_row = entity_proc->GetRow(i);
             for (int neighbor=0; neighbor<neighbor_row_size; ++neighbor)
             {
-                if (neighbor_row[neighbor] == comm_rank)
+                if (neighbor_row[neighbor] != comm_rank)
                 {
-                    indicator++;
-                }
-                else
-                {
-                    ReceiveData(reduce_receive_buffer[i][1 + neighbor - indicator],
-                                &(receive_sizes[size_specifier*data_receive_counter]),
-                                neighbor_row[neighbor], trueentity,
+                    const int header_length = size_specifier + 1;
+                    int *header = &(receive_headers[header_length*data_receive_counter]);
+                    int *size = header;
+                    int trueentity = header[size_specifier];
+                    int entity = ete_diagT_J[trueentity - ete_col_starts[0]];
+                    int row = entity;
+                    int column = 1 + received_entities[entity];
+                    ReceiveData(reduce_receive_buffer[row][column],
+                                size,
+                                neighbor_row[neighbor], ENTITY_MESSAGE_TAG,
                                 &data_requests[num_slave_comms + data_receive_counter]);
+                    received_entities[entity]++;
                     data_receive_counter++;
                 }
             }
@@ -707,8 +765,8 @@ T ** SharedEntityCommunication<T>::Collect()
         }
     }
 
-    delete [] send_sizes;
-    delete [] receive_sizes;
+    delete [] send_headers;
+    delete [] receive_headers;
 
     MPI_Status * data_statuses = new MPI_Status[num_slave_comms + num_master_comms];
     MPI_Waitall(num_slave_comms + num_master_comms, data_requests, data_statuses);
@@ -730,5 +788,7 @@ void SharedEntityCommunication<T>::Broadcast(T ** data)
     BroadcastSizes(data);
     BroadcastData(data);
 }
+
+} // namespace saamge
 
 #endif

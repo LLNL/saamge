@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -34,8 +34,12 @@
 #ifndef _ARPACKS_HPP
 #define _ARPACKS_HPP
 
+#if SAAMGE_USE_ARPACK
 #include "common.hpp"
 #include <mfem.hpp>
+
+namespace saamge
+{
 
 /* Functions */
 /*! \brief Computes a part of eigenvalues and eigenvectors of sparse matrices.
@@ -76,42 +80,8 @@ int arpacks_calc_portion_eigens_sparse_diag(const mfem::SparseMatrix& Ain,
                                             int max_iters=0, int ncv=0,
                                             int tol=0.);
 
-/*! \brief Computes a part of eigenvalues and eigenvectors of sparse matrices.
+}
 
-    Depending on the choice of \a lower it computes either the lower or the
-    upper portion of the spectrum.
-
-    The eigenvalue problem is \f$ A\mathbf{x} = \lambda B \mathbf{x}\f$, where
-    A is sparse symmetric and B is sparse s.p.d. Uses ARPACK (ARPACK++).
-
-    All parameters are generally set to default and a few are accessible.
-
-    \param Ain (IN) This is A.
-    \param evals (OUT) The eigenvalues.
-    \param evects (OUT) The eigenvectors as columns of a dense matrix.
-    \param Bin (IN) This is B.
-    \param num_evects (IN) The desired number of eigenvalues and eigenvectors.
-    \param lower (IN) If \em true, then it computes the lower portion of the
-                      spectrum. Otherwise, if \em false, it computes the upper
-                      portion of the spectrum. Default is \em true.
-    \param max_iters (IN) The maximal number of iteration performed by ARPACK.
-                          Value of 0 means to use some default value in
-                          ARPACK++.
-    \param ncv (IN) The number of Arnoldi vectors on each iteration in ARPACK.
-                    Value of 0 means to use some default value in ARPACK++.
-    \param tol (IN) The tolerance in ARPACK. Value of 0.0 means to use some
-                    default value in ARPACK++.
-
-    \returns The number of eigenvalues and eigenvectors computed.
-
-    \warning A is symmetric and B is s.p.d.
-*/
-/*
-int arpacks_calc_portion_eigens_sparse(const SparseMatrix& Ain, Vector& evals,
-                                       DenseMatrix& evects,
-                                       const SparseMatrix& Bin, int num_evects,
-                                       bool lower=true, int max_iters=0,
-                                       int ncv=0, int tol=0.);
-*/
+#endif // SAAMGE_USE_ARPACK
 
 #endif // _ARPACKS_HPP

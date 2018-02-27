@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,135 +40,199 @@
 
 #include "SharedEntityCommunication.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Types */
-/*! \brief The data used for building the tentative interpolant.
+
+/*! \brief Make contrib_tent_struct_t a bit more object oriented.
+
+    We want to manage optional behavior, such as having a
+    coordinate vector that defines polynomial coarse spaces,
+    a little better.
+
+    And we want to get rid of the CONFIG_CLASS declarations.
 */
-typedef struct {
+class ContribTent
+{
+public:
+    /*! \brief Initiates the process of building the tentative interpolant.
+
+      \param ND (IN) The number of fine DoFs.
+
+      \returns The structure needed in \b contrib_tent_insert_from_local and
+          freed/finalized by \b contrib_tent_finalize
+
+      \warning The returned structure must be finalized and freed by the caller
+          using contrib_tent_finalize
+    */
+    ContribTent(int ND, bool avoid_ess_bdr_dofs=true);
+    ~ContribTent();
+
+    /*! \brief Produces the final tentative interpolant.
+
+      This is tha last phase of the tentative interpolant construction. It's
+      called after \b contrib_tent_init and all \b contrib_tent_insert_from_local.
+      \a tent_int_struct gets freed.
+
+      \returns The local tentative interpolant as a finalized sparse matrix.
+
+      \warning After calling this function no more calls of
+             \b contrib_tent_insert_from_local can be made with
+             \a tent_int_struct as a parameter.
+    */
+    mfem::SparseMatrix *contrib_tent_finalize();
+
+    /*!
+      Like contrib_ones, except contrib spatial_dimension linear functions
+      instead of constants.
+
+      coords probably comes from Mesh.GetCoords() or Mesh.GetVertices(), at
+      least on finest level.
+    */
+    void contrib_linears(
+        const agg_partitioning_relations_t& agg_part_rels,
+        int spatial_dimension, int num_nodes, const mfem::Vector& coords);
+
+    /*!
+      Like contrib_linears, get rigid body modes for elasticity
+    */
+    void contrib_rbms(
+        const agg_partitioning_relations_t& agg_part_rels,
+        int spatial_dimension, int num_nodes, const mfem::Vector& coords);
+
+    /*!
+      like contrib_mises, assume no eigenvalue problem, just use constant
+      vector
+    */
+    void contrib_ones(const agg_partitioning_relations_t& agg_part_rels);
+
+    /*! \brief Visits all MISes and fills in the tentative interpolant.
+
+      \param agg_part_rels (IN) The partitioning relations.
+      \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
+      \param scaling_P (IN) if set, also build scaling_P for corrected nullspace
+    */
+    void contrib_mises(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DenseMatrix * const *cut_evects_arr, bool scaling_P);
+
+    /**
+       Do both spectral and linears.
+    */
+    void contrib_composite(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DenseMatrix * const *cut_evects_arr, int polynomial_order,
+        int spatial_dimension, int num_nodes, const mfem::Vector& coords);
+
+    // some getters
+    mfem::Array<double> * get_local_coarse_one_representation() 
+    {
+        return local_coarse_one_representation;
+    }
+    int get_coarse_truedof_offset() {return coarse_truedof_offset;}
+    int * get_mis_numcoarsedof() {return mis_numcoarsedof;}
+    mfem::DenseMatrix ** get_mis_tent_interps() {return mis_tent_interps;}
+    void set_threshold(double val) {threshold_ = val;}
+
+private:
+    /*! \brief Deals with essential boundary conditions in the interpolator.
+
+        \param restriction (IN) usually a row of mis_to_dof, used to identify dofs
+               in local with dofs in larger matrix
+    */
+    void contrib_filter_boundary(const agg_partitioning_relations_t& agg_part_rels,
+                                 mfem::DenseMatrix& local, 
+                                 const int *restriction);
+
+    void contrib_tent_insert_simple(const agg_partitioning_relations_t& agg_part_rels,
+                                    mfem::DenseMatrix& local, 
+                                    const int *restriction);
+
+    /*! \brief Inserts (embeds) the local tentative interpolant in the global one.
+
+      DEPRECATED, we only use insert_simple now.
+
+      \param agg_part_rels (IN) The partitioning relations.
+      \param local (IN/OUT) The local tentative interpolant, this may also be modified by boundary conditions
+      \param restriction (IN) The array that for each DoF of the aggregate
+             maps its global number (as returned by
+             \b agg_restrict_to_agg).
+    */
+    void contrib_tent_insert_from_local(const agg_partitioning_relations_t& agg_part_rels,
+                                        mfem::DenseMatrix& local, const int *restriction);
+
+    /**
+       Take cut_evects_arr, which probably came from interp_compute_vectors(),
+       and do the appropriate communication on shared minimal intersection
+       sets, returning the synchronized matrices of eigenvectors that are now
+       ready for SVD.
+
+       Really this is just some code extracted from contrib_mises to make it 
+       more "modular"
+    */
+    mfem::DenseMatrix ** CommunicateEigenvectors(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DenseMatrix * const *cut_evects_arr,
+        SharedEntityCommunication<mfem::DenseMatrix>& sec);
+
+    /**
+       Given a received_mats array, either from CommunicateEigenvectors() or
+       possibly basically empty, add constant functions to it.
+    */
+    void ExtendWithConstants(mfem::DenseMatrix ** received_mats,
+                             const agg_partitioning_relations_t& agg_part_rels);
+
+    /**
+       Given a received_mats array, either from CommunicateEigenvectors() or
+       possibly basically empty, add polynomial functions to it.
+
+       Right now only implemented for constants and linears.
+    */
+    void ExtendWithPolynomials(
+        mfem::DenseMatrix ** received_mats,
+        const agg_partitioning_relations_t& agg_part_rels,
+        int order, int spatial_dimension, 
+        int num_nodes, const mfem::Vector& coords);
+
+    /**
+       For elasticity, extend spectral degrees of freedom with rigid body
+       modes.
+    */
+    void ExtendWithRBMs(
+        mfem::DenseMatrix ** received_mats,
+        const agg_partitioning_relations_t& agg_part_rels,
+        int spatial_dimension,
+        int num_nodes, const mfem::Vector& coords);
+
+    /**
+       Take received_mats, deal with essential boundary conditions, do SVDs,
+       insert into the tentative prolongator, and then destroy received_mats.
+
+       Note well that received_mats is totally deleted by this routine.
+    */
+    void SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
+                   mfem::DenseMatrix ** received_mats, int * row_sizes,
+                   bool scaling_P);
+
+    /*! building coarse_one_representation on the fly (we are going to just
+      copy this pointer to interp_data) */
+    mfem::Array<double> * local_coarse_one_representation; 
+    int coarse_truedof_offset;
+    int * mis_numcoarsedof;
+    mfem::DenseMatrix ** mis_tent_interps;
+
     int rows; /*!< The rows of the interpolant matrix. */
     int filled_cols; /*!< How many columns are currently introduced in the
                           interpolant matrix. */
-    SparseMatrix *tent_interp; /*!< The partially built matrix of the tentative
+    mfem::SparseMatrix *tent_interp_; /*!< The partially built matrix of the tentative
                                     interpolant. */
-    Array<double> * local_coarse_one_representation; /*! ATB building coarse_one_representation on the fly (we are going to just copy this pointer to interp_data) */
-    // int coarse_ones_values_per_agg; /*! ATB number of values per agg to use in construction of coarse_one_representation (larger means larger coarse space on coarsest of three levels) */
-    int coarse_truedof_offset;
-    int * mis_numcoarsedof;
 
-    DenseMatrix ** mis_tent_interps;
-} contrib_tent_struct_t;
+    bool avoid_ess_bdr_dofs;
+    double svd_eps; // tolerance for SVD calculation
+    double threshold_; // do not insert values smaller than this into P
+};
 
-/*! \brief Functions inputing aggregates contributions to tentative prolongator.
-
-    See \em contrib.hpp.
-
-    \param tent_int_struct (IN) The structure returned by a call to
-                                \b contrib_tent_init.
-    \param agg_part_rels (IN) The partitioning relations.
-    \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
-    \param eps (IN) Tolerance for the SVD and probably also for something else.
-*/
-typedef void (*contrib_agg_ft)(contrib_tent_struct_t *tent_int_struct,
-                          const agg_partitioning_relations_t& agg_part_rels,
-                          DenseMatrix * const *cut_evects_arr, double eps);
-
-/* Options */
-
-/*! \brief The configuration class of this module.
-*/
-CONFIG_BEGIN_CLASS_DECLARATION(CONTRIB)
-
-    /*! If \em true will enforce the tentative coarse basis functions to be
-        zero on the part of the boundary with essential boundary conditions. */
-    CONFIG_DECLARE_OPTION(bool, avoid_ess_brd_dofs);
-
-CONFIG_END_CLASS_DECLARATION(CONTRIB)
-
-CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(CONTRIB)
-    CONFIG_DEFINE_OPTION_DEFAULT(avoid_ess_brd_dofs, true)
-CONFIG_END_CLASS_DEFAULTS
-
-/* Functions */
-/*! \brief Initiates the process of building the tentative interpolant.
-
-    \param ND (IN) The number of fine DoFs.
-
-    \returns The structure needed in \b contrib_tent_insert_from_local and
-             freed/finalized by \b contrib_tent_finalize
-
-    \warning The returned structure must be finalized and freed by the caller
-             using contrib_tent_finalize
-*/
-contrib_tent_struct_t *contrib_tent_init(int ND);
-
-/*! \brief Produces the final tentative interpolant.
-
-    This is tha last phase of the tentative interpolant construction. It's
-    called after \b contrib_tent_init and all \b contrib_tent_insert_from_local.
-    \a tent_int_struct gets freed.
-
-    \param tent_int_struct (IN) The structure returned by a call to
-                                \b contrib_tent_init and already with all local
-                                tentative interpolants embedded by
-                                \b contrib_tent_insert_from_local.
-
-    \returns The local tentative interpolant as a finalized sparse matrix.
-
-    \warning After calling this function no more calls of
-             \b contrib_tent_insert_from_local can be made with
-             \a tent_int_struct as a parameter.
-*/
-SparseMatrix *contrib_tent_finalize(contrib_tent_struct_t *tent_int_struct);
-
-void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
-                             const agg_partitioning_relations_t& agg_part_rels,
-                             DenseMatrix& local, 
-                             const int *restriction);
-
-void contrib_tent_insert_simple(contrib_tent_struct_t *tent_int_struct,
-                                const agg_partitioning_relations_t& agg_part_rels,
-                                DenseMatrix& local, 
-                                const int *restriction);
-
-/*! \brief Inserts (embeds) the local tentative interpolant in the global one.
-
-    \param tent_int_struct (IN) The structure returned by a call to
-                                \b contrib_tent_init.
-    \param agg_part_rels (IN) The partitioning relations.
-    \param local (IN/OUT) The local tentative interpolant, this may also be modified by boundary conditions (new ATB 11 May 2015)
-    \param restriction (IN) The array that for each DoF of the aggregate
-                            maps its global number (as returned by
-                            \b agg_restrict_to_agg).
-
-    \warning \a tent_int_struct must be already initiated by a call to
-             \b contrib_tent_init. Actually it must be the returned value from
-             the call.
-*/
-void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
-                            const agg_partitioning_relations_t& agg_part_rels,
-                            DenseMatrix& local, const int *restriction);
-
-/*!
-  like contrib_mises, assume no eigenvalue problem, just use constant
-  vector
-*/
-void contrib_ones(contrib_tent_struct_t *tent_int_struct,
-                  const agg_partitioning_relations_t& agg_part_rels);
-
-/*! \brief Visits all MISes and fills in the tentative interpolant.
-
-  this was originally copied from serial SAAMGE's contrib_ref_aggs
-
-  \param tent_int_struct (IN) The structure returned by a call to
-         \b contrib_tent_init.
-  \param agg_part_rels (IN) The partitioning relations.
-  \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
-  \param eps (IN) Tolerance for the SVD.
-*/
-void contrib_mises(contrib_tent_struct_t *tent_int_struct,
-                   const agg_partitioning_relations_t& agg_part_rels,
-                   DenseMatrix * const *cut_evects_arr,
-                   double eps, bool scaling_P);
+} // namespace saamge
 
 #endif // _CONTRIB_HPP

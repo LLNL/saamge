@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,93 +40,12 @@
 #include "aggregates.hpp"
 #include "elmat.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Options */
 
-/*! \brief The configuration class of this module.
-*/
-CONFIG_BEGIN_CLASS_DECLARATION(FEM)
-
-    /*! The port where GLVIS listens. */
-    CONFIG_DECLARE_OPTION(unsigned int, glvis_port);
-
-    /*! Whether to keep the diagonal matrix entry when imposing essential
-        boundary conditions. If not kept, it will be set to 1.*/
-    CONFIG_DECLARE_OPTION(bool, keep_diag);
-
-CONFIG_END_CLASS_DECLARATION(FEM)
-
-CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(FEM)
-    CONFIG_DEFINE_OPTION_DEFAULT(glvis_port, 19916),
-    CONFIG_DEFINE_OPTION_DEFAULT(keep_diag, true)
-CONFIG_END_CLASS_DEFAULTS
-
-/* Defines */
-/*! \def FEM_ALLOC_FEC_FES
-    \brief Allocations of FE space and collection.
-
-    Creates and allocates the FE collection, with name given by \a fec_ptr_out,
-    and FE space, with name given by \a fes_ptr_out. These names are names of
-    pointers. The type of the FE collection is taken from \a fe_coll_type_in.
-
-    \param fe_coll_type_in (IN) The type of the FE collection
-                                (e.g LinearFECollection).
-    \param mesh_ptr_in (IN) A pointer to the mesh on which the space and
-                            collection will be defined.
-    \param fec_ptr_out (IN/OUT) A name of the pointer to the created
-                                collection.
-    \param fes_ptr_out (IN/OUT) A name of the pointer to the created
-                                space.
-
-    \warning \a fec_ptr_out and \a fes_ptr_out must be freed by the caller
-             using \b FEM_FREE_FEC_FES.
-*/
-/*! \def FEM_ALLOC_PWC_FEC_FES
-    \brief Allocations of piece-wise constant FE space and collection.
-
-    Creates and allocates the FE collection, with name given by \a fec_ptr_out,
-    and FE space, with name given by \a fes_ptr_out. These names are names of
-    pointers.
-
-    \param mesh_ptr_in (IN) A pointer to the mesh on which the space and
-                            collection will be defined.
-    \param fec_ptr_out (IN/OUT) A name of the pointer to the created
-                                collection.
-    \param fes_ptr_out (IN/OUT) A name of the pointer to the created
-                                space.
-
-    \warning \a fec_ptr_out and \a fes_ptr_out must be freed by the caller
-             using \b FEM_FREE_FEC_FES.
-*/
-/*! \def FEM_FREE_FEC_FES
-    \brief Frees FE space and collection.
-
-    \param fec_ptr (IN) A name of the pointer to the previously created
-                        collection.
-    \param fes_ptr (IN) A name of the pointer to the previously created space.
-
-    \warning \a fec_ptr_out and \a fes_ptr_out are usually created using
-             \b FEM_ALLOC_LIN_FEC_FES.
-*/
-#define FEM_ALLOC_FEC_FES(fe_coll_type_in, mesh_ptr_in, fec_ptr_out, \
-                          fes_ptr_out) \
-    FiniteElementCollection * fec_ptr_out = new fe_coll_type_in; \
-    ParFiniteElementSpace * fes_ptr_out = \
-        new ParFiniteElementSpace(mesh_ptr_in, fec_ptr_out)
-
-#define FEM_ALLOC_PWC_FEC_FES(mesh_ptr_in, fec_ptr_out, fes_ptr_out) \
-    FiniteElementCollection * fec_ptr_out = (mesh_ptr_in->Dimension() == 2 ? \
-                  (FiniteElementCollection *)new Const2DFECollection : \
-                  (FiniteElementCollection *)new Const3DFECollection); \
-    ParFiniteElementSpace * fes_ptr_out = \
-        new ParFiniteElementSpace(mesh_ptr_in, fec_ptr_out)
-
-#define FEM_FREE_FEC_FES(fec_ptr, fes_ptr) \
-do { \
-    delete fes_ptr; \
-    delete fec_ptr; \
-} while (0)
+const int GLVIS_PORT = 19916;
 
 /* Functions */
 /*! \brief Refines mesh to a certain upper bound for the number of elements.
@@ -136,7 +55,7 @@ do { \
 
     \warning \a mesh should be created prior to calling this function.
 */
-void fem_refine_mesh(int max_num_elems, Mesh& mesh);
+void fem_refine_mesh(int max_num_elems, mfem::Mesh& mesh);
 
 /*! \brief Refines mesh a certain number of times.
 
@@ -145,7 +64,7 @@ void fem_refine_mesh(int max_num_elems, Mesh& mesh);
 
     \warning \a mesh should be created prior to calling this function.
 */
-void fem_refine_mesh_times(int times, Mesh& mesh);
+void fem_refine_mesh_times(int times, mfem::Mesh& mesh);
 
 /*! \brief Initializes \a x on space \a fespace with \a bdr_coeff.
 
@@ -154,8 +73,8 @@ void fem_refine_mesh_times(int times, Mesh& mesh);
     \param bdr_coeff (IN) The coefficient to be projected on the grid function
                           \a x. It defines a border condition.
 */
-void fem_init_with_bdr_cond(ParGridFunction& x, ParFiniteElementSpace *fespace,
-                            Coefficient& bdr_coeff);
+void fem_init_with_bdr_cond(mfem::ParGridFunction& x, mfem::ParFiniteElementSpace *fespace,
+                            mfem::Coefficient& bdr_coeff);
 
 /*! \brief Finds the border DoFs with essential boundary conditions.
 
@@ -175,8 +94,8 @@ void fem_init_with_bdr_cond(ParGridFunction& x, ParFiniteElementSpace *fespace,
 
     \warning The returned array must be freed by the caller.
 */
-agg_dof_status_t *fem_find_bdr_dofs(ParFiniteElementSpace& fes,
-                                    Array<int> *ess_bdr);
+agg_dof_status_t *fem_find_bdr_dofs(mfem::ParFiniteElementSpace& fes,
+                                    mfem::Array<int> *ess_bdr);
 
 /*! \brief Generates a right-hand side linear form.
 
@@ -187,8 +106,8 @@ agg_dof_status_t *fem_find_bdr_dofs(ParFiniteElementSpace& fes,
 
     \warning The returned linear form must be freed by the caller.
 */
-ParLinearForm *fem_assemble_rhs(ParFiniteElementSpace *fespace,
-                                Coefficient& rhs);
+mfem::ParLinearForm *fem_assemble_rhs(mfem::ParFiniteElementSpace *fespace,
+                                mfem::Coefficient& rhs);
 
 /*! \brief Visualizes a grid function using GLVIS in serial.
 
@@ -200,7 +119,7 @@ ParLinearForm *fem_assemble_rhs(ParFiniteElementSpace *fespace,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_serial_visualize_gf(const Mesh& mesh, GridFunction& x,
+void fem_serial_visualize_gf(const mfem::Mesh& mesh, mfem::GridFunction& x,
                              const char *keys="");
 
 /*! \brief Visualizes a grid function using GLVIS in parallel.
@@ -213,7 +132,7 @@ void fem_serial_visualize_gf(const Mesh& mesh, GridFunction& x,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_parallel_visualize_gf(const ParMesh& mesh, ParGridFunction& x,
+void fem_parallel_visualize_gf(const mfem::ParMesh& mesh, mfem::ParGridFunction& x,
                                const char *keys="");
 
 /*! \brief Visualizes piece-wise constant coefficient using GLVIS in serial.
@@ -226,7 +145,7 @@ void fem_parallel_visualize_gf(const ParMesh& mesh, ParGridFunction& x,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_serial_visualize_pwc_coef(Mesh& mesh, Coefficient& coef,
+void fem_serial_visualize_pwc_coef(mfem::Mesh& mesh, mfem::Coefficient& coef,
                                    const char *keys="");
 
 /*! \brief Visualizes piece-wise constant coefficient using GLVIS in parallel.
@@ -239,7 +158,7 @@ void fem_serial_visualize_pwc_coef(Mesh& mesh, Coefficient& coef,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_parallel_visualize_pwc_coef(ParMesh& mesh, Coefficient& coef,
+void fem_parallel_visualize_pwc_coef(mfem::ParMesh& mesh, mfem::Coefficient& coef,
                                      const char *keys="");
 
 /*! \brief Visualizes the partitioning of a mesh in serial.
@@ -255,7 +174,7 @@ void fem_parallel_visualize_pwc_coef(ParMesh& mesh, Coefficient& coef,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_serial_visualize_partitioning(Mesh& mesh, int *partitioning,
+void fem_serial_visualize_partitioning(mfem::Mesh& mesh, int *partitioning,
                                        const char *keys="");
 
 /*! \brief Visualizes the partitioning of a mesh in parallel.
@@ -272,7 +191,7 @@ void fem_serial_visualize_partitioning(Mesh& mesh, int *partitioning,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_parallel_visualize_partitioning(ParMesh& mesh, int *partitioning,
+void fem_parallel_visualize_partitioning(mfem::ParMesh& mesh, int *partitioning,
                                          int parts, const char *keys="");
 
 /*! \brief Visualizes the aggregates in serial.
@@ -289,8 +208,8 @@ void fem_parallel_visualize_partitioning(ParMesh& mesh, int *partitioning,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_serial_visualize_aggregates(FiniteElementSpace *fes, int *aggregates,
-                                     const char *keys="");
+void fem_serial_visualize_aggregates(
+    mfem::FiniteElementSpace *fes, int *aggregates, const char *keys="");
 
 /*! \brief Visualizes the aggregates in parallel.
 
@@ -307,7 +226,7 @@ void fem_serial_visualize_aggregates(FiniteElementSpace *fes, int *aggregates,
              is given by the \b glvis_port option.
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_parallel_visualize_aggregates(ParFiniteElementSpace *fes,
+void fem_parallel_visualize_aggregates(mfem::ParFiniteElementSpace *fes,
                                        int *aggregates, int parts,
                                        const char *keys="");
 
@@ -319,7 +238,7 @@ void fem_parallel_visualize_aggregates(ParFiniteElementSpace *fes,
 
     \warning The returned mesh must be freed by the caller.
 */
-Mesh *fem_read_mesh(const char *filename);
+mfem::Mesh *fem_read_mesh(const char *filename);
 
 /*! \brief Writes a mesh to a file. The format is determined by MFEM.
 
@@ -329,7 +248,7 @@ Mesh *fem_read_mesh(const char *filename);
 
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_write_mesh(const char *filename, const Mesh& mesh);
+void fem_write_mesh(const char *filename, const mfem::Mesh& mesh);
 
 /*! \brief Loads a grid function from a file. The format is determined by MFEM.
 
@@ -340,7 +259,7 @@ void fem_write_mesh(const char *filename, const Mesh& mesh);
 
     \warning The returned grid function must be freed by the caller.
 */
-GridFunction *fem_read_gf(const char *filename, Mesh *mesh);
+mfem::GridFunction *fem_read_gf(const char *filename, mfem::Mesh *mesh);
 
 /*! \brief Writes a grid function to a file. The format is determined by MFEM.
 
@@ -350,7 +269,7 @@ GridFunction *fem_read_gf(const char *filename, Mesh *mesh);
 
     \warning The precision of the output is determined by the \b prec option.
 */
-void fem_write_gf(const char *filename, GridFunction& gf);
+void fem_write_gf(const char *filename, mfem::GridFunction& gf);
 
 /* Function Templates */
 /*! \brief Assembles the global stiffness matrix by generating a bilinear form.
@@ -383,10 +302,9 @@ void fem_write_gf(const char *filename, GridFunction& gf);
              on the global stiffness matrix.
 */
 template <class T>
-ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
-                                        T& coeff, Vector& x, Vector& b,
-                                        bool bdr_cond_impose,
-                                        Array<int> *ess_bdr);
+mfem::ParBilinearForm *fem_assemble_stiffness(
+    mfem::ParFiniteElementSpace *fespace, T& coeff, mfem::Vector& x,
+    mfem::Vector& b, bool bdr_cond_impose, mfem::Array<int> *ess_bdr);
 
 /*! \brief Build everything needed for the solver to be used.
 
@@ -423,12 +341,12 @@ ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
              on the global stiffness matrix.
 */
 template <class T>
-void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
-                                Coefficient& rhs, Coefficient& bdr_coeff,
+void fem_build_discrete_problem(mfem::ParFiniteElementSpace *fespace,
+                                mfem::Coefficient& rhs, mfem::Coefficient& bdr_coeff,
                                 T& coeff, bool bdr_cond_impose,
-                                ParGridFunction& x,
-                                ParLinearForm*& b, ParBilinearForm*& a,
-                                Array<int> *ess_bdr);
+                                mfem::ParGridFunction& x,
+                                mfem::ParLinearForm*& b, mfem::ParBilinearForm*& a,
+                                mfem::Array<int> *ess_bdr);
 
 /* Inline Functions */
 /*! \brief Partitions the unweighted dual graph of the mesh.
@@ -444,23 +362,33 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
     \warning The returned array must be freed by the caller.
 */
 static inline
-int *fem_partition_mesh(Mesh& mesh, int *nparts);
+int *fem_partition_mesh(mfem::Mesh& mesh, int *nparts);
 
 /*! \brief Utility routine, to deal with vector-valued problems.
 
     Converts an mfem elem_to_dof table to one that SAAMGe can use
     algebraically without knowing about the vector structure.
 */
-Table* vector_valued_elem_to_dof(const Table& mfem_elem_to_dof,
+mfem::Table* vector_valued_elem_to_dof(const mfem::Table& mfem_elem_to_dof,
                                  const int vdim, const int ordering);
 
 /*! \brief Partitions a Cartesian 2D mesh into rectangles.
 
     This function is used to do element agglomeration on slices of
     the SPE10 test problem.
+
+    (is it really? appears deprecated to me)
 */
-int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
+int *fem_partition_dual_simple_2D(mfem::Mesh& mesh, int *nparts, int *nparts_x,
                                   int *nparts_y);
+
+/*! \brief One fine element to one coarse element - possibly useful at high
+           order.
+*/
+agg_partitioning_relations_t *
+fem_create_partitioning_identity(
+    mfem::HypreParMatrix& A, mfem::ParFiniteElementSpace& fes,
+    const agg_dof_status_t *bdr_dofs, int *nparts);
 
 /*! \brief Creates all relations on the finest (geometric) mesh.
 
@@ -485,36 +413,36 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
              \b agg_free_partitioning.
 */
 agg_partitioning_relations_t *
-fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
+fem_create_partitioning(mfem::HypreParMatrix& A, mfem::ParFiniteElementSpace& fes,
                         const agg_dof_status_t *bdr_dofs, int *nparts,
                         bool do_aggregates);
 
 agg_partitioning_relations_t *
-fem_create_partitioning_from_matrix(const SparseMatrix& A,
+fem_create_partitioning_from_matrix(const mfem::SparseMatrix& A,
                                     int *nparts,
-                                    HypreParMatrix *dof_truedof,
-                                    Array<int>& isolated_cells);
+                                    mfem::HypreParMatrix *dof_truedof,
+                                    mfem::Array<int>& isolated_cells);
 
 /* Function Templates Definitions */
 template <class T>
-ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
-                                        T& coeff, Vector& x, Vector& b,
-                                        bool bdr_cond_impose,
-                                        Array<int> *ess_bdr)
+mfem::ParBilinearForm *fem_assemble_stiffness(
+    mfem::ParFiniteElementSpace *fespace,
+    T& coeff, mfem::Vector& x, mfem::Vector& b,
+    bool bdr_cond_impose, mfem::Array<int> *ess_bdr)
 {
     SA_RPRINTF_L(0, 4, "%s", "Assembling global stiffness matrix...\n");
-    ParBilinearForm *a = new ParBilinearForm(fespace);
-    a->AddDomainIntegrator(new DiffusionIntegrator(coeff));
+    mfem::ParBilinearForm *a = new mfem::ParBilinearForm(fespace);
+    a->AddDomainIntegrator(new mfem::DiffusionIntegrator(coeff));
     a->Assemble(/*0*/);
     if (bdr_cond_impose)
     {
         SA_RPRINTF_L(0, 4, "%s", "Imposing boundary conditions...\n");
         /* Imposing Dirichlet boundary conditions. */
         SA_ASSERT(ess_bdr->Size() == fespace->GetMesh()->bdr_attributes.Max());
-        Array<int> ess_dofs;
+        mfem::Array<int> ess_dofs;
         fespace->GetEssentialVDofs(*ess_bdr, ess_dofs);
-        a->EliminateEssentialBCFromDofs(ess_dofs, x, b,
-                                    (int)CONFIG_ACCESS_OPTION(FEM, keep_diag));
+        const bool keep_diag = true;
+        a->EliminateEssentialBCFromDofs(ess_dofs, x, b, keep_diag);
     }
     SA_RPRINTF_L(0, 4, "%s", "Finalizing global stiffness matrix...\n");
     a->Finalize(0);
@@ -523,12 +451,12 @@ ParBilinearForm *fem_assemble_stiffness(ParFiniteElementSpace *fespace,
 }
 
 template <class T>
-void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
-                                Coefficient& rhs, Coefficient& bdr_coeff,
-                                T& coeff, bool bdr_cond_impose,
-                                ParGridFunction& x,
-                                ParLinearForm*& b, ParBilinearForm*& a,
-                                Array<int> *ess_bdr)
+void fem_build_discrete_problem(
+    mfem::ParFiniteElementSpace *fespace,
+    mfem::Coefficient& rhs, mfem::Coefficient& bdr_coeff,
+    T& coeff, bool bdr_cond_impose, mfem::ParGridFunction& x,
+    mfem::ParLinearForm*& b, mfem::ParBilinearForm*& a,
+    mfem::Array<int> *ess_bdr)
 {
     SA_RPRINTF_L(0, 4, "%s", "Building discrete problem...\n");
 
@@ -541,7 +469,7 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
     } 
     else
     {
-        x.Update(fespace);
+        x.SetSpace(fespace);
     }
 
     // Set up the linear form b(.) which corresponds to the right-hand side
@@ -557,10 +485,12 @@ void fem_build_discrete_problem(ParFiniteElementSpace *fespace,
 
 /* Inline Functions Definitions */
 static inline
-int *fem_partition_mesh(Mesh& mesh, int *nparts)
+int *fem_partition_mesh(mfem::Mesh& mesh, int *nparts)
 {
     //XXX: This will stay allocated in MESH till the end.
     return part_generate_partitioning_unweighted(mesh.ElementToElementTable(), nparts);
 }
+
+} // namespace saamge
 
 #endif // _FEM_HPP

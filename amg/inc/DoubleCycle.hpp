@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,6 +41,9 @@
 #include "ml.hpp"
 #include "mfem_addons.hpp"
 
+namespace saamge
+{
+
 /*!
   \brief use two different coarse solvers at a single level
 
@@ -74,5 +77,7 @@ private:
     mfem::Solver * inner_solver; // originally this has been CorrectNullspace
     mfem::Solver * outer_solver; // originally this has been a VCycleSolver
 };
+
+}
 
 #endif

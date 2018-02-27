@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -73,6 +73,9 @@
 #include "aggregates.hpp"
 
 #include <limits>
+
+namespace saamge
+{
 
 /**
    Base class for eigensolver, trying to replace the C-style
@@ -189,12 +192,14 @@ private:
        Implemented as a sparse iterative eigensolver using
        ARPACK.
     */
+#if SAAMGE_USE_ARPACK
     bool SolveIterative(
         const mfem::SparseMatrix& A,
         mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
         double& theta, mfem::DenseMatrix& cut_evects,
         const mfem::DenseMatrix *Tt,
         bool transf, bool all_eigens);
+#endif
 
     const int * aggregates;
     const agg_partitioning_relations_t &agg_part_rels;
@@ -229,9 +234,10 @@ private:
     \param AE_to_dof (IN) Table that relates AEs to DoFs.
     \param augTt (OUT) The augmented subspace matrix.
 */
-void spect_schur_augment_transf(const mfem::DenseMatrix& Tt, int part, int agg_id,
-         int agg_size, const int *aggregates, const mfem::Table& AE_to_dof,
-         mfem::DenseMatrix& augTt);
+void spect_schur_augment_transf(
+    const mfem::DenseMatrix& Tt, int part, int agg_id,
+    int agg_size, const int *aggregates, const mfem::Table& AE_to_dof,
+    mfem::DenseMatrix& augTt);
 
 /*! \brief Solves a local eigenproblem on an aggregate. Schur version.
 
@@ -316,5 +322,7 @@ bool spect_schur_local_prob_solve_sparse(const mfem::SparseMatrix& A,
          double& theta, mfem::DenseMatrix& cut_evects,
          const mfem::DenseMatrix *Tt/*=NULL*/,
          bool transf/*=0*/, bool all_eigens/*=0*/);
+
+} // namespace saamge
 
 #endif // _SPECTRAL_HPP

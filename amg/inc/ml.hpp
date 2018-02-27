@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -29,8 +29,8 @@
 */
 
 /**
-   bare bones, piecemeal copy of Delyan Kalchev's multilevel
-   (serial) interface
+   Multilevel interface, does some of the things as tg.hpp
+   but in multilevel context.
 
    Andrew T. Barker
    atb@llnl.gov
@@ -44,9 +44,10 @@
 #include "common.hpp"
 #include "levels.hpp"
 #include <mfem.hpp>
-using namespace mfem;
 #include "tg.hpp"
-#include "solve.hpp"
+
+namespace saamge
+{
 
 /*! \brief Multilevel parameters
 
@@ -61,17 +62,19 @@ public:
     /**
        Constructor following old ml_produce_data calling sequence.
     */
-    MultilevelParameters(int coarsenings, int *nparts_arr, int first_nu_pro, int nu_pro, 
-                         int nu_relax, double first_theta, double theta, bool minimal_coarse_space,
-                         bool use_correct_nullspace, bool use_arpack, bool do_aggregates);
+    MultilevelParameters(
+        int coarsenings, int *nparts_arr, int first_nu_pro, int nu_pro,
+        int nu_relax, double first_theta, double theta,
+        int polynomial_coarse_space, bool use_correct_nullspace, bool use_arpack,
+        bool do_aggregates);
 
     /**
        Constructor so every level has same parameters.
 
-       NOT IMPLEMENTED.
+       @todo NOT IMPLEMENTED.
     */
     MultilevelParameters(int num_coarsenings, int elems_per_agg, int nu_pro, 
-                         int nu_relax, double theta, bool minimal_coarse_space);
+                         int nu_relax, double theta, int polynomial_coarse_space);
 
     ~MultilevelParameters();
 
@@ -80,25 +83,34 @@ public:
     int get_nu_relax(int j) const {return nu_relax[j];}
     double get_theta(int j) const {return theta[j];}
     bool get_smooth_interp(int j) const {return (nu_pro[j] > 0);}
-    bool get_minimal_coarse_space(int j) const {return minimal_coarse_space[j];}
+    int get_polynomial_coarse_space(int j) const {return polynomial_coarse_space[j];}
     bool get_use_correct_nullspace() const {return use_correct_nullspace;}
     bool get_use_arpack() const {return use_arpack;}
     bool get_do_aggregates() const {return do_aggregates;}
     int get_nparts(int j) const {return nparts_arr[j];}
+    bool get_avoid_ess_bdr_dofs() const {return avoid_ess_bdr_dofs;}
+    bool get_use_double_cycle() const {return use_double_cycle;}
+    double get_smooth_drop_tol() const {return smooth_drop_tol;}
 
-    void set_minimal_coarse_space(int j, bool val) {minimal_coarse_space[j] = val;}
-    
+    void set_polynomial_coarse_space(int j, int val) {polynomial_coarse_space[j] = val;}
+    void set_use_double_cycle(bool use) {use_double_cycle = use;}
+    bool get_coarse_direct() const {return coarse_direct;}
+    void set_coarse_direct(bool cd) {coarse_direct = cd;}
+    void set_smooth_drop_tol(double tol) {smooth_drop_tol = tol;}
 private:
     int num_coarsenings;
     int * nparts_arr;
     int * nu_pro;
     int * nu_relax;
     double * theta;
-    bool * minimal_coarse_space;
-    // TODO: something reasonable with use_correct_nulspace
+    int * polynomial_coarse_space;
     bool use_correct_nullspace;
     bool use_arpack;
     bool do_aggregates;
+    bool avoid_ess_bdr_dofs;
+    bool use_double_cycle;
+    bool coarse_direct; // use direct solver on coarsest level
+    double smooth_drop_tol;
 };
 
 /*! \brief Multilevel data.
@@ -126,7 +138,7 @@ void ml_produce_hierarchy_from_level(
 
   used in startfromcoarse.cpp
 */
-double ml_compute_OC_from_level(HypreParMatrix& A, const ml_data_t& ml_data,
+double ml_compute_OC_from_level(mfem::HypreParMatrix& A, const ml_data_t& ml_data,
                                 levels_level_t *starting_level);
 
 /*! \brief Computes OC over the entire hierarchy.
@@ -136,7 +148,7 @@ double ml_compute_OC_from_level(HypreParMatrix& A, const ml_data_t& ml_data,
 
     \returns The operator complexity.
 */
-double ml_compute_OC(HypreParMatrix& A, const ml_data_t& ml_data);
+double ml_compute_OC(mfem::HypreParMatrix& A, const ml_data_t& ml_data);
 
 /*! \brief Computes OC for one coarsening \a level is the coarse level.
 
@@ -148,26 +160,26 @@ double ml_compute_OC(HypreParMatrix& A, const ml_data_t& ml_data);
 
     \returns The operator complexity.
 */
-double ml_compute_OC_for_level(HypreParMatrix& A, const ml_data_t& ml_data,
+double ml_compute_OC_for_level(mfem::HypreParMatrix& A, const ml_data_t& ml_data,
                                int level);
 
 /*! \brief put dimensions of the operators at each level into dims
  */
-void ml_get_dims(const ml_data_t& ml_data, Array<int>& dims);
+void ml_get_dims(const ml_data_t& ml_data, mfem::Array<int>& dims);
 
 /*! \brief Prints the dimensions operator NNZ of all levels in the hierarchy.
 
     \param A (IN) The finest operator.
     \param ml_data (IN) Multilevel data.
 */
-void ml_print_dims(HypreParMatrix& A, const ml_data_t& ml_data);
+void ml_print_dims(mfem::HypreParMatrix& A, const ml_data_t& ml_data);
 
 /*! \brief Prints information about the hierarchy.
 
     \param A (IN) The finest operator.
     \param ml_data (IN) Multilevel data.
 */
-double ml_print_data(HypreParMatrix& A, const ml_data_t& ml_data);
+double ml_print_data(mfem::HypreParMatrix& A, const ml_data_t& ml_data);
 
 void ml_impose_cycle(ml_data_t& ml_data, bool Wcycle);
 
@@ -178,89 +190,11 @@ void ml_impose_cycle(ml_data_t& ml_data, bool Wcycle);
   The caller should free agg_part_rels.
 */
 ml_data_t * ml_produce_data(
-    const SparseMatrix& Al, HypreParMatrix& Ag,
-    agg_partitioning_relations_t *agg_part_rels, 
-    ElementMatrixProvider *elem_data_finest,
-    const MultilevelParameters &mlp);
+    mfem::HypreParMatrix& Ag, agg_partitioning_relations_t *agg_part_rels, 
+    ElementMatrixProvider *elem_data_finest, const MultilevelParameters &mlp);
 
 void ml_free_data(ml_data_t *ml_data);
 
-/*! \brief Executes a stationary ML-cycle method.
-
-    This function runs a stationary multilevel solver to solve a given problem.
-
-    \param A (IN) The matrix of the system being solved (usually the global
-                  stiffness matrix). It must correspond to \a from_level.
-    \param x (IN/OUT) Outputs the solution approximation. As input it is the
-                      initial approximation. If \a zero_rhs == \em true, then
-                      the initial approximation is generated randomly.
-    \param b (IN) The right-hand side. Not used if \a zero_rhs == \em true.
-    \param maxiter (IN) The maximal number of iteration to be done.
-    \param rtol (IN) Relative tolerance. Depending on \a zero_rhs, it may be
-                     used for the error or for the residual (see \b tg_solve
-                     and \b adapt_approx_xbad).
-    \param atol (IN) Absolute tolerance. Depending on \a zero_rhs, it may be
-                     used for the error or for the residual (see \b tg_solve
-                     and \b adapt_approx_xbad).
-    \param reducttol (IN) See \b tg_solve (only for calls that are directed to
-                          \b tg_solve this argument is relevant).
-    \param ml_data (IN) This is the ML data to be used.
-    \param zero_rhs (IN) If it is \em true, then \b adapt_approx_xbad is used
-                         since it outputs more error-related information.
-                         Otherwise, \b tg_solve is used.
-    \param from_level (IN) The starting level, where \a A lives. Have in mind
-                           that it might be necessary to execute, say,
-                           \b ml_update_operators_from_level_down prior to this
-                           call, so that the coarse operators in the hierarchy
-                           would correspond to \a A. This might create a mess
-                           in the operators in the hierarchy -- they may
-                           come from different matrices on different levels.
-                           You should keep track of this and know what you are
-                           doing.
-
-    \returns The number of iterations done. If a desired convergence criteria
-             was not reached, then this number is negative.
-
-    DEPRECATED, this is never called, probably use VCycleSolver class or something similar instead
-*/
-int ml_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxiter,
-           double rtol, double atol, double reducttol, ml_data_t& ml_data,
-           bool zero_rhs, int from_level);
-
-/*! \brief Executes PCG preconditioned by a ML-cycle.
-
-    This function runs a PCG solver to solve a given problem.
-
-    \param A (IN) The matrix of the system being solved (usually the global
-                  stiffness matrix). It must correspond to \a from_level.
-    \param x (IN/OUT) Outputs the solution approximation. As input it is the
-                      initial approximation. If \a zero_rhs == \em true, then
-                      the initial approximation is generated randomly.
-    \param b (IN) The right-hand side. Not used if \a zero_rhs == \em true.
-    \param maxiter (IN) The maximal number of iteration to be done.
-    \param rtol (IN) Relative tolerance.
-    \param atol (IN) Absolute tolerance.
-    \param ml_data (IN) This is the ML data to be used.
-    \param zero_rhs (IN) If it is \em true, then it outputs more error-related
-                         information.
-    \param from_level (IN) The starting level, where \a A lives. Have in mind
-                           that it might be necessary to execute, say,
-                           \b ml_update_operators_from_level_down prior to this
-                           call, so that the coarse operators in the hierarchy
-                           would correspond to \a A. This might create a mess
-                           in the operators in the hierarchy -- they may
-                           come from different matrices on different levels.
-                           You should keep track of this and know what you are
-                           doing.
-
-    \returns The number of iterations done. If a desired convergence criteria
-             was not reached, then this number is negative.
-
-    DEPRECATED, try mfem::CGSolver with VCycleSolver as a preconditioner
-*/
-int ml_pcg_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxiter,
-               double rtol, double atol, ml_data_t& ml_data, bool zero_rhs,
-               int from_level);
-
+} // namespace saamge
 
 #endif // _ML_HPP

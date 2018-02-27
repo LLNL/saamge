@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,10 +40,11 @@
 #include <_hypre_parcsr_mv.h>
 #include <_hypre_parcsr_ls.h>
 #include <mfem.hpp>
+
+namespace saamge
+{
 using std::ofstream;
 using std::ifstream;
-using namespace mfem;
-
 
 /* Types */
 /*! \brief A function type for generators of a matrix from another matrix.
@@ -59,7 +60,7 @@ using namespace mfem;
 
     \warning Usually the returned dense matrix must be freed by the caller.
 */
-typedef DenseMatrix * (*mbox_snd_dense_from_dense_ft)(const DenseMatrix& A);
+typedef mfem::DenseMatrix * (*mbox_snd_dense_from_dense_ft)(const mfem::DenseMatrix& A);
 
 /*! \brief A function type for generators of a matrix from another matrix.
 
@@ -74,7 +75,7 @@ typedef DenseMatrix * (*mbox_snd_dense_from_dense_ft)(const DenseMatrix& A);
 
     \warning Usually the returned dense matrix must be freed by the caller.
 */
-typedef DenseMatrix * (*mbox_snd_dense_from_sparse_ft)(const SparseMatrix& A);
+typedef mfem::DenseMatrix * (*mbox_snd_dense_from_sparse_ft)(const mfem::SparseMatrix& A);
 
 /*! \brief A function type for generators of a matrix from another matrix.
 
@@ -89,7 +90,7 @@ typedef DenseMatrix * (*mbox_snd_dense_from_sparse_ft)(const SparseMatrix& A);
 
     \warning Usually the returned sparse matrix must be freed by the caller.
 */
-typedef SparseMatrix * (*mbox_snd_sparse_from_sparse_ft)(const SparseMatrix& A);
+typedef mfem::SparseMatrix * (*mbox_snd_sparse_from_sparse_ft)(const mfem::SparseMatrix& A);
 
 /*! \brief A function type for generators of a matrix from another matrix.
 
@@ -104,7 +105,7 @@ typedef SparseMatrix * (*mbox_snd_sparse_from_sparse_ft)(const SparseMatrix& A);
 
     \warning Usually the returned sparse matrix must be freed by the caller.
 */
-typedef SparseMatrix * (*mbox_snd_sparse_from_dense_ft)(const DenseMatrix& A);
+typedef mfem::SparseMatrix * (*mbox_snd_sparse_from_dense_ft)(const mfem::DenseMatrix& A);
 
 /*! \brief A function type for generators of a matrix from another matrix.
 
@@ -126,7 +127,7 @@ typedef SparseMatrix * (*mbox_snd_sparse_from_dense_ft)(const DenseMatrix& A);
              destructors are needed in this case or the caller must know the
              type of the returned matrix when freeing it.
 */
-typedef Matrix * (*mbox_snd_ft)(const Matrix& A);
+typedef mfem::Matrix * (*mbox_snd_ft)(const mfem::Matrix& A);
 
 /*! \brief A function type for generators of a dioagonal from another matrix.
 
@@ -136,7 +137,7 @@ typedef Matrix * (*mbox_snd_ft)(const Matrix& A);
 
     \warning Usually the returned vector must be freed by the caller.
 */
-typedef HypreParVector * (*mbox_snd_vec_from_mat_par_ft)(HypreParMatrix& A);
+typedef mfem::HypreParVector * (*mbox_snd_vec_from_mat_par_ft)(mfem::HypreParMatrix& A);
 
 /*! \brief A function type for norms.
 
@@ -151,7 +152,7 @@ typedef HypreParVector * (*mbox_snd_vec_from_mat_par_ft)(HypreParMatrix& A);
              may be done. One should be careful with type castings and type
              mismatches.
 */
-typedef double (*mbox_norm_ft)(const Matrix& A, const Vector& x);
+typedef double (*mbox_norm_ft)(const mfem::Matrix& A, const mfem::Vector& x);
 
 /*! \brief A function type for inner products.
 
@@ -167,13 +168,13 @@ typedef double (*mbox_norm_ft)(const Matrix& A, const Vector& x);
              may be done. One should be careful with type castings and type
              mismatches.
 */
-typedef double (*mbox_inner_prod_ft)(const Matrix& A, const Vector& x,
-                                     const Vector& y);
+typedef double (*mbox_inner_prod_ft)(const mfem::Matrix& A, const mfem::Vector& x,
+                                     const mfem::Vector& y);
 
 /* Functions */
 
 void hypre_par_matrix_ownership(
-    HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts);
+    mfem::HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts);
 
 /*! Copied from Parelag hypreExtension/hypre_CSRFactory.c */
 hypre_ParCSRMatrix * hypre_IdentityParCSRMatrix( 
@@ -194,8 +195,8 @@ HYPRE_Int hypre_ParCSRMatrixDeleteZeros(hypre_ParCSRMatrix *A , double tol);
 
     \warning \a A must be s.p.d.
 */
-double mbox_energy_inner_prod_sparse(const SparseMatrix& A, const Vector& x,
-                                     const Vector& y);
+double mbox_energy_inner_prod_sparse(
+    const mfem::SparseMatrix& A, const mfem::Vector& x, const mfem::Vector& y);
 
 /*! \brief Computes the energy inner product with dense \a A.
 
@@ -209,8 +210,8 @@ double mbox_energy_inner_prod_sparse(const SparseMatrix& A, const Vector& x,
 
     \warning \a A must be s.p.d.
 */
-double mbox_energy_inner_prod_dense(const DenseMatrix& A, const Vector& x,
-                                    const Vector& y);
+double mbox_energy_inner_prod_dense(
+    const mfem::DenseMatrix& A, const mfem::Vector& x, const mfem::Vector& y);
 
 /*! \brief Computes the generalized Rayleigh quotient of matrix pair (A,B).
 
@@ -226,8 +227,8 @@ double mbox_energy_inner_prod_dense(const DenseMatrix& A, const Vector& x,
     \returns The generalized Rayleigh quotient of matrix pair (A,B) for vector
              \a x.
 */
-double mbox_gen_rayleigh_quot_sparse(const SparseMatrix& A,
-                                     const SparseMatrix& B, const Vector& x);
+double mbox_gen_rayleigh_quot_sparse(
+    const mfem::SparseMatrix& A, const mfem::SparseMatrix& B, const mfem::Vector& x);
 
 /*! \brief Computes the generalized Rayleigh quotient of matrix pair (A,B).
 
@@ -244,8 +245,8 @@ double mbox_gen_rayleigh_quot_sparse(const SparseMatrix& A,
              \a x.
 */
 
-double mbox_gen_rayleigh_quot_dense(const DenseMatrix& A, const DenseMatrix& B,
-                                    const Vector& x);
+double mbox_gen_rayleigh_quot_dense(const mfem::DenseMatrix& A, const mfem::DenseMatrix& B,
+                                    const mfem::Vector& x);
 
 /*! \brief Computes the energy norm with sparse \a A.
 
@@ -258,7 +259,8 @@ double mbox_gen_rayleigh_quot_dense(const DenseMatrix& A, const DenseMatrix& B,
 
     \warning \a A must be s.p.d.
 */
-double mbox_energy_norm_sparse(const SparseMatrix& A, const Vector& x);
+double mbox_energy_norm_sparse(
+    const mfem::SparseMatrix& A, const mfem::Vector& x);
 
 /*! \brief Computes the energy norm with dense \a A.
 
@@ -271,7 +273,8 @@ double mbox_energy_norm_sparse(const SparseMatrix& A, const Vector& x);
 
     \warning \a A must be s.p.d.
 */
-double mbox_energy_norm_dense(const DenseMatrix& A, const Vector& x);
+double mbox_energy_norm_dense(
+    const mfem::DenseMatrix& A, const mfem::Vector& x);
 
 /*! \brief Creates a copy of a table.
 
@@ -281,7 +284,7 @@ double mbox_energy_norm_dense(const DenseMatrix& A, const Vector& x);
 
     \warning The returned table must be freed by the caller.
 */
-Table *mbox_copy_table(const Table *src);
+mfem::Table *mbox_copy_table(const mfem::Table *src);
 
 /*! \brief Frees an array of matrices.
 
@@ -290,7 +293,7 @@ Table *mbox_copy_table(const Table *src);
 
     \warning Virtual destructors are likely to be needed.
 */
-void mbox_free_matr_arr(Matrix **arr, int n);
+void mbox_free_matr_arr(mfem::Matrix **arr, int n);
 
 /*! \brief Creates a copy of a finalized sparse matrix.
 
@@ -301,7 +304,7 @@ void mbox_free_matr_arr(Matrix **arr, int n);
     \warning The returned sparse matrix must be freed by the caller.
     \warning \a src must be finalized.
 */
-SparseMatrix *mbox_copy_sparse_matr(const SparseMatrix *src);
+mfem::SparseMatrix *mbox_copy_sparse_matr(const mfem::SparseMatrix *src);
 
 /*! \brief Copies an array of sparse matrices.
 
@@ -313,7 +316,7 @@ SparseMatrix *mbox_copy_sparse_matr(const SparseMatrix *src);
     \warning The returned array must be freed by the caller using
              \b mbox_free_matr_arr.
 */
-SparseMatrix **mbox_copy_sparse_matr_arr(SparseMatrix **src, int n);
+mfem::SparseMatrix **mbox_copy_sparse_matr_arr(mfem::SparseMatrix **src, int n);
 
 /*! \brief Copies an array of dense matrices.
 
@@ -325,7 +328,7 @@ SparseMatrix **mbox_copy_sparse_matr_arr(SparseMatrix **src, int n);
     \warning The returned array must be freed by the caller using
              \b mbox_free_matr_arr.
 */
-DenseMatrix **mbox_copy_dense_matr_arr(DenseMatrix **src, int n);
+mfem::DenseMatrix **mbox_copy_dense_matr_arr(mfem::DenseMatrix **src, int n);
 
 /*! \brief Loads a table from a file.
 
@@ -338,7 +341,7 @@ DenseMatrix **mbox_copy_dense_matr_arr(DenseMatrix **src, int n);
 
     \warning The returned table must be freed by the caller.
 */
-Table *mbox_read_table(const char *filename);
+mfem::Table *mbox_read_table(const char *filename);
 
 /*! \brief Writes a table to a file.
 
@@ -349,7 +352,7 @@ Table *mbox_read_table(const char *filename);
                          be erased prior to writing.
     \param tbl (IN) The table to be written.
 */
-void mbox_write_table(const char *filename, const Table& tbl);
+void mbox_write_table(const char *filename, const mfem::Table& tbl);
 
 /*! \brief Loads a finalized sparse matrix from a file.
 
@@ -362,7 +365,7 @@ void mbox_write_table(const char *filename, const Table& tbl);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_read_sparse_matr(const char *filename);
+mfem::SparseMatrix *mbox_read_sparse_matr(const char *filename);
 
 /*! \brief Loads a finalized sparse matrix from an input stream.
 
@@ -375,7 +378,7 @@ SparseMatrix *mbox_read_sparse_matr(const char *filename);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_read_sparse_matr(ifstream& ispm);
+mfem::SparseMatrix *mbox_read_sparse_matr(ifstream& ispm);
 
 /*! \brief Writes a finalized sparse matrix to a file.
 
@@ -388,7 +391,7 @@ SparseMatrix *mbox_read_sparse_matr(ifstream& ispm);
 
     \warning \a spm must be finalized.
 */
-void mbox_write_sparse_matr(const char *filename, const SparseMatrix& spm);
+void mbox_write_sparse_matr(const char *filename, const mfem::SparseMatrix& spm);
 
 /*! \brief Writes a finalized sparse matrix to an output stream.
 
@@ -400,7 +403,7 @@ void mbox_write_sparse_matr(const char *filename, const SparseMatrix& spm);
 
     \warning \a spm must be finalized.
 */
-void mbox_write_sparse_matr(ofstream& ospm, const SparseMatrix& spm);
+void mbox_write_sparse_matr(ofstream& ospm, const mfem::SparseMatrix& spm);
 
 /*! \brief Loads a dense matrix from a file.
 
@@ -413,7 +416,7 @@ void mbox_write_sparse_matr(ofstream& ospm, const SparseMatrix& spm);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_read_dense_matr(const char *filename);
+mfem::DenseMatrix *mbox_read_dense_matr(const char *filename);
 
 /*! \brief Loads a dense matrix from an input stream.
 
@@ -426,7 +429,7 @@ DenseMatrix *mbox_read_dense_matr(const char *filename);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_read_dense_matr(ifstream& idem);
+mfem::DenseMatrix *mbox_read_dense_matr(ifstream& idem);
 
 /*! \brief Writes a dense matrix to a file.
 
@@ -437,7 +440,7 @@ DenseMatrix *mbox_read_dense_matr(ifstream& idem);
                          be erased prior to writing.
     \param dem (IN) The dense matrix to be written.
 */
-void mbox_write_dense_matr(const char *filename, const DenseMatrix& dem);
+void mbox_write_dense_matr(const char *filename, const mfem::DenseMatrix& dem);
 
 /*! \brief Writes a dense matrix to an output stream.
 
@@ -447,7 +450,7 @@ void mbox_write_dense_matr(const char *filename, const DenseMatrix& dem);
     \param odem (IN) The output stream.
     \param dem (IN) The dense matrix to be written.
 */
-void mbox_write_dense_matr(ofstream& odem, const DenseMatrix& dem);
+void mbox_write_dense_matr(ofstream& odem, const mfem::DenseMatrix& dem);
 
 /*! \brief Loads an array of sparse matrices from a file.
 
@@ -465,7 +468,7 @@ void mbox_write_dense_matr(ofstream& odem, const DenseMatrix& dem);
     \warning The returned array must be freed by the caller using
              \b mbox_free_matr_arr.
 */
-SparseMatrix **mbox_read_sparse_matr_arr(const char *filename, int *n);
+mfem::SparseMatrix **mbox_read_sparse_matr_arr(const char *filename, int *n);
 
 /*! \brief Writes an array of sparse matrices to a file.
 
@@ -479,7 +482,7 @@ SparseMatrix **mbox_read_sparse_matr_arr(const char *filename, int *n);
     \param arr (IN) The array to be written.
     \param n (IN) The number of sparse matrices in the array.
 */
-void mbox_write_sparse_matr_arr(const char *filename, SparseMatrix **arr,
+void mbox_write_sparse_matr_arr(const char *filename, mfem::SparseMatrix **arr,
                                 int n);
 
 /*! \brief Loads an array of dense matrices from a file.
@@ -497,7 +500,7 @@ void mbox_write_sparse_matr_arr(const char *filename, SparseMatrix **arr,
     \warning The returned array must be freed by the caller using
             \b mbox_free_matr_arr.
 */
-DenseMatrix **mbox_read_dense_matr_arr(const char *filename, int *n);
+mfem::DenseMatrix **mbox_read_dense_matr_arr(const char *filename, int *n);
 
 /*! \brief Writes an array of dense matrices to a file.
 
@@ -510,7 +513,7 @@ DenseMatrix **mbox_read_dense_matr_arr(const char *filename, int *n);
     \param arr (IN) The array to be written.
     \param n (IN) The number of dense matrices in the array.
 */
-void mbox_write_dense_matr_arr(const char *filename, DenseMatrix **arr,
+void mbox_write_dense_matr_arr(const char *filename, mfem::DenseMatrix **arr,
                                int n);
 
 /*! \brief Generates (converts) a dense matrix from a sparse matrix.
@@ -518,7 +521,7 @@ void mbox_write_dense_matr_arr(const char *filename, DenseMatrix **arr,
     \param Sp (IN) The sparse matrix to be copied (converted).
     \param D (OUT) The generated dense matrix.
 */
-void mbox_convert_sparse_to_dense(const SparseMatrix& Sp, DenseMatrix& D);
+void mbox_convert_sparse_to_dense(const mfem::SparseMatrix& Sp, mfem::DenseMatrix& D);
 
 /*! \brief Generates (converts) a sparse matrix from a dense matrix.
 
@@ -528,7 +531,7 @@ void mbox_convert_sparse_to_dense(const SparseMatrix& Sp, DenseMatrix& D);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_convert_dense_to_sparse(const DenseMatrix& D);
+mfem::SparseMatrix *mbox_convert_dense_to_sparse(const mfem::DenseMatrix& D);
 
 /*! \brief Gives the upper triangular part of a square dense matrix.
 
@@ -543,14 +546,14 @@ SparseMatrix *mbox_convert_dense_to_sparse(const DenseMatrix& D);
 
     \warning The returned array must be freed by the caller.
 */
-double *mbox_give_upper_trian(const DenseMatrix& A);
+double *mbox_give_upper_trian(const mfem::DenseMatrix& A);
 
 /*! \brief Swaps the data of two dense matrices.
 
     \param f (IN/OUT) The first dense matrix.
     \param s (IN/OUT) The first dense matrix.
 */
-void mbox_swap_data_dense(DenseMatrix& f, DenseMatrix& s);
+void mbox_swap_data_dense(mfem::DenseMatrix& f, mfem::DenseMatrix& s);
 
 /*! \brief Adds a sparse matrix to a dense one destructively.
 
@@ -559,7 +562,7 @@ void mbox_swap_data_dense(DenseMatrix& f, DenseMatrix& s);
     \param A (IN/OUT) The dense matrix.
     \param Sp (IN) the sparse matrix.
 */
-void mbox_add_sparse_to_dense(DenseMatrix& A, const SparseMatrix& Sp);
+void mbox_add_sparse_to_dense(mfem::DenseMatrix& A, const mfem::SparseMatrix& Sp);
 
 /*! \brief Adds the diagonal of a sparse matrix to another sparse matrix.
 
@@ -573,8 +576,8 @@ void mbox_add_sparse_to_dense(DenseMatrix& A, const SparseMatrix& Sp);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_add_diag_to_sparse(const SparseMatrix& D,
-                                      const SparseMatrix& Sp);
+mfem::SparseMatrix *mbox_add_diag_to_sparse(const mfem::SparseMatrix& D,
+                                      const mfem::SparseMatrix& Sp);
 
 /*! \brief Multiplies a sparse matrix to a dense matrix.
 
@@ -585,8 +588,8 @@ SparseMatrix *mbox_add_diag_to_sparse(const SparseMatrix& D,
     \param B (IN) A dense matrix.
     \param AB (OUT) A dense matrix equal to \a A * \a B
 */
-void mbox_mult_sparse_to_dense(const SparseMatrix& A, const DenseMatrix& B,
-                               DenseMatrix& AB);
+void mbox_mult_sparse_to_dense(const mfem::SparseMatrix& A, const mfem::DenseMatrix& B,
+                               mfem::DenseMatrix& AB);
 
 /*! \brief Generates the negative of the inverse of the weighted l1-smoother.
 
@@ -601,7 +604,7 @@ void mbox_mult_sparse_to_dense(const SparseMatrix& A, const DenseMatrix& B,
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_build_Dinv_neg(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_build_Dinv_neg(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -617,7 +620,7 @@ SparseMatrix *mbox_build_Dinv_neg(const SparseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_id_dense_from_dense(const DenseMatrix& A);
+mfem::DenseMatrix *mbox_snd_id_dense_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -633,7 +636,7 @@ DenseMatrix *mbox_snd_id_dense_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_id_dense_from_sparse(const SparseMatrix& A);
+mfem::DenseMatrix *mbox_snd_id_dense_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -649,7 +652,7 @@ DenseMatrix *mbox_snd_id_dense_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_id_sparse_from_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_snd_id_sparse_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -665,7 +668,7 @@ SparseMatrix *mbox_snd_id_sparse_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_id_sparse_from_dense(const DenseMatrix& A);
+mfem::SparseMatrix *mbox_snd_id_sparse_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -681,7 +684,7 @@ SparseMatrix *mbox_snd_id_sparse_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_diagA_dense_from_dense(const DenseMatrix& A);
+mfem::DenseMatrix *mbox_snd_diagA_dense_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -697,7 +700,7 @@ DenseMatrix *mbox_snd_diagA_dense_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_diagA_dense_from_sparse(const SparseMatrix& A);
+mfem::DenseMatrix *mbox_snd_diagA_dense_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -713,7 +716,7 @@ DenseMatrix *mbox_snd_diagA_dense_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_diagA_sparse_from_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_snd_diagA_sparse_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -729,7 +732,7 @@ SparseMatrix *mbox_snd_diagA_sparse_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_diagA_sparse_from_dense(const DenseMatrix& A);
+mfem::SparseMatrix *mbox_snd_diagA_sparse_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -745,7 +748,7 @@ SparseMatrix *mbox_snd_diagA_sparse_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_diagAinv_dense_from_dense(const DenseMatrix& A);
+mfem::DenseMatrix *mbox_snd_diagAinv_dense_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -761,7 +764,7 @@ DenseMatrix *mbox_snd_diagAinv_dense_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_diagAinv_dense_from_sparse(const SparseMatrix& A);
+mfem::DenseMatrix *mbox_snd_diagAinv_dense_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -777,7 +780,7 @@ DenseMatrix *mbox_snd_diagAinv_dense_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_diagAinv_sparse_from_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_snd_diagAinv_sparse_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -793,7 +796,7 @@ SparseMatrix *mbox_snd_diagAinv_sparse_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_diagAinv_sparse_from_dense(const DenseMatrix& A);
+mfem::SparseMatrix *mbox_snd_diagAinv_sparse_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -810,7 +813,7 @@ SparseMatrix *mbox_snd_diagAinv_sparse_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_D_dense_from_dense(const DenseMatrix& A);
+mfem::DenseMatrix *mbox_snd_D_dense_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -827,7 +830,7 @@ DenseMatrix *mbox_snd_D_dense_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_D_dense_from_sparse(const SparseMatrix& A);
+mfem::DenseMatrix *mbox_snd_D_dense_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -844,7 +847,7 @@ DenseMatrix *mbox_snd_D_dense_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_D_sparse_from_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_snd_D_sparse_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -861,7 +864,7 @@ SparseMatrix *mbox_snd_D_sparse_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_D_sparse_from_dense(const DenseMatrix& A);
+mfem::SparseMatrix *mbox_snd_D_sparse_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -892,8 +895,8 @@ SparseMatrix *mbox_snd_D_sparse_from_dense(const DenseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_restr_snd_D_sparse_from_sparse(const SparseMatrix& A,
-                  const int *elem_to_smallcol, const Table& bigcol_to_elem,
+mfem::SparseMatrix *mbox_restr_snd_D_sparse_from_sparse(const mfem::SparseMatrix& A,
+                  const int *elem_to_smallcol, const mfem::Table& bigcol_to_elem,
                   int small_id, int big_id, int small_sz);
 
 /*! \brief A function generating a matrix from another matrix.
@@ -912,7 +915,7 @@ SparseMatrix *mbox_restr_snd_D_sparse_from_sparse(const SparseMatrix& A,
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_Dinv_dense_from_dense(const DenseMatrix& A);
+mfem::DenseMatrix *mbox_snd_Dinv_dense_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -930,7 +933,7 @@ DenseMatrix *mbox_snd_Dinv_dense_from_dense(const DenseMatrix& A);
 
     \warning The returned dense matrix must be freed by the caller.
 */
-DenseMatrix *mbox_snd_Dinv_dense_from_sparse(const SparseMatrix& A);
+mfem::DenseMatrix *mbox_snd_Dinv_dense_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -948,7 +951,7 @@ DenseMatrix *mbox_snd_Dinv_dense_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_Dinv_sparse_from_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_snd_Dinv_sparse_from_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief A function generating a matrix from another matrix.
 
@@ -966,7 +969,7 @@ SparseMatrix *mbox_snd_Dinv_sparse_from_sparse(const SparseMatrix& A);
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_snd_Dinv_sparse_from_dense(const DenseMatrix& A);
+mfem::SparseMatrix *mbox_snd_Dinv_sparse_from_dense(const mfem::DenseMatrix& A);
 
 /*! \brief Generates an array of matrices from an array of matrices.
 
@@ -989,14 +992,15 @@ SparseMatrix *mbox_snd_Dinv_sparse_from_dense(const DenseMatrix& A);
     \warning The returned array must be freed by the caller using
              \b mbox_free_matr_arr.
 */
-Matrix **mbox_produce_snd_arr(Matrix **in_arr, int n, mbox_snd_ft snd_gen);
+mfem::Matrix **mbox_produce_snd_arr(
+    mfem::Matrix **in_arr, int n, mbox_snd_ft snd_gen);
 
 /*! \brief Gets the diagonal of a sparse matrix.
 
     \param Sp (IN) The sparse matrix
     \param d (OUT) The diagonal.
 */
-void mbox_get_diag_of_sparse(const SparseMatrix& Sp, Vector& d);
+void mbox_get_diag_of_sparse(const mfem::SparseMatrix& Sp, mfem::Vector& d);
 
 /*! \brief Transforms the diagonal of a diagonal sparse matrix.
 
@@ -1007,8 +1011,8 @@ void mbox_get_diag_of_sparse(const SparseMatrix& Sp, Vector& d);
     \param D (IN) The (possibly diagonal) sparse matrix to be transformed.
     \param TdTt (OUT) The dense resulting matrix of the transformation.
 */
-void mbox_transform_diag(const DenseMatrix& T, const SparseMatrix& D,
-                         DenseMatrix& TdTt);
+void mbox_transform_diag(const mfem::DenseMatrix& T, const mfem::SparseMatrix& D,
+                         mfem::DenseMatrix& TdTt);
 
 /*! \brief Transforms a dense matrix.
 
@@ -1019,8 +1023,8 @@ void mbox_transform_diag(const DenseMatrix& T, const SparseMatrix& D,
     \param A (IN) The dense matrix to be transformed.
     \param TATt (OUT) The dense resulting matrix of the transformation.
 */
-void mbox_transform_dense(const DenseMatrix& T, const DenseMatrix& A,
-                          DenseMatrix& TATt);
+void mbox_transform_dense(const mfem::DenseMatrix& T, const mfem::DenseMatrix& A,
+                          mfem::DenseMatrix& TATt);
 
 /*! \brief Transforms a sparse matrix.
 
@@ -1030,8 +1034,8 @@ void mbox_transform_dense(const DenseMatrix& T, const DenseMatrix& A,
     \param Tt (IN) The dense full-rank matrix of the transformation.
     \param TATt (OUT) The dense resulting matrix of the transformation.
 */
-void mbox_transform_sparse(const SparseMatrix& A, const DenseMatrix& Tt,
-                           DenseMatrix& TATt);
+void mbox_transform_sparse(const mfem::SparseMatrix& A, const mfem::DenseMatrix& Tt,
+                           mfem::DenseMatrix& TATt);
 
 /*! \brief Transforms a group of vectors.
 
@@ -1042,15 +1046,16 @@ void mbox_transform_sparse(const SparseMatrix& A, const DenseMatrix& Tt,
     \param vects (IN) The vectors to be transformed.
     \param trans_vects (OUT) The transformed vectors.
 */
-void mbox_transform_vects(const DenseMatrix& Tt, const DenseMatrix& vects,
-                          DenseMatrix& trans_vects);
+void mbox_transform_vects(const mfem::DenseMatrix& Tt,
+                          const mfem::DenseMatrix& vects,
+                          mfem::DenseMatrix& trans_vects);
 
 /*! \brief Normalizes a group of vectors presented as columns of a dense matrix.
 
     \param vects (IN/OUT) The vectors to be normalized.
     \param sqnorms (IN) An array with the squares of the norms of the vectors.
 */
-void mbox_sqnormalize_vects(DenseMatrix& vects, const double *sqnorms);
+void mbox_sqnormalize_vects(mfem::DenseMatrix& vects, const double *sqnorms);
 
 /*! \brief Orthogonalizes a vector to a group of orthonormal vectors.
 
@@ -1087,9 +1092,9 @@ void mbox_sqnormalize_vects(DenseMatrix& vects, const double *sqnorms);
 
     \warning \a energy_norm must be the norm induced by \a energy_inner_prod.
 */
-bool mbox_orthogonalize(const Vector& x, const DenseMatrix& vects,
-                        const Matrix& D, const Matrix& A, double tol,
-                        DenseMatrix& orth_vects, mbox_norm_ft energy_norm,
+bool mbox_orthogonalize(const mfem::Vector& x, const mfem::DenseMatrix& vects,
+                        const mfem::Matrix& D, const mfem::Matrix& A, double tol,
+                        mfem::DenseMatrix& orth_vects, mbox_norm_ft energy_norm,
                         mbox_inner_prod_ft energy_inner_prod);
 
 /*! \brief Checks if two dense matrices are equal.
@@ -1100,7 +1105,7 @@ bool mbox_orthogonalize(const Vector& x, const DenseMatrix& vects,
 
     \returns If they are equal.
 */
-bool mbox_are_equal_dense(const DenseMatrix& f, const DenseMatrix& s,
+bool mbox_are_equal_dense(const mfem::DenseMatrix& f, const mfem::DenseMatrix& s,
                           double tol);
 
 /*! \brief Checks if two sparse matrices are equal.
@@ -1114,8 +1119,9 @@ bool mbox_are_equal_dense(const DenseMatrix& f, const DenseMatrix& s,
 
     \returns If they are equal.
 */
-bool mbox_are_equal_sparse(const SparseMatrix& f, const SparseMatrix& s,
-                           double tol, const int *bdr_dofs=NULL);
+bool mbox_are_equal_sparse(
+    const mfem::SparseMatrix& f, const mfem::SparseMatrix& s,
+    double tol, const int *bdr_dofs=NULL);
 
 /*! \brief Restricts a diagonal matrix.
 
@@ -1138,9 +1144,9 @@ bool mbox_are_equal_sparse(const SparseMatrix& f, const SparseMatrix& s,
     \param small_id (IN) The number of the small collection.
     \param big_id (IN) The number of the big collection.
 */
-void mbox_set_zero_diag_outside_set_sparse(SparseMatrix& D,
+void mbox_set_zero_diag_outside_set_sparse(mfem::SparseMatrix& D,
                                            const int *elem_to_smallcol,
-                                           const Table& bigcol_to_elem,
+                                           const mfem::Table& bigcol_to_elem,
                                            int small_id, int big_id);
 
 /*! \brief Creates a copy of a finalized sparse matrix and removes the zeros.
@@ -1153,7 +1159,7 @@ void mbox_set_zero_diag_outside_set_sparse(SparseMatrix& D,
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_filter_zeros_sparse(const SparseMatrix& A);
+mfem::SparseMatrix *mbox_filter_zeros_sparse(const mfem::SparseMatrix& A);
 
 /*! \brief Computes the Schur complement for a given \a set of indices.
 
@@ -1166,8 +1172,9 @@ SparseMatrix *mbox_filter_zeros_sparse(const SparseMatrix& A);
                     computed for the indices in the array keeping the provided
                     order in the array.
 */
-void mbox_build_schur_from_sparse(const SparseMatrix& A, DenseMatrix& S,
-                                  const Array<int>& set);
+void mbox_build_schur_from_sparse(const mfem::SparseMatrix& A,
+                                  mfem::DenseMatrix& S,
+                                  const mfem::Array<int>& set);
 
 /*! \brief Creates a diagonal sparse matrix using HYPRE allocations.
 
@@ -1182,7 +1189,7 @@ void mbox_build_schur_from_sparse(const SparseMatrix& A, DenseMatrix& S,
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-SparseMatrix *mbox_create_diag_sparse_for_hypre(Vector& diag);
+mfem::SparseMatrix *mbox_create_diag_sparse_for_hypre(mfem::Vector& diag);
 
 /*! \brief Makes a copy of a parallel matrix.
 
@@ -1194,7 +1201,7 @@ SparseMatrix *mbox_create_diag_sparse_for_hypre(Vector& diag);
 
     \warning The returned matrix must be freed by the caller.
 */
-HypreParMatrix *mbox_clone_parallel_matrix(HypreParMatrix *A);
+mfem::HypreParMatrix *mbox_clone_parallel_matrix(mfem::HypreParMatrix *A);
 
 /*! \brief Replaces all data entries in the matrix by their absolute values.
 
@@ -1202,7 +1209,7 @@ HypreParMatrix *mbox_clone_parallel_matrix(HypreParMatrix *A);
 
     \param A (IN/OUT) The matrix to replace its entries.
 */
-void mbox_compute_abs_parallel_matrix(HypreParMatrix& A);
+void mbox_compute_abs_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Copies a matrix and replaces all entries by their absolute values.
 
@@ -1212,7 +1219,7 @@ void mbox_compute_abs_parallel_matrix(HypreParMatrix& A);
 
     \warning The returned matrix must be freed by the caller.
 */
-HypreParMatrix *mbox_abs_clone_parallel_matrix(HypreParMatrix& A);
+mfem::HypreParMatrix *mbox_abs_clone_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Scales a matrix by a constant
 
@@ -1221,7 +1228,7 @@ HypreParMatrix *mbox_abs_clone_parallel_matrix(HypreParMatrix& A);
     \param A (IN/OUT) The matrix to replace its entries.
     \param c (IN) The constant.
 */
-void mbox_scale_parallel_matrix(HypreParMatrix& A, double c);
+void mbox_scale_parallel_matrix(mfem::HypreParMatrix& A, double c);
 
 /*! \brief Copies a matrix and scales all entries by a constant.
 
@@ -1232,7 +1239,7 @@ void mbox_scale_parallel_matrix(HypreParMatrix& A, double c);
 
     \warning The returned matrix must be freed by the caller.
 */
-HypreParMatrix *mbox_scale_clone_parallel_matrix(HypreParMatrix& A, double c);
+mfem::HypreParMatrix *mbox_scale_clone_parallel_matrix(mfem::HypreParMatrix& A, double c);
 
 /*! \brief Inverts the diagonal of a matrix.
 
@@ -1240,7 +1247,7 @@ HypreParMatrix *mbox_scale_clone_parallel_matrix(HypreParMatrix& A, double c);
 
     \param A (IN/OUT) The matrix.
 */
-void mbox_invert_daig_parallel_matrix(HypreParMatrix& A);
+void mbox_invert_diag_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Negates the diagonal of a matrix.
 
@@ -1248,7 +1255,7 @@ void mbox_invert_daig_parallel_matrix(HypreParMatrix& A);
 
     \param A (IN/OUT) The matrix.
 */
-void mbox_negate_daig_parallel_matrix(HypreParMatrix& A);
+void mbox_negate_diag_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Square-roots the diagonal of a matrix.
 
@@ -1256,7 +1263,7 @@ void mbox_negate_daig_parallel_matrix(HypreParMatrix& A);
 
     \param A (IN/OUT) The matrix.
 */
-void mbox_sqrt_daig_parallel_matrix(HypreParMatrix& A);
+void mbox_sqrt_diag_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Adds a constant to the diagonal of a matrix.
 
@@ -1265,7 +1272,7 @@ void mbox_sqrt_daig_parallel_matrix(HypreParMatrix& A);
     \param A (IN/OUT) The matrix.
     \param c (IN) The constant.
 */
-void mbox_add_daig_parallel_matrix(HypreParMatrix& A, double c);
+void mbox_add_diag_parallel_matrix(mfem::HypreParMatrix& A, double c);
 
 /*! \brief If not an owner of offsets, "hard" copies them and becomes an owner.
 
@@ -1273,7 +1280,7 @@ void mbox_add_daig_parallel_matrix(HypreParMatrix& A, double c);
 
     \param A (IN/OUT) The matrix.
 */
-void mbox_make_owner_rowstarts_colstarts(HypreParMatrix& A);
+void mbox_make_owner_rowstarts_colstarts(mfem::HypreParMatrix& A);
 
 /*! \brief If not an owner of offsets, "hard" copies them and becomes an owner.
 
@@ -1282,26 +1289,26 @@ void mbox_make_owner_rowstarts_colstarts(HypreParMatrix& A);
 
     \param v (IN/OUT) The vector.
 */
-void mbox_make_owner_partitioning(HypreParVector& v);
+void mbox_make_owner_partitioning(mfem::HypreParVector& v);
 
 /*! \brief Computes \a f(i) *= \a s(i).
 
     \param f (IN/OUT) The first vector.
     \param s (IN) The second vector.
 */
-void mbox_entry_mult_vector(Vector& f, const Vector& s);
+void mbox_entry_mult_vector(mfem::Vector& f, const mfem::Vector& s);
 
 /*! \brief Computes \a v(i) = \a v(i)^{-1}.
 
     \param v (IN/OUT) The vector.
 */
-void mbox_invert_vector(Vector& v);
+void mbox_invert_vector(mfem::Vector& v);
 
 /*! \brief Computes \a v(i) = \a v(i)^{1/2}.
 
     \param v (IN/OUT) The vector.
 */
-void mbox_sqrt_vector(Vector& v);
+void mbox_sqrt_vector(mfem::Vector& v);
 
 /*! \brief Returns the diagonal of a parallel matrix.
 
@@ -1314,7 +1321,7 @@ void mbox_sqrt_vector(Vector& v);
 
     \warning The returned vector must be freed by the caller.
 */
-HypreParVector *mbox_get_diag_parallel_matrix(HypreParMatrix& A);
+mfem::HypreParVector *mbox_get_diag_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Creates a diagonal parallel matrix.
 
@@ -1327,7 +1334,7 @@ HypreParVector *mbox_get_diag_parallel_matrix(HypreParMatrix& A);
 
     \warning The returned matrix must be freed by the caller.
 */
-HypreParMatrix *mbox_create_diag_parallel_matrix(HypreParVector& diag);
+mfem::HypreParMatrix *mbox_create_diag_parallel_matrix(mfem::HypreParVector& diag);
 
 /*! \brief Generates the negative of the inverse of the weighted l1-smoother.
 
@@ -1340,7 +1347,7 @@ HypreParMatrix *mbox_create_diag_parallel_matrix(HypreParVector& diag);
 
     \warning The returned matrix must be freed by the caller.
 */
-HypreParVector *mbox_build_Dinv_neg_parallel_matrix(HypreParMatrix& A);
+mfem::HypreParVector *mbox_build_Dinv_neg_parallel_matrix(mfem::HypreParMatrix& A);
 
 /*! \brief Makes a copy of a parallel vector.
 
@@ -1352,7 +1359,7 @@ HypreParVector *mbox_build_Dinv_neg_parallel_matrix(HypreParMatrix& A);
 
     \warning The returned vector must be freed by the caller.
 */
-HypreParVector *mbox_clone_parallel_vector(HypreParVector *v);
+mfem::HypreParVector *mbox_clone_parallel_vector(mfem::HypreParVector *v);
 
 /*! \brief Computes the Euclidean orthogonal projection.
 
@@ -1360,7 +1367,7 @@ HypreParVector *mbox_clone_parallel_vector(HypreParVector *v);
     \param v (IN/OUT) The vector to project as input, and the projection of the
                       vector as output.
 */
-void mbox_project_parallel(HypreParMatrix& interp, HypreParVector& v);
+void mbox_project_parallel(mfem::HypreParMatrix& interp, mfem::HypreParVector& v);
 
 /*! \brief Computes the A-orthogonal projection.
 
@@ -1371,8 +1378,8 @@ void mbox_project_parallel(HypreParMatrix& interp, HypreParVector& v);
 
     \returns The energy norm.
 */
-void mbox_project_parallel(HypreParMatrix& A, HypreParMatrix& interp,
-                           HypreParVector& v);
+void mbox_project_parallel(mfem::HypreParMatrix& A, mfem::HypreParMatrix& interp,
+                           mfem::HypreParVector& v);
 
 /* Inline Functions */
 /*! \brief A wrapper of \b mbox_orthogonalize for sparse \a D.
@@ -1394,9 +1401,9 @@ void mbox_project_parallel(HypreParMatrix& A, HypreParMatrix& interp,
              was introduced.
 */
 static inline
-bool mbox_orthogonalize_sparse(const Vector& x, const DenseMatrix& vects,
-                               const SparseMatrix& D, const SparseMatrix& A,
-                               double tol, DenseMatrix& orth_vects);
+bool mbox_orthogonalize_sparse(const mfem::Vector& x, const mfem::DenseMatrix& vects,
+                               const mfem::SparseMatrix& D, const mfem::SparseMatrix& A,
+                               double tol, mfem::DenseMatrix& orth_vects);
 
 /*! \brief A wrapper of \b mbox_orthogonalize for dense \a D.
 
@@ -1418,9 +1425,9 @@ bool mbox_orthogonalize_sparse(const Vector& x, const DenseMatrix& vects,
              was introduced.
 */
 static inline
-bool mbox_orthogonalize_dense(const Vector& x, const DenseMatrix& vects,
-                              const DenseMatrix& D, const DenseMatrix& A,
-                              double tol, DenseMatrix& orth_vects);
+bool mbox_orthogonalize_dense(const mfem::Vector& x, const mfem::DenseMatrix& vects,
+                              const mfem::DenseMatrix& D, const mfem::DenseMatrix& A,
+                              double tol, mfem::DenseMatrix& orth_vects);
 
 /*! \brief Returns the global size of a parallel vector.
 
@@ -1431,7 +1438,7 @@ bool mbox_orthogonalize_dense(const Vector& x, const DenseMatrix& vects,
     \returns The global size of the vector.
 */
 static inline
-int mbox_parallel_vector_size(HypreParVector &v);
+int mbox_parallel_vector_size(mfem::HypreParVector &v);
 
 /*! \brief Returns the number of rows in the current process.
 
@@ -1442,7 +1449,7 @@ int mbox_parallel_vector_size(HypreParVector &v);
     \returns See the description.
 */
 static inline
-int mbox_rows_in_current_process(HypreParMatrix& A);
+int mbox_rows_in_current_process(mfem::HypreParMatrix& A);
 
 /*! \brief Returns the number of columns in the current process.
 
@@ -1453,7 +1460,7 @@ int mbox_rows_in_current_process(HypreParMatrix& A);
     \returns See the description.
 */
 static inline
-int mbox_cols_in_current_process(HypreParMatrix& A);
+int mbox_cols_in_current_process(mfem::HypreParMatrix& A);
 
 /*! \brief Sets the vector as an owner of its local data.
 
@@ -1462,7 +1469,7 @@ int mbox_cols_in_current_process(HypreParMatrix& A);
     \param v (IN) The vector.
 */
 static inline
-void mbox_make_owner_data(HypreParVector &v);
+void mbox_make_owner_data(mfem::HypreParVector &v);
 
 /*! \brief Computes the dot product of two parallel vectors.
 
@@ -1474,7 +1481,7 @@ void mbox_make_owner_data(HypreParVector &v);
     \returns The dot product.
 */
 static inline
-double mbox_parallel_inner_product(HypreParVector &v1, HypreParVector &v2);
+double mbox_parallel_inner_product(mfem::HypreParVector &v1, mfem::HypreParVector &v2);
 
 /*! \brief Computes the energy inner product of two parallel vectors.
 
@@ -1485,8 +1492,8 @@ double mbox_parallel_inner_product(HypreParVector &v1, HypreParVector &v2);
     \returns The energy inner product product.
 */
 static inline
-double mbox_energy_inner_product_parallel(HypreParMatrix& A, HypreParVector& x,
-                                          HypreParVector& y);
+double mbox_energy_inner_product_parallel(mfem::HypreParMatrix& A, mfem::HypreParVector& x,
+                                          mfem::HypreParVector& y);
 
 /*! \brief Computes the energy norm of a parallel vector.
 
@@ -1496,7 +1503,7 @@ double mbox_energy_inner_product_parallel(HypreParMatrix& A, HypreParVector& x,
     \returns The energy norm.
 */
 static inline
-double mbox_energy_norm_parallel(HypreParMatrix& A, HypreParVector& x);
+double mbox_energy_norm_parallel(mfem::HypreParMatrix& A, mfem::HypreParVector& x);
 
 /*! \brief Allocates the memory in the vector using HYPRE allocations.
 
@@ -1509,62 +1516,67 @@ double mbox_energy_norm_parallel(HypreParMatrix& A, HypreParVector& x);
     \param size (IN) Desired vector size.
 */
 static inline
-void mbox_vector_initialize_for_hypre(Vector& v, int size);
+void mbox_vector_initialize_for_hypre(mfem::Vector& v, int size);
 
 /* Inline Functions Definitions */
 static inline
-bool mbox_orthogonalize_sparse(const Vector& x, const DenseMatrix& vects,
-                               const SparseMatrix& D, const SparseMatrix& A,
-                               double tol, DenseMatrix& orth_vects)
+bool mbox_orthogonalize_sparse(
+    const mfem::Vector& x, const mfem::DenseMatrix& vects,
+    const mfem::SparseMatrix& D, const mfem::SparseMatrix& A, double tol,
+    mfem::DenseMatrix& orth_vects)
 {
-    return mbox_orthogonalize(x, vects, D, A, tol, orth_vects,
-               (mbox_norm_ft)mbox_energy_norm_sparse,
-               (mbox_inner_prod_ft)mbox_energy_inner_prod_sparse);
+    return mbox_orthogonalize(
+        x, vects, D, A, tol, orth_vects,
+        (mbox_norm_ft)mbox_energy_norm_sparse,
+        (mbox_inner_prod_ft)mbox_energy_inner_prod_sparse);
 }
 
 static inline
-bool mbox_orthogonalize_dense(const Vector& x, const DenseMatrix& vects,
-                              const DenseMatrix& D, const DenseMatrix& A,
-                              double tol, DenseMatrix& orth_vects)
+bool mbox_orthogonalize_dense(
+    const mfem::Vector& x, const mfem::DenseMatrix& vects,
+    const mfem::DenseMatrix& D, const mfem::DenseMatrix& A, double tol,
+    mfem::DenseMatrix& orth_vects)
 {
-    return mbox_orthogonalize(x, vects, D, A, tol, orth_vects,
-               (mbox_norm_ft)mbox_energy_norm_dense,
-               (mbox_inner_prod_ft)mbox_energy_inner_prod_dense);
+    return mbox_orthogonalize(
+        x, vects, D, A, tol, orth_vects,
+        (mbox_norm_ft)mbox_energy_norm_dense,
+        (mbox_inner_prod_ft)mbox_energy_inner_prod_dense);
 }
 
 static inline
-int mbox_parallel_vector_size(HypreParVector &v)
-{
-    return hypre_ParVectorGlobalSize((hypre_ParVector *)v);
-}
-
-static inline
-int mbox_parallel_vector_size(const HypreParVector &v)
+int mbox_parallel_vector_size(mfem::HypreParVector &v)
 {
     return hypre_ParVectorGlobalSize((hypre_ParVector *)v);
 }
 
 static inline
-int mbox_rows_in_current_process(HypreParMatrix& A)
+int mbox_parallel_vector_size(const mfem::HypreParVector &v)
+{
+    return hypre_ParVectorGlobalSize((hypre_ParVector *)v);
+}
+
+static inline
+int mbox_rows_in_current_process(mfem::HypreParMatrix& A)
 {
     return A.RowPart()[1] - A.RowPart()[0];
 }
 
 static inline
-int mbox_cols_in_current_process(HypreParMatrix& A)
+int mbox_cols_in_current_process(mfem::HypreParMatrix& A)
 {
     return A.ColPart()[1] - A.ColPart()[0];
 }
 
 static inline
-void mbox_make_owner_data(HypreParVector &v)
+void mbox_make_owner_data(mfem::HypreParVector &v)
 {
     hypre_SeqVectorSetDataOwner(hypre_ParVectorLocalVector((hypre_ParVector *)
                                                            v), 1);
 }
 
 static inline
-double mbox_parallel_inner_product(HypreParVector &v1, HypreParVector &v2)
+double mbox_parallel_inner_product(
+    mfem::HypreParVector &v1, mfem::HypreParVector &v2)
 {
     SA_ASSERT(mbox_parallel_vector_size(v1) == mbox_parallel_vector_size(v2));
     return hypre_ParVectorInnerProd((hypre_ParVector *)v1,
@@ -1572,29 +1584,33 @@ double mbox_parallel_inner_product(HypreParVector &v1, HypreParVector &v2)
 }
 
 static inline
-double mbox_energy_inner_product_parallel(HypreParMatrix& A, HypreParVector& x,
-                                          HypreParVector& y)
+double mbox_energy_inner_product_parallel(
+    mfem::HypreParMatrix& A, mfem::HypreParVector& x,
+    mfem::HypreParVector& y)
 {
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
-    Vector tmp(x.Size());
+    mfem::Vector tmp(x.Size());
     A.Mult(x, tmp);
-    HypreParVector TMP(PROC_COMM, A.GetGlobalNumRows(), tmp.GetData(),
+    mfem::HypreParVector TMP(PROC_COMM, A.GetGlobalNumRows(), tmp.GetData(),
                        A.GetRowStarts());
     return mbox_parallel_inner_product(TMP, y);
 }
 
 static inline
-double mbox_energy_norm_parallel(HypreParMatrix& A, HypreParVector& x)
+double mbox_energy_norm_parallel(
+    mfem::HypreParMatrix& A, mfem::HypreParVector& x)
 {
     return sqrt(mbox_energy_inner_product_parallel(A, x, x));
 }
 
 static inline
-void mbox_vector_initialize_for_hypre(Vector& v, int size)
+void mbox_vector_initialize_for_hypre(mfem::Vector& v, int size)
 {
     SA_ASSERT(size >= 0);
     v.Destroy();
     v.SetDataAndSize(hypre_CTAlloc(double, size), size);
 }
+
+} // namespace saamge
 
 #endif // _MBOX_HPP

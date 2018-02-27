@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,7 +41,9 @@
 #include "elmat.hpp"
 #include "mbox.hpp"
 
-using namespace mfem;
+// arguably this should be a different namespace?
+namespace saamge
+{
 
 /* Types */
 /*! \brief A coefficient function type.
@@ -61,9 +63,11 @@ using namespace mfem;
              elements but now it's not limited to only that case.
     \warning Of course, MFEM can take any kind of coefficients to be used as
              \f$k\f$ and they are not necessary based on this function type.
+
+    DEPRECATED - do not think this is ever used
 */
-typedef double (*mfem_ew_ft)(ElementTransformation& T,
-                             Vector& x, Mesh& mesh, double param);
+typedef double (*mfem_ew_ft)(mfem::ElementTransformation& T,
+                             mfem::Vector& x, mfem::Mesh& mesh, double param);
 
 /*! \brief A function type for the right-hand side.
 
@@ -76,13 +80,17 @@ typedef double (*mfem_ew_ft)(ElementTransformation& T,
     \param param (IN) Function-specific parameter.
 
     \returns The value of the right-hand side function in \a x.
+
+    DEPRECATED - do not think this is ever used
 */
-typedef double (*mfem_bdr_rhs_ft)(const Vector& x, int attr, double param);
+typedef double (*mfem_bdr_rhs_ft)(const mfem::Vector& x, int attr, double param);
 
 /* Classes */
 /*! \brief Adapts \b mfem_ew_ft coefficients to be usable as MFEM coefficients.
+
+DEPRECATED - do not think this is ever used
 */
-class ElementWiseCoefficient : public Coefficient
+class ElementWiseCoefficient : public mfem::Coefficient
 {
 public:
     /*! \brief The constructor.
@@ -92,7 +100,7 @@ public:
         \param mesh (IN) The mesh.
         \param given_param (IN) Function-specific parameter.
     */
-    ElementWiseCoefficient(mfem_ew_ft function, Mesh &given_mesh,
+    ElementWiseCoefficient(mfem_ew_ft function, mfem::Mesh &given_mesh,
                            double given_param/*=0.*/) :
         func(function), mesh(given_mesh), param(given_param)
     {
@@ -105,8 +113,8 @@ public:
 
         \returns The value of the coefficient.
     */
-    virtual double Eval(ElementTransformation& T,
-                        const IntegrationPoint& ip);
+    virtual double Eval(mfem::ElementTransformation& T,
+                        const mfem::IntegrationPoint& ip);
 
     /*! \brief Not used.
 
@@ -119,16 +127,18 @@ public:
 private:
     mfem_ew_ft func; /*!< The coefficient of type \b mfem_ew_ft that is getting
                           adapted to be usable as MFEM coefficient. */
-    Mesh& mesh; /*!< The mesh. */
-    Vector transip; /*!< For inner use. */
+    mfem::Mesh& mesh; /*!< The mesh. */
+    mfem::Vector transip; /*!< For inner use. */
     double param; /*!< Function-specific parameter. */
 };
 
 /*! \brief Wraps \b mfem_bdr_rhs_ft coefficients as MFEM coefficients.
 
     Wraps \b mfem_bdr_rhs_ft coefficients to be usable as MFEM coefficients.
+
+    DEPRECATED - do not think this is ever used
 */
-class BdrRhsCoefficient : public Coefficient
+class BdrRhsCoefficient : public mfem::Coefficient
 {
 public:
     /*! \brief The constructor.
@@ -139,7 +149,7 @@ public:
         \param bdr (IN) \em true if this is a boundary condition.
         \param given_param (IN) Function-specific parameter.
     */
-    BdrRhsCoefficient(mfem_bdr_rhs_ft function, Mesh &given_mesh, bool bdr,
+    BdrRhsCoefficient(mfem_bdr_rhs_ft function, mfem::Mesh &given_mesh, bool bdr,
                       double given_param/*=0.*/) :
         func(function), mesh(given_mesh), border(bdr), param(given_param)
     {
@@ -152,8 +162,8 @@ public:
 
         \returns The value of the coefficient.
     */
-    virtual double Eval(ElementTransformation& T,
-                        const IntegrationPoint& ip);
+    virtual double Eval(mfem::ElementTransformation& T,
+                        const mfem::IntegrationPoint& ip);
 
     /*! \brief Not used.
 
@@ -167,8 +177,8 @@ private:
     mfem_bdr_rhs_ft func; /*!< The coefficient of type \b mfem_bdr_rhs_ft that
                                is getting adapted to be usable as MFEM
                                coefficient. */
-    Mesh& mesh; /*!< The mesh. */
-    Vector transip; /*!< For inner use. */
+    mfem::Mesh& mesh; /*!< The mesh. */
+    mfem::Vector transip; /*!< For inner use. */
     bool border; /*!< If it is a boundary condition. */
     double param; /*!< Function-specific parameter. */
 };
@@ -177,9 +187,9 @@ private:
 
     Wraps \b smpr_ft preconditioners to be usable as MFEM preconditioners.
 
-    DEPRECATED
+    DEPRECATED, but want to resurrect and use it exclusively?
 */
-class CFunctionSmoother : public Operator
+class CFunctionSmoother : public mfem::Operator
 {
 public:
     /*! \brief The constructor.
@@ -190,8 +200,8 @@ public:
                               preconditioner.
         \param dataa (IN/OUT) The smoother-specific data.
     */
-    CFunctionSmoother(HypreParMatrix& A, smpr_ft smoothera, void *dataa) :
-        Operator(A.GetGlobalNumRows()), mat(A), smoother(smoothera),
+    CFunctionSmoother(mfem::HypreParMatrix& A, smpr_ft smoothera, void *dataa) :
+        mfem::Operator(A.GetGlobalNumRows()), mat(A), smoother(smoothera),
         data(dataa)
     {
     }
@@ -210,14 +220,14 @@ public:
         \param x (IN) The vector to be smoothed.
         \param y (OUT) The smoothed vector.
     */
-    virtual void Mult(const Vector& x, Vector& y) const
+    virtual void Mult(const mfem::Vector& x, mfem::Vector& y) const
     {
         y = 0.;
         smoother(mat, x, y, data);
     }
 
 private:
-    HypreParMatrix& mat; /*!< The operator which we precondition. */
+    mfem::HypreParMatrix& mat; /*!< The operator which we precondition. */
     smpr_ft smoother; /*!< The smoother of type \b smpr_ft that is getting
                            adapted to be usable as MFEM smoother
                            (preconditioner). */
@@ -229,17 +239,19 @@ private:
 
     \param mesh (IN) The mesh.
     \param elem_to_vert (OUT) The constructed relation.
+
+    DEPRECATED - never used
 */
-void construct_elem_to_vert(Mesh& mesh, Table& elem_to_vert);
+void construct_elem_to_vert(mfem::Mesh& mesh, mfem::Table& elem_to_vert);
 
 /**
-   Returns a pointer to a HypreParMatrix on one processor that
+   Returns a pointer to a mfem::HypreParMatrix on one processor that
    is the same as A.
 
    SparseMatrix A owns the data, so if you delete it the
    returned HypreParMatrix is SOL.
 */
-HypreParMatrix * FakeParallelMatrix(const SparseMatrix *A);
+mfem::HypreParMatrix * FakeParallelMatrix(const mfem::SparseMatrix *A);
 
 /*! \brief PCG solver.
 
@@ -261,16 +273,18 @@ HypreParMatrix * FakeParallelMatrix(const SparseMatrix *A);
     \returns The number of iterations done. If a solution was not successfully
              computed, then this number is negative.
 */
-int kalchev_pcg(const HypreParMatrix &A, const Operator &B, const HypreParVector &b,
-                HypreParVector &x, int print_iter/*=0*/, int max_num_iter/*=1000*/, double RTOLERANCE/*=10e-12*/,
+int kalchev_pcg(const mfem::HypreParMatrix &A, const mfem::Operator &B, const mfem::HypreParVector &b,
+                mfem::HypreParVector &x, int print_iter/*=0*/, int max_num_iter/*=1000*/, double RTOLERANCE/*=10e-12*/,
                 double ATOLERANCE/*=10e-24*/, bool zero_rhs/*=false*/);
 
-SparseMatrix * IdentitySparseMatrix(int n);
+mfem::SparseMatrix * IdentitySparseMatrix(int n);
 
-Table * TableFromSparseMatrix(const SparseMatrix& A);
+mfem::Table * TableFromSparseMatrix(const mfem::SparseMatrix& A);
 
 /*! \brief Makes an mfem::Table of size n that is the identity permutation
  */
-Table * IdentityTable(int n);
+mfem::Table * IdentityTable(int n);
+
+} // namespace saamge
 
 #endif // _MFEM_ADDONS_HPP

@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -40,7 +40,8 @@
 
 #include <mpi.h>
 
-using namespace mfem;
+namespace saamge
+{
 
 class InversePermeabilityFunction
 {
@@ -54,7 +55,8 @@ public:
 
     static void ReadPermeabilityFile(const std::string fileName);
     static void ReadPermeabilityFile(const std::string fileName, MPI_Comm comm);
-    static void SetConstantInversePermeability(double ipx, double ipy, double ipz);
+    static void SetConstantInversePermeability(
+        double ipx, double ipy, double ipz);
 
     template<class F>
     static void Transform(const F & f)
@@ -63,19 +65,21 @@ public:
             inversePermeability[i] = f(inversePermeability[i]);
     }
 
-    static void InversePermeability(const Vector & x, Vector & val);
-    static void PermeabilityTensor(const Vector & x, DenseMatrix & val);
-    static double PermeabilityXY(Vector &x);
-    static void NegativeInversePermeability(const Vector & x, Vector & val);
-    static void Permeability(const Vector & x, Vector & val);
+    static void InversePermeability(const mfem::Vector & x, mfem::Vector & val);
+    static void PermeabilityTensor(
+        const mfem::Vector & x, mfem::DenseMatrix & val);
+    static double PermeabilityXY(mfem::Vector &x);
+    static void NegativeInversePermeability(
+        const mfem::Vector & x, mfem::Vector & val);
+    static void Permeability(const mfem::Vector & x, mfem::Vector & val);
 
-    static double Norm2InversePermeability(const Vector & x);
-    static double Norm1InversePermeability(const Vector & x);
-    static double NormInfInversePermeability(const Vector & x);
+    static double Norm2InversePermeability(const mfem::Vector & x);
+    static double Norm1InversePermeability(const mfem::Vector & x);
+    static double NormInfInversePermeability(const mfem::Vector & x);
 
-    static double InvNorm2(const Vector & x);
-    static double InvNorm1(const Vector & x);
-    static double InvNormInf(const Vector & x);
+    static double InvNorm2(const mfem::Vector & x);
+    static double InvNorm1(const mfem::Vector & x);
+    static double InvNormInf(const mfem::Vector & x);
 
     static void ClearMemory();
 
@@ -91,5 +95,7 @@ private:
     static SliceOrientation orientation;
     static int npos;
 };
+
+}
 
 #endif /* INVERSEPERMEABILITYFUNCTION_HPP_ */

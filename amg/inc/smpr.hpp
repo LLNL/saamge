@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,7 +38,8 @@
 #include <mfem.hpp>
 #include "mbox.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Types */
 /*! \brief A function type for a smoother/preconditioner.
@@ -47,12 +48,15 @@ using namespace mfem;
     is the smoother/preconditioner.
     \a x is the initial guess as an input and the next iterate as an output.
 
+    possibilities here: smpr_sym_poly() [only one used]
+                        smpr_gauss_seidel() [not used]
+
     \param A (IN) The matrix.
     \param b (IN) The right-hand side.
     \param x (IN/OUT) \f$\mathbf{x} += M^{-1}(\mathbf{b} - A\mathbf{x})\f$.
     \param data (IN/OUT) Smoother/preconditioner-specific data.
 */
-typedef void (*smpr_ft)(HypreParMatrix& A, const Vector& b, Vector& x,
+typedef void (*smpr_ft)(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x,
                         void *data);
 
 /*! \brief Computes roots for a polynomial smoother.
@@ -86,7 +90,7 @@ typedef struct {
     int nu; /*!< The used nu */
     int degree; /*!< The degree of the polynomial (first) */
     const double *roots; /*!< The roots of the polynomial (first) */
-    HypreParVector *Dinv_neg; /*!< This is \f$-D^{-1}\f$ in the smoother
+    mfem::HypreParVector *Dinv_neg; /*!< This is \f$-D^{-1}\f$ in the smoother
                                  \f$M^{-1} = \left[ I - p\left( D^{-1}A \right) \right] A^{-1}\f$,
                                  where p is the polynomial given by \a roots
                                  and \a degree.
@@ -94,8 +98,6 @@ typedef struct {
                                       above, D needs to be spectrally
                                       equivalent to the diagonal of A and also
                                       v' A v <= v' D v. */
-    mbox_snd_vec_from_mat_par_ft build_Dinv_neg; /*!< The -D^{-1} construction
-                                                      method. */
 
     double weightfirst; /*!< The weight of the first polynomial (if needed) */
     int degree2; /*!< The degree of the second polynomial (if needed) */
@@ -104,43 +106,6 @@ typedef struct {
     double param; /*!< A real (double) parameter (polynomial smoother
                        specific) */
 } smpr_poly_data_t;
-
-/* Options */
-
-/*! \brief The configuration class of this module.
-*/
-CONFIG_BEGIN_CLASS_DECLARATION(SMPR)
-
-    /*! The -D^{-1} construction method.
-
-        \warning Have in mind that usually D needs to be spectrally equivalent
-                 to the diagonal of the stiffness matrix and also
-                 v' A v <= v' D v.
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(mbox_snd_vec_from_mat_par_ft, build_Dinv_neg);
-
-    /*! The polynomial smoother to be generated during initialization.
-
-        This smoother is used for relaxation.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(smpr_poly_t, smpr_poly);
-
-CONFIG_END_CLASS_DECLARATION(SMPR)
-
-CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(SMPR)
-    CONFIG_DEFINE_OPTION_DEFAULT(build_Dinv_neg,
-                                 mbox_build_Dinv_neg_parallel_matrix),
-    CONFIG_DEFINE_OPTION_DEFAULT(smpr_poly, SMPR_POLY_SAS)
-CONFIG_END_CLASS_DEFAULTS
 
 /* Functions */
 /*! \brief Computes appropriate \em nu from \a a.
@@ -179,7 +144,9 @@ double smpr_cheb_firstkind(int n, double x);
     \param x (IN/OUT) \f$\mathbf{x} += M^{-1}(\mathbf{b} - A\mathbf{x})\f$.
     \param data (IN) Must be of type \b smpr_poly_data_t.
 */
-void smpr_sym_poly(HypreParMatrix& A, const Vector& b, Vector& x, void *data);
+void smpr_sym_poly(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
+
+void smpr_gauss_seidel(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
 
 /*! \brief The two-grid SA-\f$\rho\f$AMGe is used as a preconditioner.
 
@@ -197,7 +164,7 @@ void smpr_sym_poly(HypreParMatrix& A, const Vector& b, Vector& x, void *data);
 
     DEPRECATED
 */
-void smpr_tg(HypreParMatrix& A, const Vector& b, Vector& x, void *data);
+void smpr_tg(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
 
 /*! \brief Computes roots for the polynomial smoother.
 
@@ -271,7 +238,7 @@ void smpr_invx_poly_init(int nu, double a, smpr_poly_data_t *poly_data);
 
     \warning The returned vector must NOT be freed by the caller.
 */
-HypreParVector *smpr_update_Dinv_neg(HypreParMatrix& A,
+mfem::HypreParVector *smpr_update_Dinv_neg(mfem::HypreParMatrix& A,
                                      smpr_poly_data_t *poly_data);
 
 /*! \brief Creates and initializes the polynomial smoother data.
@@ -286,9 +253,8 @@ HypreParVector *smpr_update_Dinv_neg(HypreParMatrix& A,
              \b smpr_free_poly_data.
     \warning It uses the option \b smpr_poly to determine the type of the
              polynomial smoother for relaxation.
-    \warning It uses the option \b build_Dinv_neg.
 */
-smpr_poly_data_t *smpr_init_poly_data(HypreParMatrix& A, int nu, double param);
+smpr_poly_data_t *smpr_init_poly_data(mfem::HypreParMatrix& A, int nu, double param);
 
 /*! \brief Frees the structure for the polynomial smoother.
 
@@ -319,7 +285,7 @@ smpr_poly_data_t *smpr_copy_poly_data(const smpr_poly_data_t *src);
     \warning The returned vector must NOT be freed by the caller.
 */
 static inline
-HypreParVector *smpr_get_Dinv_neg(const smpr_poly_data_t *poly_data);
+mfem::HypreParVector *smpr_get_Dinv_neg(const smpr_poly_data_t *poly_data);
 
 /*! \brief Computes a polynomial smoother.
 
@@ -339,28 +305,28 @@ HypreParVector *smpr_get_Dinv_neg(const smpr_poly_data_t *poly_data);
     \warning Works only with "diagonal" \a Dinv_neg.
 */
 static inline
-void smpr_compute_poly(HypreParMatrix& A, const Vector& b, Vector& x,
+void smpr_compute_poly(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x,
                        int degree, const double *roots,
-                       HypreParVector *Dinv_neg);
+                       mfem::HypreParVector *Dinv_neg);
 
 /* Inline Functions Definitions */
 static inline
-HypreParVector *smpr_get_Dinv_neg(const smpr_poly_data_t *poly_data)
+mfem::HypreParVector *smpr_get_Dinv_neg(const smpr_poly_data_t *poly_data)
 {
      return poly_data->Dinv_neg;
 }
 
 static inline
-void smpr_compute_poly(HypreParMatrix& A, const Vector& b, Vector& x,
+void smpr_compute_poly(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x,
                        int degree, const double *roots,
-                       HypreParVector *Dinv_neg)
+                       mfem::HypreParVector *Dinv_neg)
 {
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
     SA_ASSERT(A.GetGlobalNumRows() == mbox_parallel_vector_size(*Dinv_neg));
     SA_ASSERT(degree >= 0);
 
-    Vector tmp(b.Size());
-    Vector tmp1(b.Size());
+    mfem::Vector tmp(b.Size());
+    mfem::Vector tmp1(b.Size());
     for (int i=0; i < degree; ++i)
     {
         const double mult = 1. / roots[i];
@@ -371,5 +337,7 @@ void smpr_compute_poly(HypreParMatrix& A, const Vector& b, Vector& x,
         x.Add(mult, tmp);
     }
 }
+
+} // namespace saamge
 
 #endif // _SMPR_HPP

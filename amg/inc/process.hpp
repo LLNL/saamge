@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,26 +41,25 @@
 #include "config_mgr.hpp"
 using std::stringstream;
 using std::string;
-using namespace mfem;
 
 /* Defines */
 /*! \brief Returns the rank of the current process.
 */
-#define PROC_RANK           ((const int)proc_info.rank)
+#define PROC_RANK           ((const int) saamge::proc_info.rank)
 
 /*! \brief Returns the total number of processes.
 */
-#define PROC_NUM           ((const int)proc_info.procs_num)
+#define PROC_NUM           ((const int) saamge::proc_info.procs_num)
 
 /*! \brief Returns the communicator.
 */
-#define PROC_COMM           ((const MPI_Comm)proc_info.comm)
+#define PROC_COMM           ((const MPI_Comm) saamge::proc_info.comm)
 
 /*! \brief Aborts the process and the group
 
     \param err (IN) Error code.
 */
-#define PROC_ABORT(err)     MPI_Abort(proc_info.comm, (err))
+#define PROC_ABORT(err)     MPI_Abort(saamge::proc_info.comm, (err))
 
 /*! \brief Clears the content of \b PROC_STR_STREAM.
 */
@@ -69,6 +68,9 @@ using namespace mfem;
         PROC_STR_STREAM.str(string()); \
         PROC_STR_STREAM.clear(); \
     } while(0)
+
+namespace saamge
+{
 
 /* Types */
 /*! \brief Structure containing process information.
@@ -100,7 +102,7 @@ void proc_init(MPI_Comm comm);
     \param my_size (IN) How many entities the current process has.
     \param offsets (OUT) Offsets on all processes in global entities numbering.
 */
-void proc_allgather_offsets(int my_size, Array<int>& offsets);
+void proc_allgather_offsets(int my_size, mfem::Array<int>& offsets);
 
 /*! \brief Returns non-global offsets for all processes.
 
@@ -108,6 +110,8 @@ void proc_allgather_offsets(int my_size, Array<int>& offsets);
   \param offsets (OUT) size 2, offsets of current process in global numbering
   \param total (OUT) total number of entities
 */
-void proc_determine_offsets(int my_size, Array<int>& offsets, int& total);
+void proc_determine_offsets(int my_size, mfem::Array<int>& offsets, int& total);
+
+} // namespace saamge
 
 #endif // _PROCESS_HPP

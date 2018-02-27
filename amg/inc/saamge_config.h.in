@@ -1,6 +1,4 @@
-/*! \file
-    \brief The main header file for the library user.
-
+/*! 
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
@@ -30,30 +28,9 @@
     <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
-#ifndef _SAAMGE_HPP
-#define _SAAMGE_HPP
+#ifndef __SAAMGE_CONFIG_H
+#define __SAAMGE_CONFIG_H
 
-#include <common.hpp>
-#include <adapt.hpp>
-#include <aggregates.hpp>
-#include <arpacks.hpp>
-#include <contrib.hpp>
-#include <elmat.hpp>
-#include <fem.hpp>
-#include <helpers.hpp>
-#include <interp.hpp>
-#include <levels.hpp>
-#include <mbox.hpp>
-#include <ml.hpp>
-#include <mfem_addons.hpp>
-#include <part.hpp>
-#include <process.hpp>
-#include <smpr.hpp>
-#include <solve.hpp>
-#include <spectral.hpp>
-#include <tg.hpp>
-#include <xpacks.hpp>
-#include <DoubleCycle.hpp>
+#define SAAMGE_USE_ARPACK @saamge_USE_ARPACK@
 
-#endif // _SAAMGE_HPP
+#endif

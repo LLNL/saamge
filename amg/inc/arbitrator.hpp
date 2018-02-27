@@ -5,7 +5,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,6 +38,9 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include "aggregates.hpp"
+
+namespace saamge
+{
 
 /**
    Arbitration is neither mandatory (you can use MISes if you want)
@@ -82,7 +85,7 @@ private:
     const int nparts;
     const int num_dof; // not num_truedof
 
-    Vector local_diag; // diagonal entries of local (diagonal...) matrix
+    mfem::Vector local_diag; // diagonal entries of local (diagonal...) matrix
 
     // utility Hypre pointers, do not free
     hypre_CSRMatrix * dof_truedof_diag;
@@ -90,5 +93,7 @@ private:
     // transposed matrix, free at destructor
     hypre_CSRMatrix * truedof_dof_diag;
 };
+
+}
 
 #endif

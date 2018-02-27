@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,9 +37,11 @@
 #include "common.hpp"
 #include "smpr.hpp"
 #include "tg_data.hpp"
+#include "ml.hpp"
 #include <mfem.hpp>
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Types */
 
@@ -55,15 +57,15 @@ using namespace mfem;
 class CorrectNullspace : public mfem::Solver
 {
 public:
-    CorrectNullspace(HypreParMatrix& A,
-                     HypreParMatrix * interp,
+    CorrectNullspace(mfem::HypreParMatrix& A,
+                     mfem::HypreParMatrix * interp,
                      int smoother_steps,
                      bool smooth_phat,
                      bool v_cycle,
                      bool iterative_mode);
     ~CorrectNullspace();
-    virtual void SetOperator(const Operator &op);
-    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void SetOperator(const mfem::Operator &op);
+    virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
 private:
     int smoother_steps; // two purposes: if use_hypre_smoother, gives number of GS steps,
                         // otherwise, gives nu (which is more like degree than steps) for Delyan's Chebyshev smoother
@@ -74,12 +76,12 @@ private:
     smpr_ft smoother;
     void * smoother_data;
 
-    HypreParMatrix * A;
-    HypreParMatrix * Ac; // this is matrix at nulspace level
-    HypreParMatrix * interp;
-    HypreParMatrix * restr;
+    mfem::HypreParMatrix * A;
+    mfem::HypreParMatrix * Ac; // this is matrix at nulspace level
+    mfem::HypreParMatrix * interp;
+    mfem::HypreParMatrix * restr;
 
-    Solver * correct_nullspace_coarse;
+    mfem::Solver * correct_nullspace_coarse;
 
     int spectral_cycles; // only makes sense without --spectral-cg option
     int cumulative_spectral_cg; // only makes sense with --spectral-cg option
@@ -87,7 +89,9 @@ private:
 };
 
 /**
-   This solves with Hypre CG preconditioned with Hypre BoomerAMG
+   @brief Solves with Hypre CG preconditioned with Hypre BoomerAMG
+
+   That is, no spectral method at all, for use in comparisons etc.
 
    In many places I am moving away from HyprePCG, towards
    mfem::CGSolver because the latter allows more flexible 
@@ -100,57 +104,81 @@ private:
 class AMGSolver : public mfem::Solver
 {
 public:
-    AMGSolver(HypreParMatrix& A, bool iterative_mode);
+    AMGSolver(mfem::HypreParMatrix& A, bool iterative_mode);
     ~AMGSolver();
-    virtual void SetOperator(const Operator &op) {};
-    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void SetOperator(const mfem::Operator &op) {};
+    virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
+    void SetRelTol(double rtol) { rel_tol = rtol; }
 private:
-    HypreSolver *amg; /*!< AMG preconditioner. */
-    HyprePCG *pcg; /*!< PCG solver. */
+    mfem::HypreSolver *amg; /*!< AMG preconditioner. */
+    mfem::HyprePCG *pcg; /*!< PCG solver. */
+    double rel_tol;
     mutable int cumulative_iterations; 
-    int ref_cntr; /*!< Reference counter. */
+    int ref_cntr; /*!< Reference counter. @todo remove */
+    double iters_coeff; /*!< multiply by matrix size for max iterations */
 };
 
 /**
-   this class intended to replace solve_spd_Vcycle() as a solve_t
+   @brief Does a V-cycle with the given tg_data struct
+
+   Basically a wrapper for the C-struct as we move to being a bit
+   more C++-like.
+
+   Replaces solve_spd_Vcycle()
 */
 class VCycleSolver : public mfem::Solver
 {
 public:
     VCycleSolver(tg_data_t * tg_data, bool iterative_mode);
     ~VCycleSolver();
-    virtual void SetOperator(const Operator &op);
-    virtual void Mult(const Vector &x, Vector &y) const;
+    virtual void SetOperator(const mfem::Operator &op);
+    virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
 private:
     tg_data_t * tg_data;
-    HypreParMatrix * A;
+    mfem::HypreParMatrix * A;
 };
 
+/**
+   @brief Encapsulates and wraps the spectral smoothed aggregation
+   spectral element AMG solver in a user-friendly way.
 
-/* Options */
-
-/*! \brief The configuration class of this module.
+   @param polynomial_coarse is here to allow user to specify that we
+          should add rigid body modes for elasticity, in which case you
+          set it to 1, otherwise -1 is probably best.
 */
-CONFIG_BEGIN_CLASS_DECLARATION(SOLVE)
+class SpectralAMGSolver : public mfem::Solver
+{
+public:
+    /**
+       ess_bdr is the first argument to fes.GetEssentialVDofs():
+         fes.GetEssentialVDofs(*ess_bdr, ess_dofs);
+       ie, ess_bdr has length (number of attributes) and is nonzero
+       for boundary attributes that are essential
+    */
+    SpectralAMGSolver(mfem::HypreParMatrix& Ag,
+                      mfem::ParBilinearForm& aform,
+                      mfem::SparseMatrix& Alocal,
+                      mfem::Array<int>& ess_bdr,
+                      int elems_per_agg, int num_levels,
+                      int nu_pro, int nu_relax, double theta,
+                      int polynomial_coarse, bool coarse_direct);
+    ~SpectralAMGSolver();
 
-    /*! The absolute tolerance for the solve procedures. */
-    CONFIG_DECLARE_OPTION(double, atol);
+    /// Solver interface
+    void SetOperator(const mfem::Operator &op);
 
-    /*! The relative tolerance for the solve procedures. */
-    CONFIG_DECLARE_OPTION(double, rtol);
+    /// Operator interface
+    void Mult(const mfem::Vector &x, mfem::Vector &y) const;
 
-    /*! The coefficient for the maximal number of iterations. This coefficient
-        is multiplied to the size of the matrix to determine the desired number
-        of iterations. */
-    CONFIG_DECLARE_OPTION(double, iters_coeff);
+private:
+    mfem::HypreParMatrix& Ag_;
 
-CONFIG_END_CLASS_DECLARATION(SOLVE)
+    int* nparts_arr_;
+    agg_partitioning_relations_t* agg_part_rels_;
+    ml_data_t* ml_data_;
 
-CONFIG_BEGIN_INLINE_CLASS_DEFAULTS(SOLVE)
-    CONFIG_DEFINE_OPTION_DEFAULT(atol, 0.),
-    CONFIG_DEFINE_OPTION_DEFAULT(rtol, 1e-12),
-    CONFIG_DEFINE_OPTION_DEFAULT(iters_coeff, 10.)
-CONFIG_END_CLASS_DEFAULTS
+    VCycleSolver* v_cycle_;
+};
 
 /* Functions */
 /*! \brief Empty coarse solver.
@@ -162,8 +190,9 @@ CONFIG_END_CLASS_DEFAULTS
     \param x (OUT) The approximated solution.
     \param data (IN/OUT) Not used.
 */
-void solve_empty(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
-                 void *data);
+void solve_empty(
+    mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+    mfem::HypreParVector& x, void *data);
 
 /*! \brief Inexact coarse solve by a TG(or V)-cycle.
 
@@ -177,10 +206,13 @@ void solve_empty(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
     \warning The coarse matrix (\b Ac) in \a data must be already computed.
              This function does not produce the coarse operator.
 */
-void solve_spd_Vcycle(HypreParMatrix& A, const HypreParVector& b, HypreParVector& x,
-                      void *data);
-void solve_spd_Wcycle(HypreParMatrix& A, const HypreParVector& b, HypreParVector& x,
-                      void *data);
+void solve_spd_Vcycle(
+    mfem::HypreParMatrix& A, const mfem::HypreParVector& b,
+    mfem::HypreParVector& x, void *data);
+void solve_spd_Wcycle(
+    mfem::HypreParMatrix& A, const mfem::HypreParVector& b,
+    mfem::HypreParVector& x, void *data);
 
+} // namespace saamge
 
 #endif // _SOLVE_HPP

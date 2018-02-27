@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -36,6 +36,9 @@
 
 #include "common.hpp"
 #include <mfem.hpp>
+
+namespace saamge
+{
 
 /* Functions */
 
@@ -70,7 +73,7 @@ int *part_generate_partitioning(const mfem::Table& graph, int *weights, int *par
 
     See part_generate_partitioning()
 */
-int *part_generate_partitioning_unweighted(const Table& graph, int *parts);
+int *part_generate_partitioning_unweighted(const mfem::Table& graph, int *parts);
 
 /*! \brief Checks the integrity of the partitioning.
 
@@ -82,5 +85,7 @@ int *part_generate_partitioning_unweighted(const Table& graph, int *parts);
     DEPRECATED
 */
 void part_check_partitioning(const mfem::Table& graph, const int *partitioning);
+
+}
 
 #endif // _PART_HPP

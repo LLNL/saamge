@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -37,7 +37,8 @@
 #include "common.hpp"
 #include <mfem.hpp>
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Functions */
 /*! \brief Computes the inverse of an s.p.d. dense matrix.
@@ -45,7 +46,7 @@ using namespace mfem;
     \param Ain (IN) The s.p.d. matrix to be inverted.
     \param invA (OUT) The inverse matrix.
 */
-void xpacks_calc_spd_inverse_dense(const DenseMatrix& Ain, DenseMatrix& invA);
+void xpacks_calc_spd_inverse_dense(const mfem::DenseMatrix& Ain, mfem::DenseMatrix& invA);
 
 /*! \brief Computes all eigenpairs of a dense matrix.
 
@@ -58,8 +59,8 @@ void xpacks_calc_spd_inverse_dense(const DenseMatrix& Ain, DenseMatrix& invA);
 
     \warning A is symmetric.
 */
-void xpacks_calc_all_eigens_dense(const DenseMatrix& Ain, Vector& evals,
-                                  DenseMatrix& evects);
+void xpacks_calc_all_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector& evals,
+                                  mfem::DenseMatrix& evects);
 
 /*! \brief "Fixes" a symmetric positive semi-definite matrix.
 
@@ -74,7 +75,7 @@ void xpacks_calc_all_eigens_dense(const DenseMatrix& Ain, Vector& evals,
              least one eigenvalue was negative and an actual "fixing" procedure
              was performed.
 */
-bool xpacks_fix_spsd_dense(DenseMatrix& A);
+bool xpacks_fix_spsd_dense(mfem::DenseMatrix& A);
 
 /*! \brief Computes all (generalized) eigenpairs of dense matrices.
 
@@ -88,9 +89,9 @@ bool xpacks_fix_spsd_dense(DenseMatrix& A);
 
     \warning A is symmetric and B is s.p.d.
 */
-void xpacks_calc_all_gen_eigens_dense(const DenseMatrix& Ain, Vector& evals,
-                                      DenseMatrix& evects,
-                                      const DenseMatrix& Bin);
+void xpacks_calc_all_gen_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector& evals,
+                                      mfem::DenseMatrix& evects,
+                                      const mfem::DenseMatrix& Bin);
 
 /*! \brief Computes the lower eigenvalues and eigenvectors of dense matrices.
 
@@ -116,8 +117,8 @@ void xpacks_calc_all_gen_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
     \warning A is symmetric and B is s.p.d.
 */
-int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
-                                   DenseMatrix& evects, const DenseMatrix& Bin,
+int xpacks_calc_lower_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector& evals,
+                                   mfem::DenseMatrix& evects, const mfem::DenseMatrix& Bin,
                                    double upper, bool atleast_one/*=1*/);
 
 /*! \brief Computes the upper eigenvalues and eigenvectors of dense matrices.
@@ -144,8 +145,8 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
     \warning A is symmetric and B is s.p.d.
 */
-int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
-                                   DenseMatrix& evects, const DenseMatrix& Bin,
+int xpacks_calc_upper_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector& evals,
+                                   mfem::DenseMatrix& evects, const mfem::DenseMatrix& Bin,
                                    double lower, bool atleast_one/*=1*/);
 
 /*! \brief Remove eigenvectors for large eigenvalues (takes the small).
@@ -165,8 +166,8 @@ int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
     \warning It leaves at least one vector not cut.
 */
-double xpack_cut_evects_small(const Vector& evals, const DenseMatrix& evects,
-                              double bound, DenseMatrix& cut_evects);
+double xpack_cut_evects_small(const mfem::Vector& evals, const mfem::DenseMatrix& evects,
+                              double bound, mfem::DenseMatrix& cut_evects);
 
 /*! \brief Remove eigenvectors for small eigenvalues (takes the large).
 
@@ -185,8 +186,8 @@ double xpack_cut_evects_small(const Vector& evals, const DenseMatrix& evects,
 
     \warning It leaves at least one vector not cut.
 */
-double xpack_cut_evects_large(const Vector& evals, const DenseMatrix& evects,
-                              double bound, DenseMatrix& cut_evects);
+double xpack_cut_evects_large(const mfem::Vector& evals, const mfem::DenseMatrix& evects,
+                              double bound, mfem::DenseMatrix& cut_evects);
 
 
 /*! \brief Computes the singular values and left singular vectors.
@@ -203,8 +204,8 @@ double xpack_cut_evects_large(const Vector& evals, const DenseMatrix& evects,
                          matrix.
     \param svals (OUT) This singular values.
 */
-void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
-                         DenseMatrix& lsvects, Vector& svals);
+void xpack_svd_dense_arr(const mfem::DenseMatrix *arr, int arr_size,
+                         mfem::DenseMatrix& lsvects, mfem::Vector& svals);
 
 /*! \brief Cuts the left singular vectors with close to zero singular values.
 
@@ -219,12 +220,12 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
     \param eps (IN) The threshold for removing the left singular vectors with
                     effectively zero singular values.
 */
-void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
-                    DenseMatrix& orth_set, double eps);
+void xpack_orth_set(const mfem::DenseMatrix& lsvects, const mfem::Vector& svals,
+                    mfem::DenseMatrix& orth_set, double eps);
 
 /*! \brief solves least squares problem Ax = b for possibly rectangular A.
  */
-void xpack_solve_lls(const DenseMatrix& A, const Vector &rhs, Vector &x);
+void xpack_solve_lls(const mfem::DenseMatrix& A, const mfem::Vector &rhs, mfem::Vector &x);
 
 /*! \brief Solves a linear system using the Cholesky decomposition.
 
@@ -236,7 +237,9 @@ void xpack_solve_lls(const DenseMatrix& A, const Vector &rhs, Vector &x);
 
     \warning \a A is s.p.d.
 */
-void xpack_solve_spd_Cholesky(const DenseMatrix& A, const Vector &rhs,
-                              Vector &x);
+void xpack_solve_spd_Cholesky(const mfem::DenseMatrix& A, const mfem::Vector &rhs,
+                              mfem::Vector &x);
+
+} // namespace saamge
 
 #endif // _XPACKS_HPP

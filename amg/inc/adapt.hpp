@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -58,6 +58,9 @@
 #define ADAPT_XBAD_ALL_FLAGS        (ADAPT_XBAD_MAX_ITER_FLAG | \
                                      ADAPT_XBAD_ERR_TOL_FLAG | \
                                      ADAPT_XBAD_ERR_INC_FLAG)
+
+namespace saamge
+{
 
 /* Functions */
 /*! \brief Approximates xbad.
@@ -123,5 +126,7 @@ int adapt_approx_xbad(
     tg_data_t *tg_data, mfem::HypreParVector& xbad, double *cf, double *acf,
     double *err, double *err0, int *executed_iters, double rtol/*=10e-12*/, double atol/*=10e-24*/,
     bool normalize/*=1*/, bool output=true);
+
+}
 
 #endif // _ADAPT_HPP

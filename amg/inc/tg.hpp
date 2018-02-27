@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,11 +38,11 @@
 #include "tg_data.hpp"
 #include <mfem.hpp>
 #include "smpr.hpp"
-#include "solve.hpp"
 #include "mbox.hpp"
 #include "interp.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /* Types */
 
@@ -64,9 +64,9 @@ using namespace mfem;
 
     \returns (r, r). The kind of the inner product itself is function-specific.
 */
-typedef double (*tg_calc_res_ft)(HypreParMatrix& A, HypreParVector& b,
-                                 HypreParVector& x, HypreParVector *& res,
-                                 HypreParVector *& psres, void *data);
+typedef double (*tg_calc_res_ft)(mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+                                 mfem::HypreParVector& x, mfem::HypreParVector *& res,
+                                 mfem::HypreParVector *& psres, void *data);
 
 /*! \brief The type of functions that recompute (r, r).
 
@@ -87,9 +87,9 @@ typedef double (*tg_calc_res_ft)(HypreParMatrix& A, HypreParVector& b,
 
     \returns (r, r). The kind of the inner product itself is function-specific.
 */
-typedef double (*tg_recalc_res_ft)(HypreParMatrix& A, HypreParVector& b,
-                                   HypreParVector& x, HypreParVector& x_prev,
-                                   HypreParVector& res, HypreParVector& psres,
+typedef double (*tg_recalc_res_ft)(mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+                                   mfem::HypreParVector& x, mfem::HypreParVector& x_prev,
+                                   mfem::HypreParVector& res, mfem::HypreParVector& psres,
                                    void *data);
 
 /* Options */
@@ -97,12 +97,6 @@ typedef double (*tg_recalc_res_ft)(HypreParMatrix& A, HypreParVector& b,
 /*! \brief The configuration class of this module.
 */
 CONFIG_BEGIN_CLASS_DECLARATION(TG)
-
-    /*! The method for computing the initial residual and its norm. */
-    CONFIG_DECLARE_OPTION(tg_calc_res_ft, calc_res);
-
-    /*! The method for recomputing the residual and its norm. */
-    CONFIG_DECLARE_OPTION(tg_recalc_res_ft, recalc_res);
 
     /*! The pre-smoother.
 
@@ -122,17 +116,34 @@ CONFIG_BEGIN_CLASS_DECLARATION(TG)
                  corresponding fields in the respective structure(s). */
     CONFIG_DECLARE_OPTION(smpr_ft, post_smoother);
 
-    /*! Whether to smooth the tentative interpolator or simply copy it and use
-        it as a final prolongator.
-
-        \warning This parameter is used during the construction of objects
-                 (structure instances) so if modified it will only have effect
-                 for new objects and will NOT modify the behavior of existing
-                 ones. For altering the option for existing objects look at the
-                 corresponding fields in the respective structure(s). */
-    CONFIG_DECLARE_OPTION(bool, smooth_interp);
-
 CONFIG_END_CLASS_DECLARATION(TG)
+
+/* Objects */
+
+/**
+   Use UMFPackSolver for HypreParMatrix, by secretely converting
+   to SparseMatrix
+
+   (only works for serial HypreParMatrix)
+
+   this belongs more naturally in solve.hpp, but we end up wit a circular dependency
+*/
+class HypreDirect : public mfem::Solver
+{
+public:
+   HypreDirect(mfem::HypreParMatrix& mat);
+   ~HypreDirect();
+
+   /// Set/update the solver for the given operator. (Solver interface)
+   void SetOperator(const mfem::Operator &op);
+
+   /// Operator interface
+   virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
+
+private:
+   mfem::SparseMatrix * mat_;
+   mfem::UMFPackSolver solver_;
+};
 
 /* Functions */
 
@@ -157,17 +168,11 @@ CONFIG_END_CLASS_DECLARATION(TG)
     \param data (IN/OUT) The data for \a pre_smoother and \a post_smoother.
     \param mu (IN) 1 for V-cycle, 2 for W-cycle
 */
-/*
-void tg_cycle(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
-              HypreParMatrix& restr, const HypreParVector& b, smpr_ft pre_smoother,
-              smpr_ft post_smoother, HypreParVector& x, solve_t& coarse_solver,
-              void *data, int mu=1);
-*/
-
-void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
-                  HypreParMatrix& restr, const Vector& b, smpr_ft pre_smoother,
-                  smpr_ft post_smoother, Vector& x, Solver& coarse_solver,
-                  void *data);
+void tg_cycle_atb(mfem::HypreParMatrix& A, mfem::HypreParMatrix& Ac,
+                  mfem::HypreParMatrix& interp, mfem::HypreParMatrix& restr,
+                  const mfem::Vector& b, smpr_ft pre_smoother,
+                  smpr_ft post_smoother, mfem::Vector& x,
+                  mfem::Solver& coarse_solver, void *data);
 
 /*! \brief Computes \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
 
@@ -189,9 +194,9 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
 
     \returns \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
 */
-double tg_calc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
-                          HypreParVector& x, HypreParVector *& res,
-                          HypreParVector *& psres, void *data);
+double tg_calc_res_tgprod(mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+                          mfem::HypreParVector& x, mfem::HypreParVector *& res,
+                          mfem::HypreParVector *& psres, void *data);
 
 /*! \brief Recomputes \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
 
@@ -218,9 +223,9 @@ double tg_calc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
              former iterate (\a x_prev) while \a res is for the current iterate
              (\a x).
 */
-double tg_recalc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
-                            HypreParVector& x, HypreParVector& x_prev,
-                            HypreParVector& res, HypreParVector& psres,
+double tg_recalc_res_tgprod(mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+                            mfem::HypreParVector& x, mfem::HypreParVector& x_prev,
+                            mfem::HypreParVector& res, mfem::HypreParVector& psres,
                             void *data);
 
 /*! \brief Recomputes \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
@@ -245,13 +250,15 @@ double tg_recalc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
 
     \returns \f$ (B^{-1}\mathbf{r}, \mathbf{r}) \f$.
 
+    \deprecated
+
     \warning The returned inner product and \a psres are actually for the
              former iterate (\a x_prev) while \a res is for the current iterate
              (\a x).
 */
-double tg_fullrecalc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
-                                HypreParVector& x, HypreParVector& x_prev,
-                                HypreParVector& res, HypreParVector& psres,
+double tg_fullrecalc_res_tgprod(mfem::HypreParMatrix& A, mfem::HypreParVector& b,
+                                mfem::HypreParVector& x, mfem::HypreParVector& x_prev,
+                                mfem::HypreParVector& res, mfem::HypreParVector& psres,
                                 void *data);
 
 /*! \brief Tries to solve \f$ A\mathbf{x} = \mathbf{b} \f$.
@@ -287,8 +294,8 @@ double tg_fullrecalc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
 
     \warning The coarse operator must be precomputed and present in \a tg_data.
 */
-int tg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
-             HypreParVector *& x_prev, int maxiter, tg_calc_res_ft calc_res,
+int tg_solve(mfem::HypreParMatrix& A, mfem::HypreParVector& b, mfem::HypreParVector& x,
+             mfem::HypreParVector *& x_prev, int maxiter, tg_calc_res_ft calc_res,
              tg_recalc_res_ft recalc_res, tg_data_t *tg_data, double rtol/*=10e-12*/,
              double atol/*=10e-24*/, double reducttol/*=1.*/, bool output=true);
 
@@ -315,7 +322,7 @@ int tg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
              successfully computed (according to the stopping criteria), then
              this number is negative.
 */
-int tg_pcg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
+int tg_pcg_solve(mfem::HypreParMatrix& A, mfem::HypreParVector& b, mfem::HypreParVector& x,
                  int maxiter, tg_data_t *tg_data, double rtol/*=10e-12*/, double atol/*=10e-24*/,
                  bool zero_rhs/*=false*/, bool output=true);
 
@@ -354,10 +361,11 @@ int tg_pcg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
     \warning It uses the options \b calc_res and \b recalc_res to determine how
              residuals and their norms are computed and recomputed.
 */
-int tg_run(HypreParMatrix& A,
+int tg_run(mfem::HypreParMatrix& A,
            const agg_partitioning_relations_t *agg_part_rels,
-           HypreParVector& x, HypreParVector& b, int maxiter, double rtol/*=10e-12*/,
-           double atol/*=10e-24*/, double reducttol/*=1.*/, tg_data_t *tg_data, bool zero_rhs/*=0*/,
+           mfem::HypreParVector& x, mfem::HypreParVector& b, int maxiter,
+           double rtol/*=10e-12*/, double atol/*=10e-24*/,
+           double reducttol/*=1.*/, tg_data_t *tg_data, bool zero_rhs/*=0*/,
            bool output=true);
 
 /*! \brief Executes the PCG preconditioned with the TG method.
@@ -387,9 +395,9 @@ int tg_run(HypreParMatrix& A,
 
     semi-DEPRECATED
 */
-int tg_pcg_run(HypreParMatrix& A,
+int tg_pcg_run(mfem::HypreParMatrix& A,
            const agg_partitioning_relations_t *agg_part_rels,
-           HypreParVector& x, HypreParVector& b, int maxiter, double rtol/*=10e-12*/,
+           mfem::HypreParVector& x, mfem::HypreParVector& b, int maxiter, double rtol/*=10e-12*/,
            double atol/*=10e-24*/, tg_data_t *tg_data, bool zero_rhs/*=0*/,
            bool output=true);
 
@@ -418,19 +426,40 @@ int tg_pcg_run(HypreParMatrix& A,
              \b coarse_solver_data.
 */
 tg_data_t *tg_init_data(
-    HypreParMatrix& A,
+    mfem::HypreParMatrix& A,
     const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
-    int nu_relax, double theta,
-    bool smooth_interp, bool use_arpack);
+    int nu_relax, double theta, bool smooth_interp, double smooth_drop_tol,
+    bool use_arpack);
+
+/*! \brief Shared code from tg_build_hierarchy functions */
+void tg_assemble_and_smooth(mfem::HypreParMatrix &Ag,
+                            tg_data_t& tg_data,
+                            const agg_partitioning_relations_t& agg_part_rels);
+
+/*! \brief Builds the coarse level with polynomial basis functions
+
+  Optionally includes also spectral basis functions.
+
+  \param mesh (IN) we need this in order to get coordinates, but probably
+              the right thing is to ask for the coordinate vector directly
+              in case you have it somehow in an algebraic setting.
+
+  \param polynomial_order (IN) either 0 or 1 for adding constants or linears.
+  \param use_spectral (IN) whether to also add spectral dofs
+
+  See tg_build_hierarchy() for other parameters
+*/
+void tg_build_hierarchy_with_polynomial(
+    mfem::HypreParMatrix& Ag, mfem::Mesh& mesh, tg_data_t& tg_data,
+    const agg_partitioning_relations_t& agg_part_rels,
+    ElementMatrixProvider *elem_data, int polynomial_order, bool use_spectral,
+    bool avoid_ess_bdr_dofs);
 
 /*! \brief Builds the coarse level.
 
     TG data must be initialized prior to calling this function (see
     \b tg_init_data).
 
-    \param Al (IN) The matrix of the system being solved (usually the local
-                   (on the current process) stiffness matrix). It must have the
-                   boundary conditions imposed. NULL on coarser levels.
     \param Ag (IN) The matrix of the system being solved (usually the global
                    (among all processes) stiffness matrix). It must have the
                    boundary conditions imposed.
@@ -445,14 +474,11 @@ tg_data_t *tg_init_data(
                                  NULL to invoke coarse level construction.
                                  Usually this is a MFEM \em BilinearForm used
                                  for assembling \a A (on a geometric level).
-
-    \warning \a A and \a elem_data_* must correspond to each other.
 */
-void tg_build_hierarchy(SparseMatrix const * Al, HypreParMatrix& Ag,
-                        tg_data_t& tg_data,
+void tg_build_hierarchy(mfem::HypreParMatrix& Ag, tg_data_t& tg_data,
                         const agg_partitioning_relations_t& agg_part_rels,
-                        ElementMatrixProvider *elem_data_coarse, 
-                        ElementMatrixProvider *elem_data_finest);
+                        ElementMatrixProvider *elem_data,
+                        bool avoid_ess_bdr_dofs);
 
 /*! \brief Extends an identity block to top-left of tg_data.interp
 
@@ -466,8 +492,8 @@ void tg_build_hierarchy(SparseMatrix const * Al, HypreParMatrix& Ag,
 */
 void tg_augment_interp_with_identity(tg_data_t& tg_data, int k);
 
-/*! \brief For algebraic interface, extracts submatrices from A and modifies diagonal
-  so submatrices represent Neumann problems.
+/*! \brief For algebraic interface, extracts submatrices from A and modifies
+  diagonal so submatrices represent Neumann problems.
 
   In PSV's note, this is referred to as the "diagonal compensation" strategy,
   in contrast to the window AMG strategy in WindowSubMatrices()
@@ -476,44 +502,34 @@ void tg_augment_interp_with_identity(tg_data_t& tg_data, int k);
 
   A and agg_part_rels are input, agglomerate_element_matrices is output.
 */
-void ExtractSubMatrices(const SparseMatrix& A, 
-                        const agg_partitioning_relations_t& agg_part_rels,
-                        Array<SparseMatrix*>& agglomerate_element_matrices);
+void ExtractSubMatrices(
+    const mfem::SparseMatrix& A, const agg_partitioning_relations_t& agg_part_rels,
+    mfem::Array<mfem::SparseMatrix*>& agglomerate_element_matrices);
 
 void TestWindowSubMatrices();
 
-void WindowSubMatrices(const SparseMatrix& A,
-                       const agg_partitioning_relations_t& agg_part_rels,
-                       Array<SparseMatrix*>& agglomerate_element_matrices);
-
-/*! \brief Builds a tg_data from some agglomerate element matrices.
-
-  The AE matrices could come from ExtractSubMatrices, or they could be
-  assembled somehow independently (eg, with a finite volume method
-  that MFEM does not know.  
-*/
-tg_data_t *tg_produce_data_with_ae_matrices(
-    HypreParMatrix& Ag,
-    const agg_partitioning_relations_t& agg_part_rels,
-    int nu_pro, int nu_relax, double spectral_tol,
-    bool smooth_interp, bool minimal_coarse_arg,
-    const Array<SparseMatrix* > &agglomerate_element_matrices);
+void WindowSubMatrices(
+    const mfem::SparseMatrix& A, const agg_partitioning_relations_t& agg_part_rels,
+    mfem::Array<mfem::SparseMatrix*>& agglomerate_element_matrices);
 
 /*! \brief Essentially wraps ExtractSubMatrices and
-  tg_produce_data_with_ae_matrices.
+  tg_produce_data, with an algebraic ElementMatrixProvider
 */
 tg_data_t *tg_produce_data_algebraic(
-    const SparseMatrix &Alocal,
-    HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
-    int nu_pro, int nu_relax, double spectral_tol,
-    bool smooth_interp, bool minimal_coarse_arg, bool use_window, bool use_arpack);
+    const mfem::SparseMatrix &Alocal,
+    mfem::HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
+    int nu_pro, int nu_relax, double spectral_tol, bool smooth_interp,
+    int polynomial_coarse_arg, bool use_window, bool use_arpack,
+    bool avoid_ess_bdr_dofs);
 
 /*! \brief Switch from window to diagonal compensation matrices, or vice versa.
 
   We may want to use window AMG for eigenvectors, and diagonal compensation
   for local corrections, so we use this.
+
+  This is used in fv-mfem.cpp
 */
-void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal, 
+void tg_replace_submatrices(tg_data_t &tg_data, const mfem::SparseMatrix &Alocal, 
                             const agg_partitioning_relations_t& agg_part_rels,
                             bool use_window);
 
@@ -523,9 +539,6 @@ void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal,
     systems. This includes the final (smoothed) interpolator and the smoother
     in the TG cycle.
 
-    \param Al (IN) The matrix of the system being solved (usually the local
-                   (on the current process) stiffness matrix). It must have the
-                   boundary conditions imposed.
     \param Ag (IN) The matrix of the system being solved (usually the global
                    (among all processes) stiffness matrix). It must have the
                    boundary conditions imposed.
@@ -548,13 +561,13 @@ void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal,
 
     \warning The returned structure must be freed by the caller using
              \b tg_free_data.
-    \warning \a A and \a elem_data_* must correspond to each other.
 */
 tg_data_t *tg_produce_data(
-    const SparseMatrix& Al, HypreParMatrix& Ag,
+    mfem::HypreParMatrix& Ag,
     const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
     int nu_relax, ElementMatrixProvider *elem_data_finest, double theta,
-    bool smooth_interp);
+    bool smooth_interp, int polynomial_coarse_arg, bool use_arpack,
+    bool avoid_ess_bdr_dofs);
 
 /*! \brief Frees the TG data.
 
@@ -577,6 +590,8 @@ void tg_free_data(tg_data_t *tg_data);
 */
 tg_data_t *tg_copy_data(const tg_data_t *src);
 
+double tg_compute_OC(mfem::HypreParMatrix& A, tg_data_t& tg_data);
+
 /* Inline Functions */
 /*! \brief Smooths the tentative interpolant to produce the final one.
 
@@ -586,7 +601,7 @@ tg_data_t *tg_copy_data(const tg_data_t *src);
     \param tg_data (IN) The TG data.
 */
 static inline
-void tg_smooth_interp(HypreParMatrix& A, tg_data_t& tg_data);
+void tg_smooth_interp(mfem::HypreParMatrix& A, tg_data_t& tg_data);
 
 /*! \brief Computes the coarse-grid operator.
 
@@ -602,7 +617,7 @@ void tg_smooth_interp(HypreParMatrix& A, tg_data_t& tg_data);
              the "coarse solver".
 */
 static inline
-HypreParMatrix *tg_coarse_matr(HypreParMatrix& A, HypreParMatrix& interp);
+mfem::HypreParMatrix *tg_coarse_matr(mfem::HypreParMatrix& A, mfem::HypreParMatrix& interp);
 
 /*! \brief If \em Ac is empty, it is computed.
 
@@ -619,7 +634,7 @@ HypreParMatrix *tg_coarse_matr(HypreParMatrix& A, HypreParMatrix& interp);
     \warning \em Ac must be freed using \b tg_free_coarse_operator.
 */
 static inline
-void tg_fillin_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
+void tg_fillin_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
                                bool perform_solve_init/*=true*/);
 
 /*! \brief \em Ac is updated (recomputed).
@@ -633,12 +648,14 @@ void tg_fillin_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
     \param perform_solve_init (IN) Whether to initialize the "coarse solver".
                                    Unless specially needed, this is usually
                                    \em true.
+    \param coarse_direct (IN) Use a direct solver on the coarse level.
 
     \warning \em Ac must be freed using \b tg_free_coarse_operator.
 */
 static inline
-void tg_update_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
-                               bool perform_solve_init/*=true*/);
+void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
+                               bool perform_solve_init,
+                               bool coarse_direct);
 
 /*! \brief \em Ac is freed.
 
@@ -656,17 +673,17 @@ void tg_free_coarse_operator(tg_data_t& tg_data);
     \param tg_data (IN) Two-grid data.
 */
 static inline
-void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data);
+void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data);
 
 /* Inline Functions Definitions */
 static inline
-void tg_smooth_interp(HypreParMatrix& A, tg_data_t& tg_data)
+void tg_smooth_interp(mfem::HypreParMatrix& A, tg_data_t& tg_data)
 {
     SA_ASSERT(tg_data.tent_interp);
     delete tg_data.interp;
     delete tg_data.restr;
     tg_free_coarse_operator(tg_data);
-    HypreParMatrix *interp;
+    mfem::HypreParMatrix *interp;
     tg_data.interp = interp =
         tg_data.smooth_interp ?
             interp_smooth_interp(A, *tg_data.interp_data, *tg_data.tent_interp,
@@ -677,10 +694,11 @@ void tg_smooth_interp(HypreParMatrix& A, tg_data_t& tg_data)
 }
 
 static inline
-HypreParMatrix *tg_coarse_matr(HypreParMatrix& A, HypreParMatrix& interp)
+mfem::HypreParMatrix *tg_coarse_matr(mfem::HypreParMatrix& A,
+                                     mfem::HypreParMatrix& interp)
 {
     SA_RPRINTF_L(0, 5, "%s", "Computing coarse operator...\n");
-    HypreParMatrix *Ac = RAP(&A, &interp);
+    mfem::HypreParMatrix *Ac = RAP(&A, &interp);
     SA_ASSERT(Ac);
     SA_ASSERT(Ac->GetGlobalNumRows() == Ac->GetGlobalNumCols());
     SA_ASSERT(Ac->GetGlobalNumRows() == interp.GetGlobalNumCols());
@@ -692,7 +710,7 @@ HypreParMatrix *tg_coarse_matr(HypreParMatrix& A, HypreParMatrix& interp)
 }
 
 static inline
-void tg_fillin_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
+void tg_fillin_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
                                bool perform_solve_init)
 {
     SA_ASSERT(tg_data);
@@ -702,22 +720,21 @@ void tg_fillin_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
     if (!(tg_data->Ac))
     {
         tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
-        /*
-        if (perform_solve_init && tg_data->coarse_solver.solve_init)
-        {
-            SA_RPRINTF_L(0, 5, "%s", "Initializing (fillin) coarse solver...\n");
-            tg_data->coarse_solver.data =
-                tg_data->coarse_solver.solve_init(*tg_data->Ac, tg_data->coarse_solver.data);
-        }
-        */
         if (perform_solve_init)
-            tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
+        {
+            SA_RPRINTF_L(0, 5, "%s",
+                         "Setting coarse solver as a single BoomerAMG v-cycle.\n");
+            mfem::HypreBoomerAMG * hbamg =
+                new mfem::HypreBoomerAMG(*tg_data->Ac);
+            hbamg->SetPrintLevel(0);
+            tg_data->coarse_solver = hbamg;
+        }
     }
 }
 
 static inline
-void tg_update_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
-                               bool perform_solve_init)
+void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
+                               bool perform_solve_init, bool coarse_direct)
 {
     SA_ASSERT(tg_data);
     SA_ASSERT(tg_data->interp);
@@ -727,20 +744,27 @@ void tg_update_coarse_operator(HypreParMatrix& A, tg_data_t *tg_data,
     delete tg_data->coarse_solver;
 
     tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
-    /*
-    if (perform_solve_init && tg_data->coarse_solver.solve_init)
-    {
-        SA_RPRINTF_L(0, 5, "%s", "Initializing (update) coarse solver...\n");
-        tg_data->coarse_solver.data =
-            tg_data->coarse_solver.solve_init(*tg_data->Ac, tg_data->coarse_solver.data);
-    }
-    */
     if (perform_solve_init)
     {
-        // tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
-        HypreBoomerAMG * hbamg = new HypreBoomerAMG(*tg_data->Ac);
-        hbamg->SetPrintLevel(0);
-        tg_data->coarse_solver = hbamg;
+        /*
+        SA_RPRINTF(0,"%s","Setting coarse solver as a CG preconditioned "
+                   "with BoomerAMG.\n");
+        tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
+        */
+        if (coarse_direct)
+        {
+            SA_RPRINTF_L(0, 5, "%s",
+                         "Setting coarse solver as direct UMFPACK solver.\n");
+            tg_data->coarse_solver = new HypreDirect(*tg_data->Ac);
+        }
+        else
+        {
+            SA_RPRINTF_L(0, 5, "%s",
+                       "Setting coarse solver as a single BoomerAMG v-cycle.\n");
+            mfem::HypreBoomerAMG * hbamg = new mfem::HypreBoomerAMG(*tg_data->Ac);
+            hbamg->SetPrintLevel(0);
+            tg_data->coarse_solver = hbamg;
+        }
     }
 }
 
@@ -752,15 +776,6 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
     if (!tg_data.Ac)
         return;
 
-    /*
-    if (tg_data.coarse_solver.solve_free)
-    {
-        SA_RPRINTF_L(0, 5, "%s", "Freeing coarse solver...\n");
-        tg_data.coarse_solver.data =
-            tg_data.coarse_solver.solve_free(*tg_data.Ac,
-                                             tg_data.coarse_solver.data);
-    }
-    */
     delete tg_data.coarse_solver;
 
     delete tg_data.Ac;
@@ -768,7 +783,7 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
 }
 
 static inline
-void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data)
+void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
 {
     SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
@@ -801,5 +816,7 @@ void tg_print_data(HypreParMatrix& A, const tg_data_t *tg_data)
     SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
 }
+
+} // namespace saamge
 
 #endif // _TG_HPP

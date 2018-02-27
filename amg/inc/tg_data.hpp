@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -39,7 +39,8 @@
 #include "mbox.hpp"
 #include "interp.hpp"
 
-using namespace mfem;
+namespace saamge
+{
 
 /*! \brief TG data -- interpolation, smoothers etc.
 */
@@ -47,15 +48,16 @@ typedef struct {
     interp_data_t *interp_data; /*!< Parameters and data for the
                                      interpolant. */
 
-    HypreParMatrix *Ac; /*!< The coarse-grid operator. */
-    HypreParMatrix *interp; /*!< The interpolator. */
-    HypreParMatrix *restr; /*!< The restriction operator. */
-    SparseMatrix *ltent_interp; /*!< The local (for the process) tentative
-                                     interpolant. */
-    HypreParMatrix *tent_interp; /*!< The global (among all processes)
-                                      tentative interpolant. */
+    mfem::HypreParMatrix *Ac; /*!< The coarse-grid operator. */
+    mfem::HypreParMatrix *interp; /*!< The interpolator. */
+    mfem::HypreParMatrix *restr; /*!< The restriction operator. */
+    mfem::SparseMatrix *ltent_interp; /*!< The local (for the process) tentative
+                                        interpolant. */
+    mfem::HypreParMatrix *tent_interp; /*!< The global (among all processes)
+                                         tentative interpolant. */
 
-    HypreParMatrix * scaling_P; /*!< for corrected nullspace, replaces coarse_one_representation */
+    /*! for corrected nullspace, replaces coarse_one_representation */
+    mfem::HypreParMatrix * scaling_P; 
 
     bool smooth_interp; /*!< Whether to smooth the tentative interpolator or
                              simply copy it and use it as a final
@@ -71,11 +73,15 @@ typedef struct {
     smpr_poly_data_t *poly_data; /*< The data for the polynomial smoother. */
 
     bool use_w_cycle; /*!< whether to use W-cycle or V-cycle DEPRECATED */
-    bool minimal_coarse_space; /*!< if true, no eigenvalue problem, just vector of ones */
+    /*! -1 indicates usual spectral space, otherwise order of polynomials to include */
+    int polynomial_coarse_space;
+    bool doing_spectral;
 
     int tag;
 
     ElementMatrixProvider * elem_data; /*!< keep a pointer so tg_data can free this */
 } tg_data_t;
+
+}
 
 #endif

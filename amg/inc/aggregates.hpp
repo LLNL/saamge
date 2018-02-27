@@ -4,7 +4,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -75,6 +75,9 @@
 #include "part.hpp"
 
 #include "SharedEntityCommunication.hpp"
+
+namespace saamge
+{
 
 // let's try a forward declaration just for fun...
 class ElementMatrixProvider;
@@ -264,48 +267,10 @@ void agg_construct_aggregates(const mfem::SparseMatrix& A,
              case, just setting \em final_skip_zeros to \em false should be
              sufficient.
 */
-mfem::SparseMatrix *agg_build_AE_stiffm_with_global(const mfem::SparseMatrix& A, int part,
+mfem::SparseMatrix *agg_build_AE_stiffm_with_global(
+    const mfem::SparseMatrix& A, int part,
     const agg_partitioning_relations_t& agg_part_rels,
-    ElementMatrixProvider *data, bool bdr_cond_imposed,
-    bool assemble_ess_diag);
-
-/*! \brief Assembles the local stiffness matrices for all AEs.
-
-    Uses entries in the global stiffness matrix for better performance. Also,
-    takes care of essential boundary conditions.
-
-    Initially implemented for the finest (geometric) mesh.
-
-    \param A (IN) The global stiffness matrix.
-    \param agg_part_rels (IN) The partitioning relations.
-    \param data (IN/OUT) \a elmat_callback specific data, provides element matrices
-    \param bdr_cond_imposed (IN) States if the border conditions are imposed on
-                                 \a A.
-    \param assemble_ess_diag (IN) Causes the diagonal elements corresponding
-                                  to DoFs lying simultaneously on AEs'
-                                  interfaces and the essential part of the
-                                  boundary to be assembled instead of copied
-                                  from the global matrix \a A. It is only
-                                  useful when \a bdr_cond_imposed is \em true.
-                                  It is meaningful in the cases when the global
-                                  matrix has its diagonal entries kept, instead
-                                  of set to 1, during the global imposition of
-                                  essential boundary conditions.
-
-    \returns An array of pointers to local stiffness matrices for all AEs.
-
-    \warning The returned array of pointers to sparse matrices must be freed by
-             the caller using \b mbox_free_matr_arr.
-    \warning See the warning in \b agg_build_AE_stiffm_with_global related to
-             the zero elements in \a A.
-
-    ORPHAN CODE --- never called.
-
-    DEPRECATED
-*/
-mfem::SparseMatrix **agg_build_AEs_stiffm_with_global(const mfem::SparseMatrix& A,
-    const agg_partitioning_relations_t& agg_part_rels,
-    ElementMatrixProvider *data, bool bdr_cond_imposed,
+    const ElementMatrixProvider *data, bool bdr_cond_imposed,
     bool assemble_ess_diag);
 
 /*! \brief Assembles the local stiffness matrix for an AE.
@@ -323,81 +288,9 @@ mfem::SparseMatrix **agg_build_AEs_stiffm_with_global(const mfem::SparseMatrix& 
 
     \warning The returned sparse matrix must be freed by the caller.
 */
-mfem::SparseMatrix *agg_build_AE_stiffm(int part,
-                                  const agg_partitioning_relations_t& agg_part_rels,
-                                  ElementMatrixProvider *data);
-
-/*! \brief Assembles a global matrix from element matrices.
-
-    Can also impose essential boundary conditions (BCs).
-
-    \param agg_part_rels (IN) The partitioning relations. Only \em elem_to_dof
-                              and \em dof_to_elem are used here. More might be
-                              required depending ot \a elmat_callback.
-    \param data (IN/OUT) \a elmat_callback specific data, provides element matrices.
-    \param assem_skip_zeros (IN) Skip matrix entries with zero value when
-                                 assembling. Skips zeroes in the element
-                                 matrices when adding them to the global matrix.
-    \param final_skip_zeros (IN) Skip matrix entries with zero value when
-                                 finalizing. Not relevant if \a finalize is
-                                 \em false.
-    \param finalize (IN) Finalize the sparse matrix before returning it.
-    \param bdr_dofs (IN) An array that shows if a DoF i is on essential domain
-                         border. If it is not NULL essential BCs. If it is NULL,
-                         no BCs are imposed.
-    \param sol (IN) A vector (like a solution) that fulfils the essential BCs.
-                    Not used and can be NULL if \a bdr_dofs is NULL.
-    \param rhs (IN/OUT) The right hand side without imposed essential BCs. It
-                        will be modified to impose the essential BCs. Not used
-                        and can be NULL if \a bdr_dofs is NULL.
-    \param keep_diag (IN) Whether to keep the diagonal matrix entry when
-                          imposing essential boundary conditions. If not kept,
-                          it will be set to 1. Not used if \a bdr_dofs is NULL.
-
-    \returns The assembled global matrix.
-
-    \warning The returned sparse matrix must be freed by the caller.
-
-    THIS IS NEVER CALLED.
-*/
-mfem::SparseMatrix *agg_simple_assemble(
-    const agg_partitioning_relations_t& agg_part_rels,
-    ElementMatrixProvider *data, bool assem_skip_zeros/*=true*/,
-    bool final_skip_zeros/*=true*/, bool finalize/*=true*/, const agg_dof_status_t *bdr_dofs,
-    const mfem::Vector *sol, mfem::Vector *rhs, bool keep_diag);
-
-/*! \brief Assembles a global matrix from element matrices.
-
-    Can also impose essential boundary conditions (BCs).
-
-    The element matrices must be ordered according to the numbering given by
-    \a elem_to_dof.
-
-    \param elem_matrs (IN) An array of \b Matrix pointers (which are either
-                           \b SparseMatrix pointers or \b DenseMatrix pointers).
-    \param elem_to_dof (IN) A table that relates elements to DoFs.
-    \param dof_to_elem (IN) A table that relates DoFs to elements.
-    \param assem_skip_zeros (IN) Skip matrix entries with zero value when
-                                 assembling. Skips zeroes in the element
-                                 matrices when adding them to the global matrix.
-    \param final_skip_zeros (IN) Skip matrix entries with zero value when
-                                 finalizing. Not relevant if \a finalize is
-                                 \em false.
-    \param finalize (IN) Finalize the sparse matrix before returning it.
-
-    \returns The assembled global matrix.
-
-    \warning The returned sparse matrix must be freed by the caller.
-
-    THIS IS NEVER CALLED
-*/
-mfem::SparseMatrix *agg_simple_assemble(const mfem::Matrix * const *elem_matrs,
-                                  mfem::Table& elem_to_dof, mfem::Table& dof_to_elem,
-                                  bool assem_skip_zeros/*=true*/, bool final_skip_zeros/*=true*/,
-                                  bool finalize/*=true*/,
-                                  const agg_dof_status_t *bdr_dofs,
-                                  const mfem::Vector *sol, mfem::Vector *rhs,
-                                  bool keep_diag);
+mfem::SparseMatrix *agg_build_AE_stiffm(
+    int part, const agg_partitioning_relations_t& agg_part_rels,
+    const ElementMatrixProvider *data);
 
 /*! \brief Restricts a group of vectors to an aggregate.
 
@@ -506,7 +399,7 @@ agg_create_partitioning_fine_isolate(
     mfem::Table *elem_to_elem, int *partitioning,
     const agg_dof_status_t *bdr_dofs, int *nparts,
     mfem::HypreParMatrix *dof_truedof,
-    const Array<int>& isolated_cells);
+    const mfem::Array<int>& isolated_cells);
 
 /*! \brief Finish agg_create_partitioning_fine
 
@@ -867,5 +760,7 @@ void agg_print_data(const agg_partitioning_relations_t& agg_part_rels)
     SA_RPRINTF(0, "%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
 }
+
+} // namespace saamge
 
 #endif // _AGGREGATES_HPP
