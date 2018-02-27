@@ -1,7 +1,7 @@
 # SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
 #         and solvers.
 # 
-# Copyright (c) 2016, Lawrence Livermore National Security,
+# Copyright (c) 2018, Lawrence Livermore National Security,
 # LLC. Developed under the auspices of the U.S. Department of Energy by
 # Lawrence Livermore National Laboratory under Contract
 # No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -26,13 +26,15 @@
 # License along with this program; if not, see
 # <http://www.gnu.org/licenses/>.
 
-ROOT = ../..
-TARGET = mltest
+set(SOURCES "")
+set(HEADERS "")
 
-include $(ROOT)/mk/common.mk
-include $(ROOT)/mk/common_srcs.mk
+FILE(GLOB SRCS *.cpp)
+FILE(GLOB HDRS ../inc/*.hpp)
 
-all: compile
-	$(CXX) $(COBJS) $(CPPOBJS) -o $(TARGET) $(LDFLAGS)
+set(SOURCES ${SOURCES} ${SRCS})
+set(HEADERS ${HEADERS} ${HDRS})
 
-include $(ROOT)/mk/deps.mk
+add_library(${PROJECT_NAME} ${SOURCES})
+install(TARGETS ${PROJECT_NAME} DESTINATION lib)
+install(FILES ${HEADERS} DESTINATION include)

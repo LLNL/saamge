@@ -1,7 +1,7 @@
 # SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
 #         and solvers.
 # 
-# Copyright (c) 2016, Lawrence Livermore National Security,
+# Copyright (c) 2018, Lawrence Livermore National Security,
 # LLC. Developed under the auspices of the U.S. Department of Energy by
 # Lawrence Livermore National Laboratory under Contract
 # No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -26,23 +26,38 @@
 # License along with this program; if not, see
 # <http://www.gnu.org/licenses/>.
 
-ROOT = ..
+#!/bin/bash
 
-include $(ROOT)/mk/common.mk
-include $(ROOT)/mk/common_srcs.mk
+SAAMGE_BASE_DIR=${HOME}/saamge/for-lido/amg
+SAAMGE_BUILD_DIR=${SAAMGE_BASE_DIR}/build
+SAAMGE_INSTALL_DIR=${SAAMGE_BASE_DIR}/install
 
-SUBD_TRIMMED = $(patsubst ./%,%,$(SUBD))
+mkdir -p $SAAMGE_BUILD_DIR
+cd $SAAMGE_BUILD_DIR
 
-CLEAN = $(addprefix clean,$(SUBD_TRIMMED))
+# Force a reconfigure
+rm CMakeCache.txt
+rm -rf CMakeFiles
 
-.PHONY: clean $(SUBD_TRIMMED)
+# DEBUG or OPTIMIZED
 
-all: $(SUBD_TRIMMED)
-
-$(SUBD_TRIMMED):
-	($(MAKE) -SC $@ all) || exit $$?
-
-$(CLEAN):
-	$(MAKE) -C $(patsubst clean%,%,$@) clean
-
-clean: $(CLEAN)
+cmake \
+    -DCMAKE_BUILD_TYPE=DEBUG \
+    \
+    -DMETIS_DIR=${HOME}/bin \
+    -DHYPRE_DIR=${HOME}/hypre/debug \
+    -DMFEM_DIR=${HOME}/mfem/debug-nopetsc \
+    -DSUITESPARSE_DIR=${HOME}/bin \
+    \
+    -DUSE_ARPACK=ON \
+    -DARPACK_DIR=${HOME}/arpack/arpack-ng-install \
+    -DARPACKPP_DIR=${HOME}/arpack/arpackpp \
+    \
+    -DLINK_NETCDF=OFF \
+    -DNETCDF_DIR=${HOME}/packages/netcdf \
+    \
+    -DBLAS_LIBRARIES=/usr/lib64/libblas.so \
+    -DLAPACK_LIBRARIES=/usr/lib64/liblapack.so \
+    \
+    -DCMAKE_INSTALL_PREFIX=${SAAMGE_INSTALL_DIR} \
+    ${SAAMGE_BASE_DIR}
