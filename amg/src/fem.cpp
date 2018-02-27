@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -45,13 +45,11 @@ using std::floor;
 using std::round;
 #endif
 using std::sqrt;
-using std::ofstream;
-using std::ifstream;
 using std::stringstream;
 
-/* Options */
-
-CONFIG_DEFINE_CLASS(FEM);
+namespace saamge
+{
+using namespace mfem;
 
 /* Functions */
 
@@ -82,7 +80,7 @@ void fem_init_with_bdr_cond(ParGridFunction& x, ParFiniteElementSpace *fes,
                             Coefficient& bdr_coeff)
 {
     SA_RPRINTF_L(0, 4, "%s", "Initializing vector with boundary conditions...\n");
-    x.Update(fes);
+    x.SetSpace(fes);
     x.ProjectCoefficient(bdr_coeff);
 }
 
@@ -146,6 +144,9 @@ ParLinearForm *fem_assemble_rhs(ParFiniteElementSpace *fespace,
 {
     SA_RPRINTF_L(0, 4, "%s", "Assembling global right-hand side...\n");
     ParLinearForm *b = new ParLinearForm(fespace);
+
+    // elasticity?
+    SA_ASSERT(fespace->GetVDim() == 1);
     b->AddDomainIntegrator(new DomainLFIntegrator(rhs));
     b->Assemble();
 
@@ -157,7 +158,7 @@ void fem_serial_visualize_gf(const Mesh& mesh, GridFunction& x,
 {
     SA_PRINTF_L(4, "%s", "Visualizing grid function in serial...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
 
@@ -181,7 +182,7 @@ void fem_parallel_visualize_gf(const ParMesh& mesh, ParGridFunction& x,
 {
     SA_PRINTF_L(4, "%s", "Visualizing grid function in parallel...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
 
@@ -208,7 +209,7 @@ void fem_serial_visualize_pwc_coef(Mesh& mesh, Coefficient& coef,
     SA_PRINTF_L(4, "%s", "Preparing piece-wise constant visualization "
                          "in serial...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
     if (!sol_sock.is_open())
@@ -236,7 +237,7 @@ void fem_parallel_visualize_pwc_coef(ParMesh& mesh, Coefficient& coef,
     SA_PRINTF_L(4, "%s", "Preparing piece-wise constant visualization "
                          "in parallel...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
     if (!sol_sock.is_open())
@@ -264,7 +265,7 @@ void fem_serial_visualize_partitioning(Mesh& mesh, int *partitioning,
 {
     SA_PRINTF_L(4, "%s", "Visualizing partition in serial...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
 
@@ -303,7 +304,7 @@ void fem_parallel_visualize_partitioning(ParMesh& mesh, int *partitioning,
 {
     // SA_PRINTF_L(4, "%s", "Visualizing partition in parallel...\n");
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
 
@@ -362,7 +363,7 @@ void fem_serial_visualize_aggregates(FiniteElementSpace *fes, int *aggregates,
     const int Ndofs = fes->GetNDofs();
 
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     socketstream sol_sock(vishost, visport);
 
     if (!sol_sock.is_open())
@@ -395,7 +396,7 @@ void fem_parallel_visualize_aggregates(ParFiniteElementSpace *fes,
     const int Ndofs = fes->GetNDofs();
 
     char vishost[] = "localhost";
-    int  visport   = CONFIG_ACCESS_OPTION(FEM, glvis_port);
+    int visport = GLVIS_PORT;
     // osockstream sol_sock(visport, vishost);
     socketstream sol_sock(vishost, visport);
 
@@ -431,7 +432,7 @@ void fem_parallel_visualize_aggregates(ParFiniteElementSpace *fes,
 Mesh *fem_read_mesh(const char *filename)
 {
     SA_RPRINTF_L(0, 4, "%s", "Loading mesh...\n");
-    ifstream imesh(filename);
+    std::ifstream imesh(filename);
     SA_ASSERT(imesh);
     Mesh *mesh = new Mesh(imesh, 1, 1);
     imesh.close();
@@ -440,7 +441,7 @@ Mesh *fem_read_mesh(const char *filename)
 
 void fem_write_mesh(const char *filename, const Mesh& mesh)
 {
-    ofstream omesh(filename);
+    std::ofstream omesh(filename);
     SA_ASSERT(omesh);
     omesh.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
     mesh.Print(omesh);
@@ -449,7 +450,7 @@ void fem_write_mesh(const char *filename, const Mesh& mesh)
 
 GridFunction *fem_read_gf(const char *filename, Mesh *mesh)
 {
-    ifstream igf(filename);
+    std::ifstream igf(filename);
     SA_ASSERT(igf);
     GridFunction *gf = new GridFunction(mesh, igf);
     igf.close();
@@ -458,7 +459,7 @@ GridFunction *fem_read_gf(const char *filename, Mesh *mesh)
 
 void fem_write_gf(const char *filename, GridFunction& gf)
 {
-    ofstream ogf(filename);
+    std::ofstream ogf(filename);
     SA_ASSERT(ogf);
     ogf.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
     gf.Save(ogf);
@@ -468,7 +469,9 @@ void fem_write_gf(const char *filename, GridFunction& gf)
 /** 
     MFEM defines a "Dof" as a nodal point for the scalar problem,
     if we are doing a vector problem (i.e. elasticity), our SAAMGe
-    definition of a dof is different.
+    definition of a dof is different. We define a "Dof" here as a
+    scalar number, so for us in SAAMGe there are multiple Dofs per
+    nodal point, while in MFEM there is only one.
 
     As a result, we need to modify MFEM's elem_to_dof table.
 */
@@ -642,6 +645,45 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
 }
 
 agg_partitioning_relations_t *
+fem_create_partitioning_identity(HypreParMatrix& A, ParFiniteElementSpace& fes,
+                                 const agg_dof_status_t *bdr_dofs, int *nparts)
+{
+    Table *elem_to_dof, *elem_to_elem;
+    Mesh *mesh = fes.GetMesh();
+
+    *nparts = mesh->GetNE();
+
+    //XXX: This will stay allocated in MESH till the end.
+    elem_to_elem = mbox_copy_table(&(mesh->ElementToElementTable()));
+
+    if (fes.GetVDim() == 1)
+    {
+        // scalar problem
+        elem_to_dof = mbox_copy_table(&(fes.GetElementToDofTable()));
+    }
+    else
+    {
+        // elasticity
+        elem_to_dof = vector_valued_elem_to_dof(
+            fes.GetElementToDofTable(), fes.GetVDim(), fes.GetOrdering());
+    }
+
+    int * partitioning = new int[mesh->GetNE()]; // copied to agg_part_rels, deleted there
+    for (int i=0; i<mesh->GetNE(); ++i)
+        partitioning[i] = i;
+
+    // in what follows, bdr_dofs is only used as info to copy onto coarser level, 
+    // does not actually affect partitioning
+    const bool do_aggregates = false;
+    agg_partitioning_relations_t *agg_part_rels = agg_create_partitioning_fine(
+        A, fes.GetNE(), elem_to_dof, elem_to_elem, partitioning, bdr_dofs, nparts,
+        fes.Dof_TrueDof_Matrix(), do_aggregates);
+
+    SA_ASSERT(agg_part_rels);
+    return agg_part_rels;
+}
+
+agg_partitioning_relations_t *
 fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
                         const agg_dof_status_t *bdr_dofs, int *nparts,
                         bool do_aggregates)
@@ -652,9 +694,6 @@ fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
     //XXX: This will stay allocated in MESH till the end.
     elem_to_elem = mbox_copy_table(&(mesh->ElementToElementTable()));
 
-    fes.BuildElementToDofTable(); //XXX: This remains allocated in FES till the
-                                  //     end.
-
     if (fes.GetVDim() == 1)
     {
         // scalar problem
@@ -662,24 +701,23 @@ fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
     }
     else
     {
+        // elasticity
         elem_to_dof = vector_valued_elem_to_dof(
             fes.GetElementToDofTable(), fes.GetVDim(), fes.GetOrdering());
     }
 
     // in what follows, bdr_dofs is only used as info to copy onto coarser level, 
     // does not actually affect partitioning
-    agg_partitioning_relations_t *agg_part_rels =
-        agg_create_partitioning_fine(A, fes.GetNE(), elem_to_dof, elem_to_elem,
-                                     NULL, bdr_dofs, nparts, fes.Dof_TrueDof_Matrix(),
-                                     do_aggregates);
+    agg_partitioning_relations_t *agg_part_rels = agg_create_partitioning_fine(
+        A, fes.GetNE(), elem_to_dof, elem_to_elem, NULL, bdr_dofs, nparts,
+        fes.Dof_TrueDof_Matrix(), do_aggregates);
 
     SA_ASSERT(agg_part_rels);
     return agg_part_rels;
 }
 
 agg_partitioning_relations_t *
-fem_create_partitioning_from_matrix(const SparseMatrix& A,
-                                    int *nparts,
+fem_create_partitioning_from_matrix(const SparseMatrix& A, int *nparts,
                                     HypreParMatrix *dof_truedof,
                                     Array<int>& isolated_cells)
 {
@@ -704,16 +742,16 @@ fem_create_partitioning_from_matrix(const SparseMatrix& A,
 
     if (isolated_cells.Size() == 0)
     {
-        agg_part_rels =
-            agg_create_partitioning_fine(*fakeAparallel, A.Size(), elem_to_dof, elem_to_elem,
-                                         partitioning, bdr_dofs, nparts, dof_truedof, do_aggregates);
+        agg_part_rels = agg_create_partitioning_fine(
+            *fakeAparallel, A.Size(), elem_to_dof, elem_to_elem,
+            partitioning, bdr_dofs, nparts, dof_truedof, do_aggregates);
     }
     else
     {
-        agg_part_rels =
-            agg_create_partitioning_fine_isolate(*fakeAparallel, A.Size(), elem_to_dof, elem_to_elem,
-                                                 partitioning, bdr_dofs, nparts, 
-                                                 dof_truedof, isolated_cells); // do_aggregates defaults to true...
+        // do_aggregates is always true for this call
+        agg_part_rels = agg_create_partitioning_fine_isolate(
+            *fakeAparallel, A.Size(), elem_to_dof, elem_to_elem, partitioning,
+            bdr_dofs, nparts, dof_truedof, isolated_cells);
     }
     delete[] bdr_dofs;
 
@@ -722,3 +760,5 @@ fem_create_partitioning_from_matrix(const SparseMatrix& A,
     SA_ASSERT(agg_part_rels);
     return agg_part_rels;
 }
+
+} // namespace saamge

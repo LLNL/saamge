@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -32,26 +32,62 @@
 #include "common.hpp"
 #include "xpacks.hpp"
 #include <mfem.hpp>
-extern "C" {
-#include <f2c.h>
-#include <clapack.h>
+extern "C"
+{
+    int dpotrf_(char *uplo, int *n, double *a, int *
+                lda, int *info);
+
+    int dpotri_(char *uplo, int *n, double *a, int *
+                lda, int *info);
+
+    int dsyev_(char *jobz, char *uplo, int *n, double *a, 
+               int *lda, double *w, double *work, int *lwork, 
+               int *info);
+
+    int dsygv_(int *itype, char *jobz, char *uplo, int *
+               n, double *a, int *lda, double *b, int *ldb, 
+               double *w, double *work, int *lwork, int *info);
+
+    double dlamch_(char *cmach);
+
+    int dsygvx_(int *itype, char *jobz, char *range, char *
+                uplo, int *n, double *a, int *lda, double *b, int 
+                *ldb, double *vl, double *vu, int *il, int *iu, 
+                double *abstol, int *m, double *w, double *z__, 
+                int *ldz, double *work, int *lwork, int *iwork, 
+                int *ifail, int *info);
+
+    int dgesvd_(char *jobu, char *jobvt, int *m, int *n, 
+                double *a, int *lda, double *s, double *u, int *
+                ldu, double *vt, int *ldvt, double *work, int *lwork, 
+                int *info);
+
+    int dgels_(char *trans, int *m, int *n, int *
+               nrhs, double *a, int *lda, double *b, int *ldb, 
+               double *work, int *lwork, int *info);
+
+    int dposv_(char *uplo, int *n, int *nrhs, double 
+               *a, int *lda, double *b, int *ldb, int *info);
+
 }
 
+namespace saamge
+{
+using namespace mfem;
+
 /* Functions */
-
-
 
 void xpacks_calc_spd_inverse_dense(const DenseMatrix& Ain, DenseMatrix& invA)
 {
     char uplo = 'U';
-    integer n = Ain.Height();
-    integer lda = n;
-    integer info;
+    int n = Ain.Height();
+    int lda = n;
+    int info;
     SA_ASSERT(Ain.Height() == Ain.Width());
     invA.SetSize(n);
     SA_ASSERT(invA.Width() == invA.Height());
     SA_ASSERT(invA.Width() == Ain.Width());
-    doublereal *A = invA.Data();
+    double *A = invA.Data();
 
     memcpy(A, Ain.Data(), sizeof(*A) * n * n);
 
@@ -71,20 +107,20 @@ void xpacks_calc_all_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 {
     char jobz = 'V';
     char uplo = 'U';
-    integer n = Ain.Height();
-    integer lda = n;
-    integer lwork = 3*n;
-//    doublereal *work = new doublereal[lwork];
-    integer info;
-    doublereal *A;
-    doublereal *w;
+    int n = Ain.Height();
+    int lda = n;
+    int lwork = 3*n;
+//    double *work = new double[lwork];
+    int info;
+    double *A;
+    double *w;
 
     SA_ASSERT(n > 0);
 
     evals.SetSize(n);
-    w = (doublereal *)evals.GetData();
+    w = (double *)evals.GetData();
     evects.SetSize(n);
-    A = (doublereal *)evects.Data();
+    A = (double *)evects.Data();
 
     SA_ASSERT(Ain.Height() == Ain.Width());
     SA_ASSERT(evects.Height() == evects.Width());
@@ -93,11 +129,11 @@ void xpacks_calc_all_eigens_dense(const DenseMatrix& Ain, Vector& evals,
     memcpy(A, Ain.Data(), sizeof(*A) * n * n);
 
     lwork = -1;
-    doublereal qwork;
+    double qwork;
     dsyev_(&jobz, &uplo, &n, A, &lda, w, &qwork, &lwork, &info);
     SA_ASSERT(!info);
-    lwork = (integer)qwork + 1;
-    doublereal *work = new doublereal[lwork];
+    lwork = (int)qwork + 1;
+    double *work = new double[lwork];
 
     dsyev_(&jobz, &uplo, &n, A, &lda, w, work, &lwork, &info);
     SA_ASSERT(!info);
@@ -139,25 +175,25 @@ void xpacks_calc_all_gen_eigens_dense(const DenseMatrix& Ain, Vector& evals,
                                       DenseMatrix& evects,
                                       const DenseMatrix& Bin)
 {
-    integer itype = 1;
+    int itype = 1;
     char jobz = 'V';
     char uplo = 'U';
-    integer n = Ain.Height();
-    integer lda = n;
-    integer ldb = n;
-    integer lwork = 3*n;
-//    doublereal *work = new doublereal[lwork];
-    integer info;
-    doublereal *A;
-    doublereal *B = new doublereal[n*n];
-    doublereal *w;
+    int n = Ain.Height();
+    int lda = n;
+    int ldb = n;
+    int lwork = 3*n;
+//    double *work = new double[lwork];
+    int info;
+    double *A;
+    double *B = new double[n*n];
+    double *w;
 
     SA_ASSERT(n > 0);
 
     evals.SetSize(n);
-    w = (doublereal *)evals.GetData();
+    w = (double *)evals.GetData();
     evects.SetSize(n);
-    A = (doublereal *)evects.Data();
+    A = (double *)evects.Data();
 
     SA_ASSERT(Ain.Height() == Ain.Width());
     SA_ASSERT(evects.Height() == evects.Width());
@@ -169,12 +205,12 @@ void xpacks_calc_all_gen_eigens_dense(const DenseMatrix& Ain, Vector& evals,
     memcpy(A, Ain.Data(), sizeof(*A) * n * n);
 
     lwork = -1;
-    doublereal qwork;
+    double qwork;
     dsygv_(&itype, &jobz, &uplo, &n, A, &lda, B, &ldb, w, &qwork, &lwork,
            &info);
     SA_ASSERT(!info);
-    lwork = (integer)qwork + 1;
-    doublereal *work = new doublereal[lwork];
+    lwork = (int)qwork + 1;
+    double *work = new double[lwork];
 
     dsygv_(&itype, &jobz, &uplo, &n, A, &lda, B, &ldb, w, work, &lwork, &info);
     SA_ASSERT(!info);
@@ -187,28 +223,28 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
                                    DenseMatrix& evects, const DenseMatrix& Bin,
                                    double upper, bool atleast_one)
 {
-    integer itype = 1;
+    int itype = 1;
     char jobz = 'V';
-    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with integers il, iu for which eigenvectors to take
+    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with ints il, iu for which eigenvectors to take
     char uplo = 'U';
-    integer n = Ain.Height();
-    integer lda = n;
-    integer ldb = n;
-    doublereal vl = -1.;
-    doublereal vu = upper;
+    int n = Ain.Height();
+    int lda = n;
+    int ldb = n;
+    double vl = -1.;
+    double vu = upper;
     char cmach = 'S';
-    doublereal abstol = 2. * dlamch_(&cmach);
-    integer m;
-    integer ldz = n;
-    integer lwork = 8*n;
-//    doublereal *work = new doublereal[lwork];
-    integer *iwork = new integer[5*n];
-    integer *ifail = new integer[n];
-    integer info;
-    doublereal *A = new doublereal[n*n];
-    doublereal *B = new doublereal[n*n];
-    doublereal *w = new doublereal[n];
-    doublereal *z = new doublereal[n*n];
+    double abstol = 2. * dlamch_(&cmach);
+    int m;
+    int ldz = n;
+    int lwork = 8*n;
+//    double *work = new double[lwork];
+    int *iwork = new int[5*n];
+    int *ifail = new int[n];
+    int info;
+    double *A = new double[n*n];
+    double *B = new double[n*n];
+    double *w = new double[n];
+    double *z = new double[n*n];
 
     SA_ASSERT(n > 0);
 
@@ -220,12 +256,12 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
     memcpy(A, Ain.Data(), sizeof(*A) * n * n);
 
     lwork = -1;
-    doublereal qwork;
+    double qwork;
     dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
             NULL, &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
-    lwork = (integer)qwork + 1;
-    doublereal *work = new doublereal[lwork];
+    lwork = (int)qwork + 1;
+    double *work = new double[lwork];
 
     dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
             NULL, &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
@@ -237,8 +273,8 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
         SA_ALERT(0 < m);
 #endif
         // Far from good
-        integer il = 1;
-        integer iu = 1;
+        int il = 1;
+        int iu = 1;
         range = 'I';
 
         memcpy(B, Bin.Data(), sizeof(*B) * n * n);
@@ -281,28 +317,28 @@ int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
                                    DenseMatrix& evects, const DenseMatrix& Bin,
                                    double lower, bool atleast_one)
 {
-    integer itype = 1;
+    int itype = 1;
     char jobz = 'V';
-    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with integers il, iu for which eigenvectors to take
+    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with ints il, iu for which eigenvectors to take
     char uplo = 'U';
-    integer n = Ain.Height();
-    integer lda = n;
-    integer ldb = n;
-    doublereal vl = lower;
-    doublereal vu = 2.;
+    int n = Ain.Height();
+    int lda = n;
+    int ldb = n;
+    double vl = lower;
+    double vu = 2.;
     char cmach = 'S';
-    doublereal abstol = 2. * dlamch_(&cmach);
-    integer m;
-    integer ldz = n;
-    integer lwork = 8*n;
-//    doublereal *work = new doublereal[lwork];
-    integer *iwork = new integer[5*n];
-    integer *ifail = new integer[n];
-    integer info;
-    doublereal *A = new doublereal[n*n];
-    doublereal *B = new doublereal[n*n];
-    doublereal *w = new doublereal[n];
-    doublereal *z = new doublereal[n*n];
+    double abstol = 2. * dlamch_(&cmach);
+    int m;
+    int ldz = n;
+    int lwork = 8*n;
+//    double *work = new double[lwork];
+    int *iwork = new int[5*n];
+    int *ifail = new int[n];
+    int info;
+    double *A = new double[n*n];
+    double *B = new double[n*n];
+    double *w = new double[n];
+    double *z = new double[n*n];
 
     SA_ASSERT(n > 0);
 
@@ -314,12 +350,12 @@ int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
     memcpy(A, Ain.Data(), sizeof(*A) * n * n);
 
     lwork = -1;
-    doublereal qwork;
+    double qwork;
     dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
             NULL, &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
-    lwork = (integer)qwork + 1;
-    doublereal *work = new doublereal[lwork];
+    lwork = (int)qwork + 1;
+    double *work = new double[lwork];
 
     dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
             NULL, &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
@@ -331,8 +367,8 @@ int xpacks_calc_upper_eigens_dense(const DenseMatrix& Ain, Vector& evals,
         SA_ALERT(0 < m);
 #endif
         // Far from good
-        integer il = n;
-        integer iu = n;
+        int il = n;
+        int iu = n;
         range = 'I';
 
         memcpy(B, Bin.Data(), sizeof(*B) * n * n);
@@ -463,8 +499,8 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
     int i,j;
     char jobu = 'S';
     char jobvt = 'N';
-    integer m = arr[0].Height();
-    integer n = arr[0].Width();
+    int m = arr[0].Height();
+    int n = arr[0].Width();
 
     for (i=1; i < arr_size; ++i)
     {
@@ -472,17 +508,17 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
         n += arr[i].Width();
     }
 
-    integer lda = m;
-    integer ldu = m;
-    integer ldvt = n;
-    doublereal *vt = NULL;
-    integer lwork = -1;
-    integer info;
-    doublereal qwork;
-    doublereal *a = new doublereal[m*n];
-    doublereal *s;
-    doublereal *u;
-    int minimal = min(m, n);
+    int lda = m;
+    int ldu = m;
+    int ldvt = n;
+    double *vt = NULL;
+    int lwork = -1;
+    int info;
+    double qwork;
+    double *a = new double[m*n];
+    double *s;
+    double *u;
+    int minimal = std::min(m, n);
 
     if (SA_IS_OUTPUT_LEVEL(9))
     {
@@ -494,7 +530,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
         SA_PRINTF("%s","ERROR: empty eigenvalue array!\n");
     SA_ASSERT(minimal > 0);
 
-    doublereal *ptr = a;
+    double *ptr = a;
     Vector vect(NULL, m);
     if (SA_IS_OUTPUT_LEVEL(9))
         PROC_STR_STREAM << "Norms = [ ";
@@ -508,7 +544,8 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
                 PROC_STR_STREAM << norm << " ";
             if (SA_REAL_ALMOST_LE(norm, 0.))
             {
-                SA_PRINTF("      arr_size = %d, minimal = %d, m = %d, n = %d, i = %d, norm = %e\n",
+                SA_PRINTF("      WARNING: zero eigenvector. arr_size = %d, minimal = %d, "
+                          "m = %d, n = %d, i = %d, norm = %e\n",
                           arr_size, minimal, m, n, i, norm);
                 n = n - 1;
             }
@@ -526,10 +563,10 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
         SA_PRINTF("%s", PROC_STR_STREAM.str().c_str());
         PROC_CLEAR_STR_STREAM;
     }
-    minimal = min(m, n);
+    minimal = std::min(m, n);
 
     svals.SetSize(minimal);
-    s = (doublereal *)svals.GetData();
+    s = (double *)svals.GetData();
     lsvects.SetSize(m, minimal);
     u = lsvects.Data();
 
@@ -537,11 +574,11 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
             &lwork, &info);
     SA_ASSERT(!info);
 
-    lwork = (integer)qwork + 1;
+    lwork = (int)qwork + 1;
     SA_ASSERT(lwork >= 1);
-    if (lwork < max(3 * minimal + max(m, n), 5 * minimal))
-        lwork = max(3 * minimal + max(m, n), 5 * minimal);
-    doublereal *work = new doublereal[lwork];
+    if (lwork < std::max(3 * minimal + std::max(m, n), 5 * minimal))
+        lwork = std::max(3 * minimal + std::max(m, n), 5 * minimal);
+    double *work = new double[lwork];
 
     dgesvd_(&jobu, &jobvt, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work,
             &lwork, &info);
@@ -590,16 +627,16 @@ void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
 void xpack_solve_lls(const DenseMatrix& A, const Vector &rhs, Vector &x)
 {
     char trans = 'N';
-    integer m = A.Height();
-    integer n = A.Width();
-    integer nrhs = 1;
-    doublereal *a = new doublereal[m*n];
-    integer lda = m;
-    doublereal *b = new doublereal[m];
-    integer ldb = m;
-    integer info;
-    integer lwork = 2*(m+n);
-    doublereal *work = new doublereal[2*(m+n)];
+    int m = A.Height();
+    int n = A.Width();
+    int nrhs = 1;
+    double *a = new double[m*n];
+    int lda = m;
+    double *b = new double[m];
+    int ldb = m;
+    int info;
+    int lwork = 2*(m+n);
+    double *work = new double[2*(m+n)];
     
     SA_ASSERT(A.Height() == rhs.Size());
     SA_ASSERT(A.Width() == x.Size());
@@ -621,13 +658,13 @@ void xpack_solve_spd_Cholesky(const DenseMatrix& A, const Vector &rhs,
                               Vector &x)
 {
     char uplo = 'U';
-    integer n = A.Height();
-    integer nrhs = 1;
-    doublereal *a = A.Data();
-    integer lda = n;
-    doublereal *b = new doublereal[n];
-    integer ldb = n;
-    integer info;
+    int n = A.Height();
+    int nrhs = 1;
+    double *a = A.Data();
+    int lda = n;
+    double *b = new double[n];
+    int ldb = n;
+    int info;
 
     SA_ASSERT(A.Width() == A.Height());
     SA_ASSERT(rhs.Size() == n);
@@ -641,3 +678,5 @@ void xpack_solve_spd_Cholesky(const DenseMatrix& A, const Vector &rhs,
     x.SetDataAndSize(b, n);
     x.MakeDataOwner();
 }
+
+} // namespace saamge

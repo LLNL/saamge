@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -34,15 +34,22 @@
 #define __STDC_LIMIT_MACROS
 #include <climits>
 #include <mfem.hpp>
+#ifndef MFEM_USE_METIS_5
+// METIS 4 prototypes
+typedef int idxtype;
 extern "C" {
-#include <metis.h>
+   void METIS_PartGraphKway(int*, idxtype*, idxtype*, idxtype*, idxtype*,
+                            int*, int*, int*, int*, int*, idxtype*);
 }
-
-using namespace mfem;
-
-#if (IDX_MAX != INT_MAX || IDX_MIN != INT_MIN)
-#error "idx_t does NOT match int!"
+#else
+extern "C" {
+#include "metis.h"
+}
 #endif
+
+namespace saamge
+{
+using namespace mfem;
 
 /* Functions */
 
@@ -112,13 +119,21 @@ int connectedComponents(Array<int>& partitioning, const Table& conn)
 
 int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
 {
-    SA_ASSERT(graph.Size() == graph.Width());
-    idx_t options[METIS_NOPTIONS];
-    idx_t nodes_number = graph.Size();
-    idx_t ncon = 1, objval;
+    SA_ASSERT(graph.Size() == graph.Width() || *parts == 1);
+#ifndef MFEM_USE_METIS_5
+    idxtype wgtflag = 0;
+    idxtype numflag = 0;
+    int options[5];
+#else
+    idx_t ncon = 1;
+    int options[METIS_NOPTIONS];
+    int stat;
+#endif
+    int nodes_number = graph.Size();
+    int objval;
+
     int *partitioning = new int[nodes_number];
     Array<int> p_array(partitioning, nodes_number);
-    int stat;
     const int target_parts = *parts;
     int actual_parts;
     SA_ASSERT(target_parts > 0);
@@ -127,7 +142,21 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
 
     if (target_parts > 1)
     {
-        // Initialize options with their defaults.
+#ifndef MFEM_USE_METIS_5
+        options[0] = 0;
+        METIS_PartGraphKway(&nodes_number,
+                            const_cast<Table&>(graph).GetI(),
+                            const_cast<Table&>(graph).GetJ(),
+                            (idxtype *) weights,
+                            (idxtype *) NULL,
+                            &wgtflag,
+                            &numflag,
+                            parts,
+                            options,
+                            &objval,
+                            (idxtype *) partitioning);
+
+#else
         METIS_SetDefaultOptions(options);
         // Enforce, just in case, k-way partitioning.
         options[METIS_OPTION_PTYPE] = METIS_PTYPE_KWAY;
@@ -152,6 +181,7 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
                                    &objval,
                                    partitioning);
         SA_ASSERT(METIS_OK == stat);
+#endif
         SA_ASSERT(target_parts == *parts);
     } 
     else
@@ -160,7 +190,8 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
     }
 
     // part_check_partitioning(graph, partitioning);
-    connectedComponents(p_array, graph);
+    if (target_parts > 1)
+        connectedComponents(p_array, graph);
     // part_check_partitioning(graph, partitioning);
     actual_parts = p_array.Max() + 1;
     *parts = actual_parts;
@@ -174,7 +205,7 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
 
 int *part_generate_partitioning_unweighted(const Table& graph, int *parts)
 {
-    SA_ASSERT(graph.Size() == graph.Width());
+    SA_ASSERT(graph.Size() == graph.Width() || *parts == 1);
     int * weights = new int[graph.Size()];
     for (int i=0; i<graph.Size(); ++i)
         weights[i] = 1.0;
@@ -290,3 +321,5 @@ void part_check_partitioning(const Table& graph, const int *partitioning)
     else
         SA_ALERT_PRINTF("%d EMPTY partitions!", empty_parts);
 }
+
+} // namespace saamge

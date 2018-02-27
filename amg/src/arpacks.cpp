@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -30,18 +30,17 @@
 */
 
 #include "common.hpp"
+#if SAAMGE_USE_ARPACK
 #include "arpacks.hpp"
 #include <mfem.hpp>
-using namespace mfem;
-
-/* XXX: We use this particular functionality in MFEM.
-   TODO: I hope this include will not be explicitly needed in next versions of
-         MFEM. */
-#include <general/sort_pairs.hpp>
 
 #include <argsym.h> // does not use superlu...
 // #include <arlsmat.h> // uses superlu
 // #include <arlgsym.h> // uses superlu
+
+namespace saamge
+{
+using namespace mfem;
 
 /* Classes */
 
@@ -283,3 +282,6 @@ int arpacks_calc_portion_eigens_sparse_diag(const SparseMatrix& Ain,
     return converged;
 }
 
+}
+
+#endif // SAAMGE_USE_ARPACK

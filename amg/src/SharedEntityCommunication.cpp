@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -43,7 +43,9 @@
 */
 
 #include "SharedEntityCommunication.hpp"
-// #include <cstdio>
+
+namespace saamge
+{
 
 template <>
 void SharedEntityCommunication<mfem::DenseMatrix>::SetSizeSpecifier()
@@ -157,3 +159,5 @@ void SharedEntityCommunication<mfem::Vector>::ReceiveData(
 }
 
 template class SharedEntityCommunication<mfem::Vector>;
+
+} // namespace saamge

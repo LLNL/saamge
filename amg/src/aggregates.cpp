@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -44,6 +44,8 @@
 using std::fabs;
 using std::sqrt;
 
+namespace saamge
+{
 using namespace mfem;
 
 /* Static Functions */
@@ -66,7 +68,7 @@ using namespace mfem;
 static inline
 double agg_assemble_value(int di, int dj, int part,
                           const agg_partitioning_relations_t& agg_part_rels,
-                          ElementMatrixProvider *data)
+                          const ElementMatrixProvider *data)
 {
     SA_ASSERT(&agg_part_rels);
     SA_ASSERT(agg_part_rels.partitioning);
@@ -158,7 +160,8 @@ double agg_assemble_value(int di, int dj, int part,
             value += (*elmat)(dii, djj);
             if (free_matr)
                 delete elmat;
-        } else
+        }
+        else
         { // Sparse element matrix.
             SA_ASSERT(dynamic_cast<const SparseMatrix *>(elem_matr));
             spm = static_cast<const SparseMatrix *>(elem_matr);
@@ -245,7 +248,7 @@ int *agg_preconstruct_aggregates(const Table& dof_to_AE, int nparts,
         {
             preaggregates[i] = -2; // Mark as non-trivial.
             SA_SET_FLAGS(agg_flags[i], AGG_BETWEEN_AES_FLAG);
-        } 
+        }
         else
         {
             SA_ASSERT(1 == dof_to_AE.RowSize(i));
@@ -484,7 +487,7 @@ int agg_construct_aggregate_mises(
 /**
    Inspired by serial SAAMGE ATB 1 April 2015
    but now heavily modified to work in parallel
-   
+
    Dof_to_gAE has (shared) local Dofs on rows, global AE on columns,
    ie it is Dof_TrueDof (from the ParFES) * TrueDof_to_AE (from agg_construct_mises_parallel)
 
@@ -648,6 +651,45 @@ int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
 }
 
 /**
+   Given Dof_TrueDof_Dof relation and local partitioning (in the form l_AE_to_dof),
+   construct and return a global DofToAE matrix, suitable for input to 
+   agg_construct_mises_local()
+*/
+HypreParMatrix * BuildGlobalDofToAE(HypreParMatrix * Dof_TrueDof_Dof,
+                                    Table& l_AE_to_dof)
+{
+    // construct dof_to_gAE
+    Array<int> row_offsets;
+    int global_num_rows;
+    proc_determine_offsets(l_AE_to_dof.Size(), row_offsets, global_num_rows);
+    row_offsets.Append(global_num_rows); // I think MFEM handles assumed partition differently from hypre?
+    SA_RPRINTF_L(0, 6, "constructing AE_to_dof of global size %d by %d\n",
+                 global_num_rows, Dof_TrueDof_Dof->M());
+
+    Array<int> col_offsets(3);
+    col_offsets[0] = Dof_TrueDof_Dof->GetRowStarts()[0];
+    col_offsets[1] = Dof_TrueDof_Dof->GetRowStarts()[1];
+    col_offsets[2] = Dof_TrueDof_Dof->M(); // this is ridiculous, Tzanio
+
+    // the local AE_to_dof has no knowledge of AEs on other processors
+    HypreParMatrix * AE_to_dof = new HypreParMatrix(PROC_COMM, global_num_rows,
+                                                    Dof_TrueDof_Dof->M(),
+                                                    row_offsets.GetData(),
+                                                    col_offsets.GetData(),
+                                                    &l_AE_to_dof);
+
+    // gAE_to_Dof has row starts owned AE_to_dof, col starts owned by TrueDof_Dof
+    HypreParMatrix * gAE_to_Dof = ParMult(AE_to_dof, Dof_TrueDof_Dof);
+    hypre_ParCSRMatrixDeleteZeros(*gAE_to_Dof,1.e-10); // if the matrix is square, it has wrong zeros on diagonal sometimes (rare corner case)
+
+    HypreParMatrix * Dof_to_gAE = gAE_to_Dof->Transpose(); // should own everything
+    delete AE_to_dof;
+    delete gAE_to_Dof;
+
+    return Dof_to_gAE;
+}
+
+/**
    At this point I am just throwing all the tables I can produce 
    up on the wall and seeing which ones stick.
    I am afraid I am reinventing Umberto's SharingMap, but at 
@@ -679,31 +721,7 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     // Dof_TrueDof_Dof has rows owned by Dof_TrueDof, cols by TrueDof_Dof
     HypreParMatrix * Dof_TrueDof_Dof = ParMult(Dof_TrueDof, TrueDof_Dof);
 
-    // construct dof_to_gAE
-    Array<int> row_offsets;
-    int global_num_rows;
-    proc_determine_offsets(l_AE_to_dof.Size(), row_offsets, global_num_rows);
-    row_offsets.Append(global_num_rows); // I think MFEM handles assumed partition differently from hypre?
-    SA_RPRINTF(0,"constructing AE_to_dof of global size %d by %d\n",
-               global_num_rows, Dof_TrueDof->M());
-
-    int * col_offsets = new int[3];
-    col_offsets[0] = Dof_TrueDof->GetRowStarts()[0];
-    col_offsets[1] = Dof_TrueDof->GetRowStarts()[1];
-    col_offsets[2] = Dof_TrueDof->M(); // this is ridiculous, Tzanio
-
-    // the local AE_to_dof has no knowledge of AEs on other processors
-    HypreParMatrix * AE_to_dof = new HypreParMatrix(PROC_COMM, global_num_rows,
-                                                    Dof_TrueDof->M(),
-                                                    row_offsets.GetData(),
-                                                    col_offsets,
-                                                    &l_AE_to_dof);
-
-    // gAE_to_Dof has row starts owned AE_to_dof, col starts owned by TrueDof_Dof
-    HypreParMatrix * gAE_to_Dof = ParMult(AE_to_dof, Dof_TrueDof_Dof); 
-    hypre_ParCSRMatrixDeleteZeros(*gAE_to_Dof,1.e-10); // if the matrix is square, it has wrong zeros on diagonal sometimes (rare corner case)
-
-    HypreParMatrix * Dof_to_gAE = gAE_to_Dof->Transpose(); // should own everything
+    HypreParMatrix * Dof_to_gAE = BuildGlobalDofToAE(Dof_TrueDof_Dof, l_AE_to_dof);
     if (agg_part_rels.testmesh)
         Dof_to_gAE->Print("Dof_to_gAE.mat");
 
@@ -724,6 +742,7 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
 
     // construct mis_truemis
     Array<int> row_offsets2; // these get destroyed at end of routine...
+    int global_num_rows;
     proc_determine_offsets(agg_part_rels.truemis_to_dof->Size(), row_offsets2, global_num_rows);
     row_offsets2.Append(global_num_rows);
     Array<int> col_offsets2(3);
@@ -755,8 +774,8 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     {
         std::stringstream filename;
         filename << "mis_to_AE." << PROC_RANK << ".table";
-        std::ofstream out(filename.str().c_str());
-        agg_part_rels.mis_to_AE->Print(out);
+        std::ofstream outstream(filename.str().c_str());
+        agg_part_rels.mis_to_AE->Print(outstream);
     }
 
     // TODO: wait, why can't I just do mis_to_dof * dof_to_truemis? why Dof_TrueDof_Dof?
@@ -779,21 +798,15 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     if (agg_part_rels.testmesh) 
        agg_part_rels.mis_truemis->Print("mis_truemis.mat");
 
-    delete AE_to_dof;
     delete TrueDof_Dof;
     delete Dof_TrueDof_Dof;
     delete temp;
     delete dof_to_truemis;
 
-    delete [] col_offsets;
-
     delete truemis_to_dof;
     delete mis_to_dof;
 
-    delete gAE_to_Dof;
     delete Dof_to_gAE;
-
-    // SA_RPRINTF(0,"%s","--- end agg_construct_mises_parallel() ---\n");
 
     return out;
 }
@@ -833,13 +846,14 @@ void agg_produce_mises(HypreParMatrix& Aglobal,
         agg_part_rels.mises, agg_part_rels.mises_size,
         bdr_dofs, do_aggregates);
 
-    SA_RPRINTF(0,"Total number of MISes = %d\n",
-               agg_part_rels.mis_truemis->GetGlobalNumRows());
+    SA_RPRINTF_L(0, 5, "Total number of MISes = %d\n",
+                 agg_part_rels.mis_truemis->GetGlobalNumRows());
 }
 
-SparseMatrix *agg_build_AE_stiffm_with_global(const SparseMatrix& A, int part,
+SparseMatrix *agg_build_AE_stiffm_with_global(
+    const SparseMatrix& A, int part,
     const agg_partitioning_relations_t& agg_part_rels,
-    ElementMatrixProvider *data, bool bdr_cond_imposed,
+    const ElementMatrixProvider *data, bool bdr_cond_imposed,
     bool assemble_ess_diag)
 {
     const int * const row = agg_part_rels.AE_to_dof->GetRow(part);
@@ -847,7 +861,7 @@ SparseMatrix *agg_build_AE_stiffm_with_global(const SparseMatrix& A, int part,
     SparseMatrix *AE_stiffm = new SparseMatrix(rs, rs);
     bool *diag = new bool[rs];
 
-    memset(diag, 0, sizeof(*diag)*rs);
+    std::memset(diag, 0, sizeof(*diag)*rs);
 
     SA_ASSERT(agg_part_rels.partitioning);
     SA_ASSERT(agg_part_rels.agg_flags); 
@@ -914,7 +928,8 @@ SparseMatrix *agg_build_AE_stiffm_with_global(const SparseMatrix& A, int part,
                     } else
                         diag[i] = true;
                 }
-            } else
+            }
+            else
             {
                 if (0. != neigh_data[j])
                     AE_stiffm->Set(i, local_neigh, neigh_data[j]);
@@ -925,24 +940,6 @@ SparseMatrix *agg_build_AE_stiffm_with_global(const SparseMatrix& A, int part,
     AE_stiffm->Finalize();
     delete [] diag;
     return AE_stiffm;
-}
-
-SparseMatrix **agg_build_AEs_stiffm_with_global(const SparseMatrix& A,
-    const agg_partitioning_relations_t& agg_part_rels,
-    ElementMatrixProvider *data, bool bdr_cond_imposed,
-    bool assemble_ess_diag)
-{
-    SA_ASSERT(agg_part_rels.nparts > 0);
-    SparseMatrix **arr = new SparseMatrix*[agg_part_rels.nparts];
-
-    SA_ASSERT(arr);
-    for (int i=0; i < agg_part_rels.nparts; ++i)
-        arr[i] = agg_build_AE_stiffm_with_global(A, i, agg_part_rels,
-                                                 data,
-                                                 bdr_cond_imposed,
-                                                 assemble_ess_diag);
-
-    return arr;
 }
 
 bool check_diagonal(const SparseMatrix &mat)
@@ -957,9 +954,9 @@ bool check_diagonal(const SparseMatrix &mat)
     return out;
 }
 
-SparseMatrix *agg_build_AE_stiffm(int part,
-                                  const agg_partitioning_relations_t& agg_part_rels,
-                                  ElementMatrixProvider *data)
+SparseMatrix *agg_build_AE_stiffm(
+    int part, const agg_partitioning_relations_t& agg_part_rels,
+    const ElementMatrixProvider *data)
 {
     bool free_matr;
     const int * const AEelems = agg_part_rels.AE_to_elem->GetRow(part);
@@ -976,8 +973,6 @@ SparseMatrix *agg_build_AE_stiffm(int part,
 
     int elem = AEelems[i=0];
     SA_ASSERT(0 <= elem && elem < agg_part_rels.elem_to_dof->Size());
-    // elmat_callback is probably elmat_parallel() on coarser levels
-    // const Matrix *matr = elmat_callback(elem, &agg_part_rels, data, free_matr);
     const Matrix *matr = data->GetMatrix(elem, free_matr);
 
     const SparseMatrix *elem_matr = dynamic_cast<const SparseMatrix *>(matr);
@@ -1033,7 +1028,8 @@ SparseMatrix *agg_build_AE_stiffm(int part,
             } else
                 break;
         }
-    } else //The element matrices are dense.
+    }
+    else //The element matrices are dense.
     {
         const DenseMatrix *elem_dmatr = dynamic_cast<const DenseMatrix *>(matr);
         for (;;)
@@ -1087,148 +1083,6 @@ SparseMatrix *agg_build_AE_stiffm(int part,
     return AE_stiffm;
 }
 
-SparseMatrix *agg_simple_assemble(
-    const agg_partitioning_relations_t& agg_part_rels,
-    const ElementMatrixProvider &data, bool assem_skip_zeros,
-    bool final_skip_zeros, bool finalize, const agg_dof_status_t *bdr_dofs,
-    const Vector *sol, Vector *rhs, bool keep_diag)
-{
-    SA_PRINTF_L(4, "%s", "Assembling matrix...\n");
-    SA_ASSERT(agg_part_rels.elem_to_dof);
-    SA_ASSERT(agg_part_rels.dof_to_elem);
-    bool free_matr;
-    const Table& elem_to_dof = *agg_part_rels.elem_to_dof;
-    const int num_dofs = agg_part_rels.dof_to_elem->Size();
-    const int elems_num = elem_to_dof.Size();
-    int i, k, j;
-    double el;
-    SA_ASSERT(num_dofs > 0);
-    SparseMatrix *glob_matr = new SparseMatrix(num_dofs);
-
-    SA_ASSERT(elems_num > 0);
-
-    // const Matrix *matr = elmat_callback(i=0, &agg_part_rels, data, free_matr);
-    i = 0;
-    const Matrix *matr = data.GetMatrix(i, free_matr);
-
-    const SparseMatrix *elem_matr = dynamic_cast<const SparseMatrix *>(matr);
-    if (elem_matr) //The element matrices are sparse.
-    {
-        for (;;)
-        {
-            SA_ASSERT(elem_matr);
-            SA_ASSERT(const_cast<SparseMatrix *>(elem_matr)->Finalized());
-            SA_ASSERT(elem_matr->Size() == elem_matr->Width());
-            const int sz = elem_matr->Size();
-            SA_ASSERT(sz <= num_dofs);
-            const int * const I = elem_matr->GetI();
-            const int * const J = elem_matr->GetJ();
-            const double * const Data = elem_matr->GetData();
-            SA_ASSERT(elem_to_dof.RowSize(i) == sz);
-            const int * const map = elem_to_dof.GetRow(i);
-
-            for (k=0; k < sz; ++k)
-            {
-                const int glob_k = map[k];
-                SA_ASSERT(0 <= glob_k && glob_k < num_dofs);
-                for (j = I[k]; j < I[k+1]; ++j)
-                {
-                    SA_ASSERT(0 <= J[j] && J[j] < sz);
-                    SA_ASSERT(0 <= map[J[j]] && map[J[j]] < num_dofs);
-                    el = Data[j];
-                    if (assem_skip_zeros && 0. == el)
-                        continue;
-                    glob_matr->Add(glob_k, map[J[j]], el);
-                }
-            }
-            if (free_matr)
-                delete elem_matr;
-
-            if (++i < elems_num)
-            {
-                // matr = elmat_callback(i, &agg_part_rels, data, free_matr);
-                matr = data.GetMatrix(i, free_matr);
-                SA_ASSERT(dynamic_cast<const SparseMatrix *>(matr));
-                elem_matr = static_cast<const SparseMatrix *>(matr);
-            } else
-                break;
-        }
-    } else //The element matrices are dense.
-    {
-        SA_ASSERT(dynamic_cast<const DenseMatrix *>(matr));
-        const DenseMatrix *elem_dmatr = static_cast<const DenseMatrix *>(matr);
-        for (i=0;;)
-        {
-            SA_ASSERT(elem_dmatr);
-            SA_ASSERT(elem_dmatr->Height() == elem_dmatr->Width());
-            const int sz = elem_dmatr->Height();
-            SA_ASSERT(sz <= num_dofs);
-            SA_ASSERT(elem_to_dof.RowSize(i) == sz);
-            const int * const map = elem_to_dof.GetRow(i);
-
-#if 0
-            for (k=0; k < sz; ++k)
-            {
-                const int glob_k = map[k];
-                SA_ASSERT(0 <= glob_k && glob_k < num_dofs);
-                for (j=0; j < sz; ++j)
-                {
-                    SA_ASSERT(0 <= map[j] && map[j] < num_dofs);
-                    el = (*elem_dmatr)(k, j);
-                    if (assem_skip_zeros && 0. == el)
-                        continue;
-                    glob_matr->Add(glob_k, map[j], el);
-                }
-            }
-#else
-            Array<int> rowcol((int *)map, sz);
-            glob_matr->AddSubMatrix(rowcol, rowcol, *elem_dmatr,
-                                    assem_skip_zeros);
-#endif
-            if (free_matr)
-                delete elem_dmatr;
-
-            if (++i < elems_num)
-            {
-                // matr = elmat_callback(i, &agg_part_rels, data, free_matr);
-                matr = data.GetMatrix(i, free_matr);
-                SA_ASSERT(dynamic_cast<const DenseMatrix *>(matr));
-                elem_dmatr = static_cast<const DenseMatrix *>(matr);
-            } else
-                break;
-        }
-    }
-
-    if (bdr_dofs)
-    {
-        SA_ASSERT(sol);
-        SA_ASSERT(rhs);
-        agg_eliminate_essential_bc(*glob_matr, bdr_dofs, *sol, *rhs, keep_diag);
-    }
-
-    if (finalize)
-        glob_matr->Finalize(final_skip_zeros);
-    return glob_matr;
-}
-
-SparseMatrix *agg_simple_assemble(const Matrix * const *elem_matrs,
-                                  Table& elem_to_dof, Table& dof_to_elem,
-                                  bool assem_skip_zeros, bool final_skip_zeros,
-                                  bool finalize,
-                                  const agg_dof_status_t *bdr_dofs,
-                                  const Vector *sol, Vector *rhs,
-                                  bool keep_diag)
-{
-    agg_partitioning_relations_t agg_part_rels;
-    memset(&agg_part_rels, 0, sizeof(agg_part_rels));
-    agg_part_rels.elem_to_dof = &elem_to_dof;
-    agg_part_rels.dof_to_elem = &dof_to_elem;
-    ElementMatrixArray emp(agg_part_rels, elem_matrs);
-    return agg_simple_assemble(agg_part_rels, 
-                               emp, assem_skip_zeros,
-                               final_skip_zeros, finalize, bdr_dofs, sol, rhs,
-                               keep_diag);
-}
 
 /**
   agglomerate restrict to aggregate (not confusing at all)
@@ -1459,11 +1313,9 @@ agg_create_partitioning_fine_isolate(
 
 agg_partitioning_relations_t *
 agg_create_partitioning_fine(
-    HypreParMatrix& A, int NE, Table *elem_to_dof,
-    Table *elem_to_elem, int *partitioning,
-    const agg_dof_status_t *bdr_dofs, int *nparts,
-    HypreParMatrix *dof_truedof,
-    bool do_aggregates, bool testmesh)
+    HypreParMatrix& A, int NE, Table *elem_to_dof, Table *elem_to_elem,
+    int *partitioning, const agg_dof_status_t *bdr_dofs, int *nparts,
+    HypreParMatrix *dof_truedof, bool do_aggregates, bool testmesh)
 {
     agg_partitioning_relations_t *agg_part_rels =
         new agg_partitioning_relations_t;
@@ -1487,19 +1339,16 @@ agg_create_partitioning_fine(
         agg_part_rels->partitioning = partitioning;
     else
     {
-        agg_part_rels->partitioning =
-            part_generate_partitioning_unweighted(*(agg_part_rels->elem_to_elem), nparts);
+        agg_part_rels->partitioning = part_generate_partitioning_unweighted(
+            *(agg_part_rels->elem_to_elem), nparts);
     }
 
     agg_part_rels->nparts = *nparts;
     // SA_PRINTF("in agg_create_partitioning_fine(): nparts = %d\n",*nparts);
 
-    agg_create_partitioning_tables(agg_part_rels,
-                                   A, NE, elem_to_dof,
-                                   elem_to_elem, partitioning,
-                                   bdr_dofs, nparts,
-                                   dof_truedof,
-                                   do_aggregates);
+    agg_create_partitioning_tables(agg_part_rels, A, NE, elem_to_dof,
+                                   elem_to_elem, partitioning, bdr_dofs, nparts,
+                                   dof_truedof, do_aggregates);
     return agg_part_rels;
 }
 
@@ -1511,7 +1360,6 @@ void agg_create_partitioning_tables(
     HypreParMatrix *dof_truedof,
     bool do_aggregates)
 {
-
     SA_ASSERT(elem_to_dof);
     agg_part_rels->elem_to_dof = elem_to_dof;
     Transpose(*(agg_part_rels->elem_to_dof), *(agg_part_rels->dof_to_elem));
@@ -1601,19 +1449,13 @@ Table * agg_create_finedof_to_dof(agg_partitioning_relations_t& agg_part_rels,
                interp->M(), interp->N(),
                agg_part_rels.Dof_TrueDof->M(), agg_part_rels.Dof_TrueDof->N());
     HypreParMatrix * temp = ParMult(agg_part_rels_fine.Dof_TrueDof, interp);
-    // temp->Print("temp.mat");
     HypreParMatrix * TrueDof_Dof = agg_part_rels.Dof_TrueDof->Transpose();
     HypreParMatrix * hpm_finedof_dof = ParMult(temp, TrueDof_Dof);
 
     hypre_ParCSRMatrix * h_finedof_dof = (*hpm_finedof_dof);
     hypre_CSRMatrix * finedof_dof_diag = h_finedof_dof->diag;
-    // hypre_CSRMatrix * finedof_dof_offd = h_finedof_dof->offd;
     int * finedof_dof_diag_I = finedof_dof_diag->i;
     int * finedof_dof_diag_J = finedof_dof_diag->j;
-    // int * finedof_dof_col_starts = h_finedof_dof->col_starts;
-    // int * finedof_dof_offd_I = finedof_dof_offd->i;
-    // int * finedof_dof_offd_J = finedof_dof_offd->j;    
-    // int * finedof_dof_colmap = h_finedof_dof->col_map_offd;
 
     // should probably just do out->SetIJ(); with some StealData mojo or something...
     Table * out = new Table;
@@ -2055,3 +1897,5 @@ agg_partitioning_relations_t
 
     return dst;
 }
+
+} // namespace saamge

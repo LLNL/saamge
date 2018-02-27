@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -39,6 +39,10 @@
 #include <mfem.hpp>
 #include "InversePermeabilityFunction.hpp"
 
+namespace saamge
+{
+using namespace mfem;
+
 void InversePermeabilityFunction::SetNumberCells(int Nx_, int Ny_, int Nz_)
 {
     Nx = Nx_;
@@ -46,8 +50,8 @@ void InversePermeabilityFunction::SetNumberCells(int Nx_, int Ny_, int Nz_)
     Nz = Nz_;
 }
 
-void InversePermeabilityFunction::SetMeshSizes(double hx_, double hy_, 
-                                               double hz_)
+void InversePermeabilityFunction::SetMeshSizes(
+    double hx_, double hy_, double hz_)
 {
     hx = hx_;
     hy = hy_;
@@ -60,9 +64,8 @@ void InversePermeabilityFunction::Set2DSlice(SliceOrientation o, int npos_ )
     npos = npos_;
 }
 
-void InversePermeabilityFunction::SetConstantInversePermeability(double ipx, 
-                                                                 double ipy, 
-                                                                 double ipz)
+void InversePermeabilityFunction::SetConstantInversePermeability(
+    double ipx, double ipy, double ipz)
 {
     int compSize = Nx*Ny*Nz;
     int size = 3*compSize;
@@ -286,3 +289,4 @@ InversePermeabilityFunction::SliceOrientation InversePermeabilityFunction::orien
     InversePermeabilityFunction::NONE );
 int InversePermeabilityFunction::npos(-1);
 
+} // namespace saamge

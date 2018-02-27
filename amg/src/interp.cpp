@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -41,9 +41,9 @@
 #include "mbox.hpp"
 #include "process.hpp"
 
-/* Options */
-
-CONFIG_DEFINE_CLASS(INTERP);
+namespace saamge
+{
+using namespace mfem;
 
 /* Static Functions */
 
@@ -83,9 +83,96 @@ HypreParMatrix *interp_simple_smoother(HypreParMatrix& A,
 
 /* Functions */
 
-HypreParMatrix *interp_smooth(int degree, double *roots,
-                              int times_apply_smoother, HypreParMatrix& A,
-                              HypreParMatrix& tent, HypreParVector& Dinv_neg)
+void AltThresholdLocal(int m, double threshold,
+                       HYPRE_Int * i_in, HYPRE_Int * j_in,
+                       double * data_in, HYPRE_Int ** i_out_ptr,
+                       HYPRE_Int ** j_out_ptr, double ** data_out_ptr)
+{
+    *i_out_ptr = new HYPRE_Int[m+1];
+    HYPRE_Int * i_out = *i_out_ptr;
+    i_out[0] = 0;
+
+    std::vector<int> newj;
+    std::vector<double> newdata;
+    for (int i=0; i<m; ++i)
+    {
+        int thisrowcount = 0;
+        for (int jp=i_in[i]; jp<i_in[i+1]; ++jp)
+        {
+            int j = j_in[jp];
+            double val = data_in[jp];
+            if (fabs(val) > threshold)
+            {
+                thisrowcount++;
+                newj.push_back(j);
+                newdata.push_back(val);
+            }
+        }
+        i_out[i+1] = i_out[i] + thisrowcount;
+    }
+    unsigned int nnz = i_out[m];
+    SA_ASSERT(nnz == newj.size());
+    SA_ASSERT(nnz == newdata.size());
+
+    *j_out_ptr = new HYPRE_Int[i_out[m]];
+    *data_out_ptr = new double[i_out[m]];
+    HYPRE_Int * j_out = *j_out_ptr;
+    double * data_out = *data_out_ptr;
+    for (unsigned int q=0; q<newj.size(); ++q)
+    {
+        j_out[q] = newj[q];
+        data_out[q] = newdata[q];
+    }
+}
+
+/**
+   For some reason mfem::HypreParMatrix::Threshold()
+   takes forever ever ever...
+
+   also that Threshold does not seem to support assumed partition
+ */
+HypreParMatrix * AltThreshold(HypreParMatrix& mat, double val)
+{
+    hypre_ParCSRMatrix * hmat = mat;
+    hypre_CSRMatrix * diag = hmat->diag;
+    hypre_CSRMatrix * offd = hmat->offd;
+
+    HYPRE_Int * diag_i, *diag_j, *offd_i, *offd_j;
+    double * diag_data, *offd_data;
+
+    AltThresholdLocal(diag->num_rows, val,
+                      diag->i, diag->j, diag->data,
+                      &diag_i, &diag_j, &diag_data);
+    AltThresholdLocal(offd->num_rows, val,
+                      offd->i, offd->j, offd->data,
+                      &offd_i, &offd_j, &offd_data);
+
+    HYPRE_Int offd_num_cols = offd->num_cols;
+
+   /** Creates general (rectangular) parallel matrix. The new HypreParMatrix
+       takes ownership of all input arrays, except col_starts and row_starts. */
+        /*
+   HypreParMatrix(MPI_Comm comm,
+                  HYPRE_Int global_num_rows, HYPRE_Int global_num_cols,
+                  HYPRE_Int *row_starts, HYPRE_Int *col_starts,
+                  HYPRE_Int *diag_i, HYPRE_Int *diag_j, double *diag_data,
+                  HYPRE_Int *offd_i, HYPRE_Int *offd_j, double *offd_data,
+                  HYPRE_Int offd_num_cols, HYPRE_Int *offd_col_map);
+        */
+    HypreParMatrix * newmat = new HypreParMatrix(
+        mat.GetComm(), mat.M(), mat.N(),
+        hmat->row_starts, hmat->col_starts, diag_i, diag_j, diag_data,
+        offd_i, offd_j, offd_data, offd_num_cols, hmat->col_map_offd);
+    newmat->CopyRowStarts();
+    newmat->CopyColStarts();
+
+    return newmat;
+}
+
+HypreParMatrix *interp_smooth(
+    int degree, double *roots, double drop_tol,
+    int times_apply_smoother, HypreParMatrix& A,
+    HypreParMatrix& tent, HypreParVector& Dinv_neg)
 {
     HypreParMatrix *smoother_matr = interp_simple_smoother(A, Dinv_neg);
     HypreParMatrix *interp, *iter_matr, *new_interp;
@@ -112,7 +199,7 @@ HypreParMatrix *interp_smooth(int degree, double *roots,
     {
         iter_matr = mbox_scale_clone_parallel_matrix(*smoother_matr,
                                                      1./roots[k]);
-        mbox_add_daig_parallel_matrix(*iter_matr, 1.);
+        mbox_add_diag_parallel_matrix(*iter_matr, 1.);
 
         SA_ASSERT(0 <= times_apply_smoother);
         for (int i=0; i < times_apply_smoother; ++i)
@@ -127,7 +214,18 @@ HypreParMatrix *interp_smooth(int degree, double *roots,
 
     delete smoother_matr;
 
-    return interp;
+    // something is going wrong here in parallel with drop_tol > 0.0
+
+    if (drop_tol == 0.0)
+    {
+        return interp;
+    }
+    else
+    {
+        new_interp = AltThreshold(*interp, drop_tol);
+        delete interp;
+        return new_interp;
+    }
 }
 
 interp_data_t *interp_init_data(
@@ -138,15 +236,6 @@ interp_data_t *interp_init_data(
     interp_data_t *interp_data = new interp_data_t;
     SA_ASSERT(interp_data);
     memset(interp_data, 0, sizeof(*interp_data));
-
-    SA_ASSERT(CONFIG_ACCESS_OPTION(INTERP, eps_svd) >= 0. &&
-              CONFIG_ACCESS_OPTION(INTERP, eps_lin) >= 0.);
-    interp_data->eps_svd = CONFIG_ACCESS_OPTION(INTERP, eps_svd);
-    interp_data->eps_lin = CONFIG_ACCESS_OPTION(INTERP, eps_lin);
-
-    // SA_ASSERT(CONFIG_ACCESS_OPTION(INTERP, finest_elmat_callback));
-    // interp_data->finest_elmat_callback =
-    //  CONFIG_ACCESS_OPTION(INTERP, finest_elmat_callback);
 
     interp_data->nparts = nparts;
     SA_ASSERT(0 < interp_data->nparts);
@@ -161,16 +250,14 @@ interp_data_t *interp_init_data(
     }
 
     SA_ASSERT(nu_pro >= 0);
-    SA_ASSERT(CONFIG_ACCESS_OPTION(INTERP, smoother_roots));
     interp_data->nu_pro = nu_pro;
-    interp_data->interp_smoother_roots =
-        CONFIG_ACCESS_OPTION(INTERP, smoother_roots)(interp_data->nu_pro,
-                                        &(interp_data->interp_smoother_degree));
-    interp_data->times_apply_smoother = CONFIG_ACCESS_OPTION(INTERP,
-                                            times_apply_smoother);
+    interp_data->interp_smoother_roots = smpr_sa_poly_roots(
+        interp_data->nu_pro, &(interp_data->interp_smoother_degree));
+    interp_data->times_apply_smoother = 1;
 
     interp_data->use_arpack = use_arpack;
     interp_data->scaling_P = scaling_P;
+    interp_data->drop_tol = 0.0;
 
     if (SA_IS_OUTPUT_LEVEL(5))
     {
@@ -190,28 +277,32 @@ interp_data_t *interp_init_data(
 }
 
 void interp_free_data(interp_data_t *interp_data,
-                      bool minimal_coarse_space)
+                      bool doing_spectral,
+                      double theta)
 {
     if (!interp_data) return;
-    if (minimal_coarse_space)
-    {
-        delete [] interp_data->rhs_matrices_arr;
-        delete [] interp_data->cut_evects_arr;
-        delete [] interp_data->AEs_stiffm;
-    }
-    else
+
+    if (doing_spectral)
     {
         mbox_free_matr_arr((Matrix **)interp_data->rhs_matrices_arr,
                            interp_data->nparts);
         mbox_free_matr_arr((Matrix **)interp_data->cut_evects_arr,
                            interp_data->nparts);
-        mbox_free_matr_arr((Matrix **)interp_data->AEs_stiffm, interp_data->nparts);
+        mbox_free_matr_arr((Matrix **)interp_data->AEs_stiffm,
+                           interp_data->nparts);
+    }
+    else
+    {
+        delete [] interp_data->rhs_matrices_arr;
+        delete [] interp_data->cut_evects_arr;
+        delete [] interp_data->AEs_stiffm;
     }
     delete [] interp_data->interp_smoother_roots;
     delete interp_data->local_coarse_one_representation;
     delete [] interp_data->mis_numcoarsedof;
 
-    mbox_free_matr_arr((Matrix**) interp_data->mis_tent_interps, interp_data->num_mises);
+    mbox_free_matr_arr((Matrix**) interp_data->mis_tent_interps,
+                       interp_data->num_mises);
     
     delete interp_data;
 }
@@ -237,97 +328,9 @@ interp_data_t *interp_copy_data(const interp_data_t *src)
                              src->interp_smoother_degree);
     dst->times_apply_smoother = src->times_apply_smoother;
 
-    dst->eps_svd = src->eps_svd;
-    dst->eps_lin = src->eps_lin;
-
     src->tent_interp_offsets.Copy(dst->tent_interp_offsets);
 
     return dst;
-}
-
-/**
-   This is a version of interp_compute_vectors() for the
-   algebraic calling sequence/stack, it has a lot of copied
-   code from interp_compute_vectors and TODO we should 
-   eventually combine them in a more rational way.
-
-   It does not support readapting or spect_update, and probably 
-   does not behave quite correctly with respect to transf, or
-   all_eigens. 
-
-   It is only tested with: transf=false, readapting=false,
-   all_eigens=false, spect_update=true
-*/
-void interp_compute_vectors_given_agg_matrices(
-   const agg_partitioning_relations_t& agg_part_rels,
-   const interp_data_t& interp_data, double& tol,
-   double& theta, 
-   bool transf, bool all_eigens)
-{
-    int arpack_size_threshold;
-    if (interp_data.use_arpack)
-        arpack_size_threshold = 64; // ???
-    else
-        arpack_size_threshold = std::numeric_limits<int>::max();
-    const int nparts = agg_part_rels.nparts;
-
-    double sum_skip = 0.;
-    double min_skip = 1.e+50;
-    int skipctr = 0;
-
-    DenseMatrix ** const cut_evects_arr = interp_data.cut_evects_arr;
-    SparseMatrix ** const rhs_matrices_arr = interp_data.rhs_matrices_arr;
-    SparseMatrix ** const AEs_stiffm = interp_data.AEs_stiffm;
-    SA_ASSERT(rhs_matrices_arr);
-    SA_ASSERT(cut_evects_arr);
-    SA_ASSERT(AEs_stiffm);
-
-    // Does eigensolver actually use the mises?
-    Eigensolver eigensolver(agg_part_rels.mises, agg_part_rels, arpack_size_threshold);
-
-    // Loop over AEs.
-    for (int i=0; i < nparts; ++i)
-    {
-        // bool local_added = false;
-        const SparseMatrix *AE_stiffm;
-        Vector xbad_AE;
-        // DenseMatrix *Tt = NULL;
-        double theta_local;
-        theta_local = theta;
-
-        SA_ASSERT(AEs_stiffm[i]); // pre-built in this routine
-        AE_stiffm = AEs_stiffm[i];
-        {
-            cut_evects_arr[i] = new DenseMatrix;
-        }
-        SA_ASSERT(cut_evects_arr[i]);
-
-        // Solve local eigenvalue problem and note if a vector was added.
-        int aggregate_size = -1;
-        eigensolver.Solve(*AE_stiffm, rhs_matrices_arr[i], i, i, aggregate_size,
-                          theta_local, *(cut_evects_arr[i]));
-
-        // Compute the sum of skipped over aggs.
-        SA_ASSERT(0. <= theta_local);
-        {
-            sum_skip += theta_local;
-            ++skipctr;
-            if (theta_local < min_skip)
-            {
-                min_skip = theta_local;
-            }
-        }
-    }
-
-    {
-        double thetap = sum_skip / (double)skipctr;
-        double eta = 0.5; //(double)skipctr / (double)nparts;
-
-        if (skipctr > 0)
-            theta = (1. - eta) * theta + eta * thetap;
-    }
-
-    eigensolver.PrintStatistics();
 }
 
 /**
@@ -336,17 +339,14 @@ void interp_compute_vectors_given_agg_matrices(
    we sometimes run out of memory in this routine...
    don't know if it's the local matrix assembly or the eigenvector solve
 */
-void interp_compute_vectors(SparseMatrix const * A,
-                            const agg_partitioning_relations_t& agg_part_rels,
-                            const interp_data_t& interp_data, ElementMatrixProvider *elem_data_coarse,
-                            ElementMatrixProvider *elem_data_finest, double& tol, double& theta, 
-                            bool *xbad_lin_indep, bool *vector_added, const Vector *xbad,
-                            bool transf, bool readapting, bool all_eigens, bool spect_update)
+void interp_compute_vectors(
+    const agg_partitioning_relations_t& agg_part_rels,
+    const interp_data_t& interp_data, ElementMatrixProvider *elem_data,
+    double tol, double& theta, bool *xbad_lin_indep, bool *vector_added,
+    const Vector *xbad, bool transf, bool readapting,
+    bool all_eigens, bool spect_update, bool bdr_cond_imposed)
 {
-    const bool bdr_cond_imposed = CONFIG_ACCESS_OPTION(INTERP,
-                                                       bdr_cond_imposed);
-    const bool assemble_ess_diag = CONFIG_ACCESS_OPTION(INTERP,
-                                                        assemble_ess_diag);
+    // const bool assemble_ess_diag = true;
     const int nparts = agg_part_rels.nparts;
 
     double sum_skip = 0.;
@@ -377,16 +377,17 @@ void interp_compute_vectors(SparseMatrix const * A,
 
     int arpack_size_threshold;
     if (interp_data.use_arpack)
-        arpack_size_threshold = 64; // ???
+        arpack_size_threshold = ARPACK_SIZE_THRESHOLD; // ??? 64, but no good reason for that
     else
         arpack_size_threshold = std::numeric_limits<int>::max();
-    Eigensolver eigensolver(agg_part_rels.mises, agg_part_rels, arpack_size_threshold);
+    Eigensolver eigensolver(agg_part_rels.mises, agg_part_rels,
+                            arpack_size_threshold);
 
     // Loop over AEs.
-    for (int i=0; i < nparts; ++i)
+    for (int i=0; i<nparts; ++i)
     {
         if (nparts < 10 || i % (nparts / 10) == 0)
-            SA_RPRINTF(0,"  local eigenvalue problem %d / %d\n", i, nparts);
+            SA_RPRINTF_L(0, 5, "  local eigenvalue problem %d / %d\n", i, nparts);
         bool local_added = false;
         const SparseMatrix *AE_stiffm;
         Vector xbad_AE;
@@ -401,7 +402,7 @@ void interp_compute_vectors(SparseMatrix const * A,
         {
             // Build agglomerate stiffness matrix.
             SA_PRINTF_L(9, "%s", "Assembling local stiffness matrix...\n");
-            SA_ASSERT(elem_data_finest || elem_data_coarse);
+            SA_ASSERT(elem_data);
             if (transf)
             {
                 SA_ASSERT(AEs_stiffm[i]);
@@ -409,24 +410,12 @@ void interp_compute_vectors(SparseMatrix const * A,
                 AEs_stiffm[i] = NULL;
             }
             SA_ASSERT(!AEs_stiffm[i]); // we demand to assemble these ourselves
-            if (elem_data_finest)
-            {
-                AEs_stiffm[i] =
-                    agg_build_AE_stiffm_with_global(*A, i, agg_part_rels,
-                                                    elem_data_finest,
-                                                    bdr_cond_imposed, assemble_ess_diag);
-            } 
-            else
-            {
-                // SA_PRINTF("about to build local stiffness matrix part %d...\n",i);
-                AEs_stiffm[i] = agg_build_AE_stiffm(i, agg_part_rels, elem_data_coarse);
-                // SA_PRINTF("%s","done with local stiffness matrix...\n");
-                // SA_PRINTF("it has size %d\n", AEs_stiffm[i]->Height());
-            }
+            AEs_stiffm[i] = elem_data->BuildAEStiff(i);
         }
         AE_stiffm = AEs_stiffm[i];
         SA_ASSERT(AE_stiffm);
-        if (agg_part_rels.testmesh && !elem_data_finest)
+        if (agg_part_rels.testmesh &&
+            !elem_data->IsGeometric())
         {
             std::stringstream filename;
             filename << "AE_stiffm_" << i << "." << PROC_RANK << ".mat";
@@ -458,10 +447,7 @@ void interp_compute_vectors(SparseMatrix const * A,
                 // Resulting orthogonal vectors stored in Tt.
                 // Also, note whether a linear independent vector was
                 // introduced.
-                double ltol =
-                    interp_data.eps_lin
-                        /* * mbox_energy_norm_sparse(*(rhs_matrices_arr[i]),
-                                                     xbad_AE) */;
+                double ltol = INTERP_LINEAR_TOLERANCE;
                 local_lin_indep =
                     mbox_orthogonalize_sparse(xbad_AE, *(cut_evects_arr[i]),
                                               *(rhs_matrices_arr[i]),
@@ -602,56 +588,124 @@ void interp_compute_vectors(SparseMatrix const * A,
         SA_RPRINTF_L(0, 5, "Suggested theta: %g\n", theta);
     }
 
-    eigensolver.PrintStatistics();
+    if (SA_IS_OUTPUT_LEVEL(5))
+        eigensolver.PrintStatistics();
 }
 
 /**
-   Trying to build a interpolant for the minimal space,
-   ie, with just constants. This should be a drop-in replacement for
-   interp_sparse_tent_build() and should be (very) similar to it
-   when theta = 0, but faster.
+   Idea here is to build spectral + polynomial space.
 */
-SparseMatrix *interp_build_minimal(
+SparseMatrix * interp_build_composite(
     const agg_partitioning_relations_t &agg_part_rels,
-    interp_data_t& interp_data)
+    interp_data_t& interp_data, ElementMatrixProvider *elem_data, double theta,
+    int spatial_dimension, int num_nodes, const Vector& coords, int order,
+    bool avoid_ess_bdr_dofs, bool use_spectral)
 {
-    // interp_compute_vectors skipped entirely
+    const double tol = 0.0; // ? for readapting or something
+    bool *xbad_lin_indep = NULL; // TODO const
+    bool *vector_added = NULL; // TODO const
+    const Vector *xbad = NULL;
+    const bool transf = false;
+    const bool readapting = false;
+    const bool all_eigens = false;
+    const bool spect_update = true;
 
-    // interp_sparse_tent_assemble
-    contrib_tent_struct_t *tent_int_struct;
+    // this fills interp_data.cut_evects_arr
+    if (use_spectral)
+    {
+        interp_compute_vectors(
+            agg_part_rels, interp_data, elem_data, tol, theta, xbad_lin_indep,
+            vector_added, xbad, transf, readapting, all_eigens, spect_update,
+            avoid_ess_bdr_dofs);
+    }
+
     SparseMatrix *tent_interp;
-    tent_int_struct = contrib_tent_init(agg_part_rels.ND);
-    contrib_ones(tent_int_struct, agg_part_rels);
+    ContribTent tent_int_struct(agg_part_rels.ND, avoid_ess_bdr_dofs);
+    if (use_spectral)
+    {
+        tent_int_struct.contrib_composite(
+            agg_part_rels, interp_data.cut_evects_arr, order, spatial_dimension,
+            num_nodes, coords);
+    }
+    else
+    {
+        if (order == 0)
+        {
+            tent_int_struct.contrib_ones(agg_part_rels);
+        }
+        else if (order == 1)
+        {
+            SA_ASSERT(agg_part_rels.ND == num_nodes); // not elasticity...
+            tent_int_struct.contrib_linears(
+                agg_part_rels, spatial_dimension, num_nodes, coords);
+        }
+        else
+        {
+            SA_ASSERT(false);
+        }
+    }
 
-    interp_data.local_coarse_one_representation = tent_int_struct->local_coarse_one_representation; // copying a pointer (interp_data deletes)
-    interp_data.coarse_truedof_offset = tent_int_struct->coarse_truedof_offset;
-    interp_data.mis_numcoarsedof = tent_int_struct->mis_numcoarsedof; // copying a pointer (interp_data deletes)
+    // Below local_coarse_one_representation, mis_numcoardof, mis_tent_interps
+    // are all copying pointers, with the expectation that interp_data will
+    // delete them later on
+    interp_data.local_coarse_one_representation =
+        tent_int_struct.get_local_coarse_one_representation();
+    interp_data.coarse_truedof_offset =
+        tent_int_struct.get_coarse_truedof_offset();
+    interp_data.mis_numcoarsedof = tent_int_struct.get_mis_numcoarsedof();
+    interp_data.mis_tent_interps = tent_int_struct.get_mis_tent_interps();
     interp_data.num_mises = agg_part_rels.num_mises;
-    interp_data.mis_tent_interps = tent_int_struct->mis_tent_interps; // copying a pointer (interp_data deletes)
 
     // Produce the tentative interpolant in its (local) almost final form.
-    // (this builds local_tent_interp and copies/moves some data structures and pointers around)
-    tent_interp = contrib_tent_finalize(tent_int_struct);
+    // (this builds local_tent_interp and copies/moves some data structures and
+    // pointers around)
+    tent_interp = tent_int_struct.contrib_tent_finalize();
     SA_ASSERT(tent_interp);
     SA_ASSERT(tent_interp->Finalized());
 
     return tent_interp;
 }
 
-SparseMatrix *interp_sparse_tent_build(
-    SparseMatrix const *A, const agg_partitioning_relations_t& agg_part_rels,
-    interp_data_t& interp_data, ElementMatrixProvider *elem_data_coarse, 
-    ElementMatrixProvider *elem_data_finest, double& tol, double& theta, bool *xbad_lin_indep, 
-    bool *vector_added, const Vector *xbad,
-    bool transf, bool readapting, bool all_eigens, bool spect_update)
+/**
+   Trying to build an interpolant with no spectral information and
+   only a polynomial coarse space. This should be a drop-in
+   replacement for interp_sparse_tent_build() and should be (very)
+   similar to it when theta = 0 and order = 0, but faster.
+*/
+SparseMatrix *interp_build_polynomial(
+    const agg_partitioning_relations_t &agg_part_rels,
+    interp_data_t& interp_data, int spatial_dimension,
+    int num_nodes, const Vector& coords, int order, bool avoid_ess_bdr_dofs)
 {
-    SA_RPRINTF_L(0,4, "%s", "---------- interp_compute_vectors { ----------------"
-                 "---\n");
+    return interp_build_composite(
+        agg_part_rels, interp_data, NULL, 0.0, spatial_dimension, num_nodes,
+        coords, order, avoid_ess_bdr_dofs, false);
+}
 
-    interp_compute_vectors(A, agg_part_rels, interp_data, 
-                           elem_data_coarse, elem_data_finest, tol,
-                           theta, xbad_lin_indep, vector_added, xbad, transf,
-                           readapting, all_eigens, spect_update);
+SparseMatrix *interp_build_minimal(
+    const agg_partitioning_relations_t &agg_part_rels,
+    interp_data_t& interp_data)
+{
+    Vector dummy;
+    return interp_build_polynomial(agg_part_rels, interp_data,
+                                   -1, -1, dummy, 0, true);
+}
+
+SparseMatrix *interp_sparse_tent_build(
+    const agg_partitioning_relations_t& agg_part_rels,
+    interp_data_t& interp_data, ElementMatrixProvider *elem_data, double& tol,
+    double& theta, bool *xbad_lin_indep, bool *vector_added, const Vector *xbad,
+    bool transf, bool readapting, bool all_eigens, bool spect_update,
+    bool avoid_ess_bdr_dofs)
+{
+    SA_RPRINTF_L(0,4, "%s", "---------- interp_compute_vectors { --------------"
+                 "-----\n");
+
+    bool bdr_cond_imposed = avoid_ess_bdr_dofs;
+    interp_compute_vectors(
+        agg_part_rels, interp_data, elem_data, tol, theta, xbad_lin_indep,
+        vector_added, xbad, transf, readapting, all_eigens, spect_update,
+        bdr_cond_imposed);
 
     if (SA_IS_OUTPUT_LEVEL(4))
     {
@@ -662,7 +716,8 @@ SparseMatrix *interp_sparse_tent_build(
     }
 
     SparseMatrix *tent_interp;
-    tent_interp = interp_sparse_tent_assemble(agg_part_rels, interp_data);
+    tent_interp = interp_sparse_tent_assemble(agg_part_rels, interp_data,
+                                              avoid_ess_bdr_dofs);
 
     SA_RPRINTF_L(0,4, "%s", "---------- } interp_sparse_tent_assemble -----------"
                  "---\n");
@@ -672,32 +727,31 @@ SparseMatrix *interp_sparse_tent_build(
 
 SparseMatrix *interp_sparse_tent_assemble(
     const agg_partitioning_relations_t& agg_part_rels,
-    interp_data_t& interp_data)
+    interp_data_t& interp_data, bool avoid_ess_bdr_dofs)
 {
-    contrib_tent_struct_t *tent_int_struct;
     SparseMatrix *tent_interp;
 
     // Initialize the structure for building the tentative interpolator.
-    tent_int_struct = contrib_tent_init(agg_part_rels.ND);
+    ContribTent tent_int_struct(agg_part_rels.ND, avoid_ess_bdr_dofs);
 
     // Input aggregates [mises] contributions.
     // on modern parallel multilevel branches this should be contrib_mises()
     // in original Delyan code it is probably contrib_big_aggs_nosvd() 
-    contrib_mises(tent_int_struct, agg_part_rels,
-                  interp_data.cut_evects_arr, interp_data.eps_svd,
-                  interp_data.scaling_P);
+    tent_int_struct.contrib_mises(agg_part_rels,
+                                  interp_data.cut_evects_arr,
+                                  interp_data.scaling_P);
 
-    interp_data.local_coarse_one_representation = tent_int_struct->local_coarse_one_representation; // copying a pointer (interp_data deletes)
-    interp_data.coarse_truedof_offset = tent_int_struct->coarse_truedof_offset;
-    interp_data.mis_numcoarsedof = tent_int_struct->mis_numcoarsedof; // copying a pointer (interp_data deletes)
+    interp_data.local_coarse_one_representation = tent_int_struct.get_local_coarse_one_representation(); // copying a pointer (interp_data deletes)
+    interp_data.coarse_truedof_offset = tent_int_struct.get_coarse_truedof_offset();
+    interp_data.mis_numcoarsedof = tent_int_struct.get_mis_numcoarsedof(); // copying a pointer (interp_data deletes)
     interp_data.num_mises = agg_part_rels.num_mises;
     // SA_RPRINTF(PROC_NUM-1,"coarse_truedofoffset = %d, mises on this processor = %d\n",
     //         interp_data.coarse_truedof_offset, interp_data.num_mises);
-    interp_data.mis_tent_interps = tent_int_struct->mis_tent_interps; // copying a pointer (interp_data deletes)
+    interp_data.mis_tent_interps = tent_int_struct.get_mis_tent_interps(); // copying a pointer (interp_data deletes)
 
     // Produce the tentative interpolant in its final form.
     // (this just copies/moves some data structures and pointers around)
-    tent_interp = contrib_tent_finalize(tent_int_struct);
+    tent_interp = tent_int_struct.contrib_tent_finalize();
     SA_ASSERT(tent_interp);
     SA_ASSERT(tent_interp->Finalized());
 
@@ -716,13 +770,10 @@ HypreParMatrix *interp_global_tent_assemble(
     int * dof_offsets = agg_part_rels.Dof_TrueDof->RowPart();
     // may need to append the total number because Tzanio is a fool
 
-    HypreParMatrix *tent_interp_dof =
-        new HypreParMatrix(PROC_COMM, agg_part_rels.Dof_TrueDof->GetGlobalNumRows(),
-                           total_columns,
-                           dof_offsets,
-                           (int *)(interp_data.tent_interp_offsets),
-                           local_tent_interp);
-    
+    HypreParMatrix *tent_interp_dof = new HypreParMatrix(
+        PROC_COMM, agg_part_rels.Dof_TrueDof->GetGlobalNumRows(),
+        total_columns, dof_offsets, (int *)(interp_data.tent_interp_offsets),
+        local_tent_interp);
 
     HypreParMatrix *tdof_to_dof = 
         agg_part_rels.Dof_TrueDof->Transpose();
@@ -771,7 +822,8 @@ HypreParVector *interp_global_coarse_one_assemble(
                            (int*) interp_data.tent_interp_offsets);
     hypre_ParVector * hnco = (hypre_ParVector*) (*coarse_one_representation);
     // coarse_one_representation->BecomeVectorOwner(); // commented out ATB 19 December 2014, may cause memory leak
-    memcpy(hypre_ParVectorLocalVector(hnco)->data,olddata,local_coarse_one_representation->Size()*sizeof(double));
+    memcpy(hypre_ParVectorLocalVector(hnco)->data,olddata,
+           local_coarse_one_representation->Size()*sizeof(double));
     hypre_ParVectorOwnsData(hnco) = 1;
     hypre_ParVectorOwnsPartitioning(hnco) = 0; // offsets are owned by the interpolation matrix
     // TODO probably need to do some more specific Hypre owns_col_starts garbage as well as the above line...
@@ -796,6 +848,10 @@ HypreParMatrix * interp_scaling_P_assemble(
     int num_mises = agg_part_rels.num_mises;
 
     int num_local_rows = local_coarse_one_representation->Size();
+    // the following assertion fails if you try to do linears in your coarse
+    // space with corrected_nullspace on the same level (ie, two-level)
+    // also fails for --correct-nulspace with constants (not necessarily linears)
+    // also fails for --correct-nulspace with elasticity and rigid body modes
     SA_ASSERT(num_local_rows == local_tent_interp->Width());
     
     int num_local_cols = 0;
@@ -804,8 +860,8 @@ HypreParMatrix * interp_scaling_P_assemble(
             interp_data.mis_numcoarsedof[j] > 0)
             num_local_cols++;
 
-    SA_RPRINTF(0,"local scaling_P is %d by %d\n",
-               num_local_rows,num_local_cols); 
+    SA_RPRINTF_L(0, 8, "local scaling_P is %d by %d\n",
+                 num_local_rows,num_local_cols); 
     SparseMatrix * serial_out = new SparseMatrix(num_local_rows, num_local_cols);
 
     // put the entries in local matrix
@@ -842,15 +898,14 @@ HypreParMatrix * interp_scaling_P_assemble(
     for (int q=0; q<serial_out->NumNonZeroElems(); ++q)
         modifyJ[q] = modifyJ[q] + cols[0];
 
-    // we use this constructor because it copies the row_part and col_part, and everything, really
-    HypreParMatrix * out = 
-        new HypreParMatrix(PROC_COMM, num_local_rows, 
-                           global_num_rows, global_num_cols,
-                           serial_out->GetI(), modifyJ,
-                           serial_out->GetData(), interp_data.tent_interp_offsets.GetData(), 
-                           cols.GetData());
+    // we use this constructor because it copies the row_part and col_part
+    HypreParMatrix * out = new HypreParMatrix(
+        PROC_COMM, num_local_rows,  global_num_rows, global_num_cols,
+        serial_out->GetI(), modifyJ, serial_out->GetData(),
+        interp_data.tent_interp_offsets.GetData(), cols.GetData());
 
     delete serial_out;
     return out;
 }
 
+} // namespace saamge

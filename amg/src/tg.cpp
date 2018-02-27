@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -39,73 +39,49 @@
 #include "adapt.hpp"
 #include "mfem_addons.hpp"
 
+namespace saamge
+{
+using namespace mfem;
+
 /* Options */
 
 CONFIG_BEGIN_CLASS_DEFAULTS(TG)
-    CONFIG_DEFINE_OPTION_DEFAULT(calc_res, tg_calc_res_tgprod),
-    CONFIG_DEFINE_OPTION_DEFAULT(recalc_res, tg_recalc_res_tgprod),
+//    CONFIG_DEFINE_OPTION_DEFAULT(calc_res, tg_calc_res_tgprod),
+//    CONFIG_DEFINE_OPTION_DEFAULT(recalc_res, tg_recalc_res_tgprod),
     CONFIG_DEFINE_OPTION_DEFAULT(pre_smoother, smpr_sym_poly),
-    CONFIG_DEFINE_OPTION_DEFAULT(post_smoother, smpr_sym_poly),
-    CONFIG_DEFINE_OPTION_DEFAULT(smooth_interp, true)
+    CONFIG_DEFINE_OPTION_DEFAULT(post_smoother, smpr_sym_poly)
+//    CONFIG_DEFINE_OPTION_DEFAULT(pre_smoother, smpr_gauss_seidel),
+//    CONFIG_DEFINE_OPTION_DEFAULT(post_smoother, smpr_gauss_seidel),
 CONFIG_END_CLASS_DEFAULTS
 
 CONFIG_DEFINE_CLASS(TG);
 
-/* Functions */
+/* Class implementations */
 
-/*
-  I think maybe x, b should be Vector& instead of HypreParVector&
-  ATB 10 February 2015
-*/
-/*
-void tg_cycle(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
-              HypreParMatrix& restr, const HypreParVector& b, smpr_ft pre_smoother,
-              smpr_ft post_smoother, HypreParVector& x, solve_t& coarse_solver,
-              void *data, int mu)
+HypreDirect::HypreDirect(mfem::HypreParMatrix& mat)
 {
-    // SA_RPRINTF(0,"** tg_cycle with fine size %d and coarse size %d\n",
-    //         A.M(), Ac.M());
-
-    SA_ASSERT(&A);
-    SA_ASSERT(&Ac);
-    SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
-    SA_ASSERT(Ac.GetGlobalNumRows() == Ac.GetGlobalNumCols());
-    SA_ASSERT(interp.GetGlobalNumRows() == A.GetGlobalNumRows());
-    SA_ASSERT(restr.GetGlobalNumCols() == A.GetGlobalNumCols());
-    SA_ASSERT(interp.GetGlobalNumRows() >= interp.GetGlobalNumCols());
-    SA_ASSERT(interp.GetGlobalNumCols() == restr.GetGlobalNumRows());
-    SA_ASSERT(restr.GetGlobalNumRows() == Ac.GetGlobalNumRows());
-    SA_ASSERT(mbox_parallel_vector_size(b) == A.GetGlobalNumRows());
-    SA_ASSERT(mbox_parallel_vector_size(x) == A.GetGlobalNumRows());
-    SA_ASSERT(pre_smoother);
-    SA_ASSERT(post_smoother);
-    SA_ASSERT(coarse_solver.solver);
-
-    Vector res(b.Size()), resc(mbox_rows_in_current_process(Ac));
-    Vector xc(mbox_rows_in_current_process(Ac));
-    xc = 0.0; // moved out of coarse_solver.solver for W-cycle
-
-    pre_smoother(A, b, x, data);
-
-    A.Mult(x, res);
-    subtract(b, res, res);
-    restr.Mult(res, resc);
-
-    HypreParVector RESC(PROC_COMM, Ac.GetGlobalNumRows(), resc.GetData(),
-                        Ac.GetRowStarts());
-    HypreParVector XC(PROC_COMM, Ac.GetGlobalNumRows(), xc.GetData(), Ac.GetRowStarts());
-
-    // coarse_solver.solver is solve_spd_Vcycle, solve_spd_Wcycle, solve_spd_AMG
-    // just apply this twice for W-cycle...
-    // SA_RPRINTF(0,"      coarse_solver.solver = %p\n", coarse_solver.solver);
-    for (int i=0; i<mu; ++i)
-        coarse_solver.solver(Ac, RESC, XC, coarse_solver.data);
-
-    interp.Mult(XC, x, 1., 1.);
-
-    post_smoother(A, b, x, data);
+   hypre_ParCSRMatrix* h_mat = mat;
+   hypre_CSRMatrix* diag = h_mat->diag;
+   mat_ = new SparseMatrix(diag->i, diag->j, diag->data, diag->num_rows,
+                           diag->num_cols, false, false, false);
+   solver_.SetOperator(*mat_);
 }
-*/
+
+HypreDirect::~HypreDirect()
+{
+   delete mat_;
+}
+
+void HypreDirect::SetOperator(const mfem::Operator &op)
+{
+}
+
+void HypreDirect::Mult(const mfem::Vector &x, mfem::Vector &y) const
+{
+   solver_.Mult(x, y);
+}
+
+/* Functions */
 
 /**
    slight reworking of tg_cycle with x, b as Vector instead of HypreParVector
@@ -128,13 +104,9 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
     SA_ASSERT(restr.GetGlobalNumRows() == Ac.GetGlobalNumRows());
     // SA_ASSERT(mbox_parallel_vector_size(b) == A.GetGlobalNumRows());
     // SA_ASSERT(mbox_parallel_vector_size(x) == A.GetGlobalNumRows());
-    // SA_ASSERT(coarse_solver.Height() == Ac.Height()); // only is true on 1 processor
     SA_ASSERT(pre_smoother);
     SA_ASSERT(post_smoother);
     // SA_ASSERT(coarse_solver.solver);
-
-    // SA_RPRINTF(0,"  ---- tg_cycle_atb runs with fine size %d, coarse size %d\n",
-    //        A.GetGlobalNumRows(), Ac.GetGlobalNumRows());
 
     Vector res(b.Size()), resc(mbox_rows_in_current_process(Ac));
     Vector xc(mbox_rows_in_current_process(Ac));
@@ -148,7 +120,8 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
 
     HypreParVector RESC(PROC_COMM, Ac.GetGlobalNumRows(), resc.GetData(),
                         Ac.GetRowStarts());
-    HypreParVector XC(PROC_COMM, Ac.GetGlobalNumRows(), xc.GetData(), Ac.GetRowStarts());
+    HypreParVector XC(PROC_COMM, Ac.GetGlobalNumRows(), xc.GetData(),
+                      Ac.GetRowStarts());
 
     // could repeat this for W-cycle...
     // coarse_solver.solver(Ac, RESC, XC, coarse_solver.data);
@@ -179,9 +152,11 @@ double tg_calc_res_tgprod(HypreParMatrix& A, HypreParVector& b,
     lpsres = 0.;
 
     lres.StealData(&p);
-    res = new HypreParVector(PROC_COMM, A.GetGlobalNumRows(), p, A.GetRowStarts());
+    res = new HypreParVector(PROC_COMM, A.GetGlobalNumRows(), p,
+                             A.GetRowStarts());
     lpsres.StealData(&p);
-    psres = new HypreParVector(PROC_COMM, A.GetGlobalNumRows(), p, A.GetRowStarts());
+    psres = new HypreParVector(PROC_COMM, A.GetGlobalNumRows(), p,
+                               A.GetRowStarts());
 
     tg_cycle_atb(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), *res,
                  tg_data->pre_smoother, tg_data->post_smoother, *psres,
@@ -259,7 +234,7 @@ int tg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
     x_prev = new HypreParVector(PROC_COMM, A.GetGlobalNumRows(), p, A.GetRowStarts());
     mbox_make_owner_data(*x_prev);
 
-    rr = calc_res(A, b, x, res, psres, tg_data);
+    rr = tg_calc_res_tgprod(A, b, x, res, psres, tg_data);
     if ((end = rtol * rr) < atol)
         end = atol;
     if (output)
@@ -295,7 +270,7 @@ int tg_solve(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
                      *tg_data->coarse_solver, tg_data->poly_data);
 
         rr_prev = rr;
-        rr = recalc_res(A, b, x, *x_prev, *res, *psres, tg_data);
+        rr = tg_recalc_res_tgprod(A, b, x, *x_prev, *res, *psres, tg_data);
     }
     if (output)
         SA_RPRINTF_L(0, 2, "Stationary iteration: after %d iterations"
@@ -345,14 +320,7 @@ int tg_run(HypreParMatrix& A,
            bool output/*=true*/)
 {
     int tgiters=0;
-    tg_calc_res_ft calc_res;
-    tg_recalc_res_ft recalc_res;
     HypreParVector *x_past = NULL;
-
-    SA_ASSERT(CONFIG_ACCESS_OPTION(TG, calc_res) &&
-              CONFIG_ACCESS_OPTION(TG, recalc_res));
-    calc_res = CONFIG_ACCESS_OPTION(TG, calc_res);
-    recalc_res = CONFIG_ACCESS_OPTION(TG, recalc_res);
 
     SA_ASSERT(tg_data);
 
@@ -382,13 +350,14 @@ int tg_run(HypreParMatrix& A,
         }
     } else
     {
-        tgiters = tg_solve(A, b, x, x_past, maxiter, calc_res, recalc_res,
-                           tg_data, rtol, atol, reducttol, output);
+        tgiters = tg_solve(A, b, x, x_past, maxiter, tg_calc_res_tgprod,
+                           tg_recalc_res_tgprod, tg_data, rtol, atol, reducttol,
+                           output);
         if (SA_IS_OUTPUT_LEVEL(3) && output)
         {
             HypreParVector *res, *psres;
             SA_PRINTF("Last residual (r,r): %g\n",
-                      calc_res(A, b, x, res, psres, tg_data));
+                      tg_calc_res_tgprod(A, b, x, res, psres, tg_data));
             delete res;
             delete psres;
         }
@@ -434,7 +403,8 @@ int tg_pcg_run(HypreParMatrix& A,
 
 tg_data_t *tg_init_data(
     HypreParMatrix& A, const agg_partitioning_relations_t& agg_part_rels, 
-    int nu_pro, int nu_relax, double theta, bool smooth_interp, bool use_arpack)
+    int nu_pro, int nu_relax, double theta, bool smooth_interp, 
+    double smooth_drop_tol, bool use_arpack)
 {
     tg_data_t *tg_data = new tg_data_t;
     SA_ASSERT(tg_data);
@@ -447,66 +417,49 @@ tg_data_t *tg_init_data(
 
     tg_data->theta = theta;
 
-    tg_data->interp_data = interp_init_data(agg_part_rels, nu_pro, use_arpack, false);
+    tg_data->interp_data = interp_init_data(agg_part_rels, nu_pro,
+                                            use_arpack, false);
+    tg_data->interp_data->drop_tol = smooth_drop_tol;
     tg_data->poly_data = smpr_init_poly_data(A, nu_relax, 0.0);
 
     tg_data->smooth_interp = smooth_interp;
 
     tg_data->tag = -1;
 
+    tg_data->doing_spectral = false;
+
     return tg_data;
 }
 
-void tg_build_hierarchy(SparseMatrix const * Al, HypreParMatrix& Ag,
-                        tg_data_t& tg_data,
-                        const agg_partitioning_relations_t& agg_part_rels,
-                        ElementMatrixProvider *elem_data_coarse, 
-                        ElementMatrixProvider *elem_data_finest)
+void tg_assemble_and_smooth(HypreParMatrix &Ag,
+                            tg_data_t& tg_data,
+                            const agg_partitioning_relations_t& agg_part_rels)
 {
-    double tol = 0.; // Essentially, not used.
-    double theta = tg_data.theta;
-
-    //XXX: Currently, we see no reason to actually compute all eigenpairs.
-    const bool all_eigens = false;
-
-    delete tg_data.ltent_interp;
-    delete tg_data.tent_interp;
-
-    if (tg_data.minimal_coarse_space)
-    {
-        tg_data.ltent_interp = 
-            interp_build_minimal(agg_part_rels, *tg_data.interp_data);
-    }
-    else
-    {
-        // save the pointer so tg_data can free it
-        if (elem_data_coarse)
-            tg_data.elem_data = elem_data_coarse;
-        else
-            tg_data.elem_data = elem_data_finest;
-        tg_data.ltent_interp =
-            interp_sparse_tent_build(Al, agg_part_rels, *tg_data.interp_data,
-                                     elem_data_coarse, elem_data_finest, tol, theta, NULL, NULL, NULL,
-                                     false, false, all_eigens, true);
-    }
-    SA_ASSERT(tg_data.ltent_interp);
-
+    StopWatch chrono;
+    chrono.Start();
     tg_data.tent_interp =
         interp_global_tent_assemble(agg_part_rels, *tg_data.interp_data,
                                     tg_data.ltent_interp);
+    chrono.Stop();
+    SA_RPRINTF_L(0, 5, "Time for global_tent_assemble: %f\n",chrono.RealTime());
 
     if (tg_data.interp_data->scaling_P)
     {
-        SA_RPRINTF(0,"%s","Building scaling P.\n");
-        tg_data.scaling_P =
-            interp_scaling_P_assemble(agg_part_rels, *tg_data.interp_data,
-                                      tg_data.ltent_interp, 
-                                      tg_data.interp_data->local_coarse_one_representation);
+        // TODO: check here if we have actually filled in the
+        // local_coarse_one_representation, and print an informative
+        // error message and/or fall back to no corrected nullspace
+
+        SA_RPRINTF_L(0, 5, "%s","Building scaling P.\n");
+        tg_data.scaling_P = interp_scaling_P_assemble(
+            agg_part_rels, *tg_data.interp_data, tg_data.ltent_interp, 
+            tg_data.interp_data->local_coarse_one_representation);
     }
 
-    // SA_RPRINTF(0, "%s","  calling tg_smooth_interp.\n");
+    chrono.Clear();
+    chrono.Start();
     tg_smooth_interp(Ag, tg_data);
-
+    chrono.Stop();
+    SA_RPRINTF_L(0, 5, "Time for tg_smooth_interp: %f\n",chrono.RealTime());
     if (SA_IS_OUTPUT_LEVEL(3))
     {
         SA_RPRINTF(0,"fine DoFs: %d\n", agg_part_rels.ND);
@@ -519,6 +472,73 @@ void tg_build_hierarchy(SparseMatrix const * Al, HypreParMatrix& Ag,
     }
     SA_ASSERT(tg_data.interp->GetGlobalNumCols() ==
               tg_data.restr->GetGlobalNumRows());
+}
+
+void tg_build_hierarchy_with_polynomial(
+    HypreParMatrix& Ag, Mesh& mesh, tg_data_t& tg_data,
+    const agg_partitioning_relations_t& agg_part_rels,
+    ElementMatrixProvider *elem_data, int polynomial_order, bool use_spectral,
+    bool avoid_ess_bdr_dofs)
+{
+    delete tg_data.ltent_interp;
+    delete tg_data.tent_interp;
+
+    SA_ASSERT(tg_data.polynomial_coarse_space == 0 ||
+              tg_data.polynomial_coarse_space == 1);
+
+    // GetNV() should be GetNNodes() or something that does not exist,
+    // this will not work for higher order as is...
+    Vector nodes;
+    mesh.GetNodes(nodes);
+    tg_data.doing_spectral = use_spectral;
+    tg_data.elem_data = elem_data;
+    tg_data.ltent_interp = interp_build_composite(
+        agg_part_rels, *tg_data.interp_data, elem_data, tg_data.theta,
+        mesh.SpaceDimension(), mesh.GetNV(), nodes, polynomial_order,
+        avoid_ess_bdr_dofs, use_spectral);
+
+    SA_ASSERT(tg_data.ltent_interp);
+    tg_assemble_and_smooth(Ag, tg_data, agg_part_rels);
+}
+
+void tg_build_hierarchy(HypreParMatrix& Ag, tg_data_t& tg_data,
+                        const agg_partitioning_relations_t& agg_part_rels,
+                        ElementMatrixProvider *elem_data,
+                        bool avoid_ess_bdr_dofs)
+{
+    double useless_parameter = 0.; // Essentially, not used.
+
+    //XXX: Currently, we see no reason to actually compute all eigenpairs.
+    const bool all_eigens = false;
+
+    delete tg_data.ltent_interp;
+    delete tg_data.tent_interp;
+
+    if (tg_data.polynomial_coarse_space == -1 && tg_data.theta > 0.0)
+    {
+        // save the pointer so tg_data can free it
+        tg_data.elem_data = elem_data;
+        tg_data.doing_spectral = true;
+        tg_data.ltent_interp = interp_sparse_tent_build(
+            agg_part_rels, *tg_data.interp_data, elem_data,
+            useless_parameter, tg_data.theta, NULL, NULL, NULL, false, false,
+            all_eigens, true, avoid_ess_bdr_dofs);
+    }
+    else if (tg_data.polynomial_coarse_space == 1)
+    {
+        std::cerr << "NOT IMPLEMENTED: try tg_build_hierarchy_with_polynomial()?"
+                  << std::endl;
+        throw 1;
+    }
+    else
+    {
+        tg_data.elem_data = elem_data; // should be NULL? but copy anyway
+        tg_data.doing_spectral = false;
+        tg_data.ltent_interp = 
+            interp_build_minimal(agg_part_rels, *tg_data.interp_data);
+    }
+    SA_ASSERT(tg_data.ltent_interp);
+    tg_assemble_and_smooth(Ag, tg_data, agg_part_rels);
 }
 
 void tg_augment_interp_with_identity(tg_data_t& tg_data, int k)
@@ -546,12 +566,10 @@ void tg_augment_interp_with_identity(tg_data_t& tg_data, int k)
     col_starts[0] = 0;
     col_starts[1] = new_interp->Width();
 
-    tg_data.interp = new HypreParMatrix(PROC_COMM,
-                                        new_interp->Height(), new_interp->Height(),
-                                        new_interp->Width(),
-                                        new_interp->GetI(), new_interp->GetJ(),
-                                        new_interp->GetData(), row_starts,
-                                        col_starts);
+    tg_data.interp = new HypreParMatrix(
+        PROC_COMM, new_interp->Height(), new_interp->Height(),
+        new_interp->Width(), new_interp->GetI(), new_interp->GetJ(),
+        new_interp->GetData(), row_starts, col_starts);
     mbox_make_owner_rowstarts_colstarts(*tg_data.interp);
     delete [] row_starts;
     delete [] col_starts;
@@ -610,20 +628,24 @@ void ExtractSubMatrices(const SparseMatrix& A,
         agglomerate_element_matrices[part]->Finalize(); // should we finalize at the end instead of here?
         // --- end paste
     }
-    // now modify these matrices to be nice (not entirely sure of this step)
+    // now modify these matrices to have rowsum 0, so that vector of all 1s is in coarse space
+    // (this ignores some boundary condition issues, makes assumptions on basis, but for
+    // algebraic I'm not sure what else to do)
     for (int part=0; part<nparts; ++part)
     {
         int * row = agg_part_rels.AE_to_dof->GetRow(part);
         int numrows = agglomerate_element_matrices[part]->Size();
         Vector rowsums(numrows);
         agglomerate_element_matrices[part]->GetRowSums(rowsums);
-        if (numrows > 1) // for aggregates with a single cell... (???)
+        if (numrows > 1)
+        {
             for (int i=0; i<numrows; ++i)
             {
                 if (agglomerate_element_matrices[part]->Elem(i,i) <= 0.0)
                     std::cout << "    Warning: part " << part << " row " << i
                               << " has negative diagonal before modifications " 
-                              << agglomerate_element_matrices[part]->Elem(i,i) << std::endl;
+                              << agglomerate_element_matrices[part]->Elem(i,i)
+                              << std::endl;
                 if (agglomerate_element_matrices[part]->RowSize(i) > 1)
                     agglomerate_element_matrices[part]->Add(i,i,-rowsums(i));
                 if (agglomerate_element_matrices[part]->Elem(i,i) <= 0.0)
@@ -632,13 +654,18 @@ void ExtractSubMatrices(const SparseMatrix& A,
                               << " has negative diagonal after modifications "
                               << agglomerate_element_matrices[part]->Elem(i,i)
                               << ", glob_dof = " << row[i] << std::endl;
-                    std::cout << "      row size = " << agglomerate_element_matrices[part]->RowSize(i)
+                    std::cout << "      row size = "
+                              << agglomerate_element_matrices[part]->RowSize(i)
                               << ", rowsum = " << rowsums(i) << std::endl;
                     agglomerate_element_matrices[part]->Set(i,i,1.0);
                 }
             }
+        }
         else
-            agglomerate_element_matrices[part]->Set(0,0,1.0); // see contrib.cpp line 211, not sure why
+        {
+            // aggregates with a single cell need a 1 on the diagonal (?)
+            agglomerate_element_matrices[part]->Set(0,0,1.0);
+        }
     }
 }
 
@@ -830,61 +857,16 @@ void WindowSubMatrices(const SparseMatrix& A,
     }
 }
 
-tg_data_t *tg_produce_data_with_ae_matrices(
-    HypreParMatrix& Ag,
-    const agg_partitioning_relations_t& agg_part_rels,
-    int nu_pro, int nu_relax, double spectral_tol,
-    bool smooth_interp, bool minimal_coarse_arg, bool use_arpack,
-    const Array<SparseMatrix* > &agglomerate_element_matrices)
-{
-    double useless_parameter = 0.0; // comment by Delyan, "Essentially, not used", whatever that means
-    tg_data_t * tg_data;
-
-    tg_data = tg_init_data(Ag, agg_part_rels, nu_pro, nu_relax,
-                           spectral_tol, smooth_interp, use_arpack);
-    tg_data->minimal_coarse_space = minimal_coarse_arg;
-    // tg_build_hierarchy
-    const bool all_eigens = false;
-    int num_aggs = agg_part_rels.nparts;
-    for (int i=0; i<num_aggs; ++i)
-    {
-        // use given element matrices - only necessary if !minimal_coarse_arg
-        tg_data->interp_data->AEs_stiffm[i] = agglomerate_element_matrices[i];
-    }
-    //   interp_sparse_tent_build
-    if (minimal_coarse_arg)
-    {
-        tg_data->ltent_interp = interp_build_minimal(agg_part_rels, *tg_data->interp_data);
-    }
-    else
-    {
-        interp_compute_vectors_given_agg_matrices(
-            agg_part_rels, *tg_data->interp_data,
-            useless_parameter, spectral_tol, false, all_eigens);
-        tg_data->ltent_interp = interp_sparse_tent_assemble(agg_part_rels, *tg_data->interp_data);
-    }
-
-    tg_data->tent_interp =
-        interp_global_tent_assemble(agg_part_rels, *tg_data->interp_data,
-                                    tg_data->ltent_interp);
-    tg_data->smooth_interp = smooth_interp;
-    tg_smooth_interp(Ag, *tg_data);
-
-    hypre_ParCSRMatrix* h_interp = (*tg_data->interp);
-    hypre_ParCSRMatrixSetNumNonzeros(h_interp);
-    // SA_PRINTF("interp has %d NNZ\n", tg_data->interp->NNZ());
-    return tg_data;
-}
-
 /**
-   In the current implementation, we are assuming serial, and assuming Ag and Alocal are essentially
-   the same matrix.
+   In the current implementation, we are assuming serial, and assuming Ag and
+   Alocal are essentially the same matrix.
 */
 tg_data_t *tg_produce_data_algebraic(
-    const SparseMatrix &Alocal,
+    const SparseMatrix& Alocal,
     HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
-    int nu_pro, int nu_relax, double spectral_tol,
-    bool smooth_interp, bool minimal_coarse_arg, bool use_window, bool use_arpack)
+    int nu_pro, int nu_relax, double spectral_tol, bool smooth_interp,
+    int polynomial_coarse_arg, bool use_window, bool use_arpack,
+    bool avoid_ess_bdr_dofs)
 {
     SA_ASSERT(PROC_NUM == 1);
 
@@ -895,8 +877,14 @@ tg_data_t *tg_produce_data_algebraic(
     else
         ExtractSubMatrices(Alocal, agg_part_rels, agglomerate_element_matrices);
 
-    return tg_produce_data_with_ae_matrices(Ag, agg_part_rels, nu_pro, nu_relax, spectral_tol, smooth_interp,
-                                            minimal_coarse_arg, use_arpack, agglomerate_element_matrices);
+    ElementMatrixProvider * emp = new ElementMatrixArray(
+        agg_part_rels, agglomerate_element_matrices);
+
+    tg_data_t * out = tg_produce_data(
+        Ag, agg_part_rels, nu_pro, nu_relax, emp, spectral_tol,
+        smooth_interp, polynomial_coarse_arg, use_arpack, avoid_ess_bdr_dofs);
+
+    return out;
 }
 
 void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal, 
@@ -922,18 +910,26 @@ void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal,
 /**
    NOTE: only usable for actual two level method, do not use this
    routine as part of a multilevel method
+
+   The SAAMGe steering committee is considering a proposal to mark
+   this routine DEPRECATED and require users to call tg_init_data and
+   tg_build_hierarchy[_linears] separately. Please send feedback on
+   this proposal to atb@llnl.gov.
 */
-tg_data_t *tg_produce_data(const SparseMatrix& Al, HypreParMatrix& Ag,
-                           const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
-                           int nu_relax, ElementMatrixProvider *elem_data_finest, 
-                           double theta, bool smooth_interp)
+tg_data_t *tg_produce_data(
+    HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
+    int nu_pro, int nu_relax, ElementMatrixProvider *elem_data, double theta,
+    bool smooth_interp, int polynomial_coarse_arg,
+    bool use_arpack, bool avoid_ess_bdr_dofs)
 {
-    const bool use_arpack = false;
-    tg_data_t *tg_data = tg_init_data(Ag, agg_part_rels, nu_pro, nu_relax,
-                                      theta, smooth_interp, use_arpack);
+    const double smooth_drop_tol = 0.0;
+    tg_data_t *tg_data = tg_init_data(
+        Ag, agg_part_rels, nu_pro, nu_relax, theta, smooth_interp,
+        smooth_drop_tol, use_arpack);
+    tg_data->polynomial_coarse_space = polynomial_coarse_arg;
 
-    tg_build_hierarchy(&Al, Ag, *tg_data, agg_part_rels, NULL, elem_data_finest);
-
+    tg_build_hierarchy(Ag, *tg_data, agg_part_rels, elem_data,
+                       avoid_ess_bdr_dofs);
     return tg_data;
 }
 
@@ -941,7 +937,8 @@ void tg_free_data(tg_data_t *tg_data)
 {
     if (!tg_data) return;
     smpr_free_poly_data(tg_data->poly_data);
-    interp_free_data(tg_data->interp_data,tg_data->minimal_coarse_space);
+    interp_free_data(tg_data->interp_data, tg_data->doing_spectral,
+                     tg_data->theta);
     delete tg_data->ltent_interp;
     delete tg_data->tent_interp;
     delete tg_data->scaling_P;
@@ -974,3 +971,11 @@ tg_data_t *tg_copy_data(const tg_data_t *src)
 
     return dst;
 }
+
+double tg_compute_OC(HypreParMatrix& A, tg_data_t& tg_data)
+{
+    SA_ASSERT(tg_data.Ac);
+    return 1.0 + tg_data.Ac->NNZ() / ((double) A.NNZ());
+}
+
+} // namespace saamge

@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -36,8 +36,13 @@
 #include <mfem.hpp>
 using std::stringstream;
 
+namespace saamge
+{
+using namespace mfem;
+
 /* Variables */
 
+// global variable in the global namespace here
 proc_info_t proc_info;
 
 stringstream PROC_STR_STREAM;
@@ -81,3 +86,5 @@ void proc_determine_offsets(int my_size, Array<int>& offsets, int& total)
     total = offsets[1];
     MPI_Bcast(&total, 1, MPI_INT, PROC_NUM-1, PROC_COMM);
 }
+
+} // namespace saamge

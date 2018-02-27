@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -39,6 +39,8 @@
 #include "helpers.hpp"
 #include "mbox.hpp"
 
+namespace saamge
+{
 using namespace mfem;
 
 Eigensolver::Eigensolver(
@@ -100,15 +102,24 @@ bool Eigensolver::Solve(
     }
     else
     {
+#if SAAMGE_USE_ARPACK
         return SolveIterative(A, B, part, agg_id, aggregate_size,
                               theta, cut_evects, 
                               NULL, transf, all_eigens);
+#else
+        count_direct_solves++;
+        return SolveDirect(A, B, part, agg_id, aggregate_size,
+                           theta, cut_evects, 
+                           NULL, transf, all_eigens);
+#endif
     }
 }
 
 /**
    This is the standard eigenvalue solver for multilevel runs.
-   We are transitioning to using ARPACK by default.
+   It is better to use ARPACK for larger problems, we are still
+   experimenting with this and what "larger problems" means and
+   how this affects accuracy etc.
 */
 bool Eigensolver::SolveDirect(
     const mfem::SparseMatrix& A,
@@ -225,6 +236,7 @@ bool Eigensolver::SolveDirect(
     return vector_added;
 }
 
+#if SAAMGE_USE_ARPACK
 bool Eigensolver::SolveIterative(
     const mfem::SparseMatrix& A,
     mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
@@ -262,15 +274,9 @@ bool Eigensolver::SolveIterative(
     int num_arnoldi = (A.Width() < 4*max_arpack_vectors) ? A.Width() : 4*max_arpack_vectors;
     if (A.Width() < max_arpack_vectors) max_arpack_vectors = A.Width();
     cut_ptr = &cut_helper;
-    int numvectors = arpacks_calc_portion_eigens_sparse_diag(A,
-                                                             evals,
-                                                             *cut_ptr,
-                                                             *B,
-                                                             max_arpack_vectors,
-                                                             true,
-                                                             max_arpack_its,
-                                                             num_arnoldi,
-                                                             arpack_tol);
+    int numvectors = arpacks_calc_portion_eigens_sparse_diag(
+        A, evals, *cut_ptr, *B, max_arpack_vectors, true,
+        max_arpack_its, num_arnoldi, arpack_tol);
     int vectors_got = min_vectors;
     for (int ev=min_vectors; ev<max_arpack_vectors; ++ev)
     {
@@ -314,6 +320,7 @@ bool Eigensolver::SolveIterative(
 
     return vector_added;
 }
+#endif
 
 void spect_schur_augment_transf(
     const DenseMatrix& Tt, int part, int agg_id,
@@ -427,7 +434,7 @@ bool spect_schur_local_prob_solve_sparse(
 
     // Build the restricted weighted l1-smoother for the eigenvalue problem if
     // not given.
-    if(!B)
+    if (!B)
     {
         B = mbox_restr_snd_D_sparse_from_sparse(A, aggregates,
                 *agg_part_rels.AE_to_dof, agg_id, part, agg_size);
@@ -557,3 +564,5 @@ bool spect_schur_local_prob_solve_sparse(
 
     return vector_added;
 }
+
+} // namespace saamge

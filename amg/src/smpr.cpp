@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -43,9 +43,9 @@ using std::cos;
 using std::pow;
 using std::log;
 
-/* Options */
-
-CONFIG_DEFINE_CLASS(SMPR);
+namespace saamge
+{
+using namespace mfem;
 
 /* Macros and Static Functions */
 
@@ -191,6 +191,25 @@ double smpr_cheb_firstkind(int n, double x)
     return value;
 }
 
+/// the name here does not *quite* match the implementation
+void smpr_gauss_seidel(HypreParMatrix& A, const Vector& b, Vector& x, void *data)
+{
+    Vector res(x);
+    Vector temp(x);
+    A.Mult(x,res);
+    res *= -1.0;
+    res += b;
+
+    // HypreSmoother hsmoother(A, HypreSmoother::l1GS);
+    // HypreSmoother hsmoother(A, HypreSmoother::GS);
+    // HypreSmoother hsmoother(A, HypreSmoother::Chebyshev);
+    HypreSmoother hsmoother(A, HypreSmoother::l1GS, 3);
+    // hsmoother.Mult(b,x);
+
+    hsmoother.Mult(res,temp);
+    x += temp;
+}
+
 void smpr_sym_poly(HypreParMatrix& A, const Vector& b, Vector& x, void *data)
 {
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
@@ -332,8 +351,8 @@ HypreParVector *smpr_update_Dinv_neg(HypreParMatrix& A,
 {
     SA_ASSERT(poly_data);
     delete poly_data->Dinv_neg;
-    SA_ASSERT(poly_data->build_Dinv_neg);
-    poly_data->Dinv_neg = poly_data->build_Dinv_neg(A);
+
+    poly_data->Dinv_neg = mbox_build_Dinv_neg_parallel_matrix(A);
     return poly_data->Dinv_neg;
 }
 
@@ -348,18 +367,14 @@ smpr_poly_data_t *smpr_init_poly_data(HypreParMatrix& A, int nu, double param)
     poly_data->degree = 0;
     poly_data->roots = NULL;
     poly_data->Dinv_neg = NULL;
-    SA_ASSERT(CONFIG_ACCESS_OPTION(SMPR, build_Dinv_neg));
-    poly_data->build_Dinv_neg = CONFIG_ACCESS_OPTION(SMPR, build_Dinv_neg);
     smpr_update_Dinv_neg(A, poly_data);
     poly_data->weightfirst = 1.;
     poly_data->degree2 = 0;
     poly_data->roots2 = NULL;
     poly_data->param = param;
 
-    SA_ASSERT(0 <= CONFIG_ACCESS_OPTION(SMPR, smpr_poly) &&
-              CONFIG_ACCESS_OPTION(SMPR, smpr_poly) < SMPR_POLY_MAX);
-
-    switch (CONFIG_ACCESS_OPTION(SMPR, smpr_poly))
+    const int smpr_poly = SMPR_POLY_SAS;
+    switch (smpr_poly)
     {
         case SMPR_POLY_ONEMINUSX:
             poly_data->roots = smpr_oneminusx_poly_roots(poly_data->nu,
@@ -424,10 +439,11 @@ smpr_poly_data_t *smpr_copy_poly_data(const smpr_poly_data_t *src)
     dst->degree = src->degree;
     dst->roots = helpers_copy_dbl_arr(src->roots, src->degree);
     dst->Dinv_neg = mbox_clone_parallel_vector(src->Dinv_neg);
-    dst->build_Dinv_neg = src->build_Dinv_neg;
     dst->weightfirst = src->weightfirst;
     dst->degree2 = src->degree2;
     dst->roots2 = helpers_copy_dbl_arr(src->roots2, src->degree2);
     dst->param = src->param;
     return dst;
 }
+
+} // namespace saamge

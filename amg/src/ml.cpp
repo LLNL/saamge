@@ -2,7 +2,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -29,8 +29,8 @@
 */
 
 /**
-   @file bare bones, piecemeal copy of Delyan Kalchev's multilevel
-   (serial) interface, now made parallel, we hope.
+   @file Delyan Kalchev's multilevel (serial) interface,
+   now made parallel.
 
    Andrew T. Barker
    atb@llnl.gov
@@ -41,33 +41,42 @@
 #include "ml.hpp"
 #include "levels.hpp"
 #include <mfem.hpp>
-using namespace mfem;
 #include "contrib.hpp"
 #include "tg.hpp"
 #include "elmat.hpp"
+#include "solve.hpp"
+
+namespace saamge
+{
+using namespace mfem;
 
 // not sure whether to copy nparts_arr or just use the given pointer
 MultilevelParameters::MultilevelParameters(
     int coarsenings, int *nparts_arr_arg, int first_nu_pro, int nu_pro_arg, 
-    int nu_relax_arg, double first_theta, double theta_arg, bool minimal_coarse_space_arg,
-    bool use_correct_nullspace, bool use_arpack, bool do_aggregates) 
+    int nu_relax_arg, double first_theta, double theta_arg,
+    int polynomial_coarse_space_arg, bool use_correct_nullspace,
+    bool use_arpack, bool do_aggregates) 
     :
     num_coarsenings(coarsenings),
     use_correct_nullspace(use_correct_nullspace),
     use_arpack(use_arpack),
-    do_aggregates(do_aggregates)
+    do_aggregates(do_aggregates),
+    avoid_ess_bdr_dofs(true),
+    use_double_cycle(false),
+    coarse_direct(false),
+    smooth_drop_tol(0.0)
 {
     nparts_arr = new int[num_coarsenings];
     nu_pro = new int[num_coarsenings];
     nu_relax = new int[num_coarsenings];
     theta = new double[num_coarsenings];
-    minimal_coarse_space = new bool[num_coarsenings];
+    polynomial_coarse_space = new int[num_coarsenings];
 
     nparts_arr[0] = nparts_arr_arg[0];
     nu_pro[0] = first_nu_pro;
     nu_relax[0] = nu_relax_arg;
     theta[0] = first_theta;
-    minimal_coarse_space[0] = minimal_coarse_space_arg;
+    polynomial_coarse_space[0] = polynomial_coarse_space_arg;
 
     for (int i=1; i<num_coarsenings; ++i)
     {
@@ -75,13 +84,13 @@ MultilevelParameters::MultilevelParameters(
         nu_pro[i] = nu_pro_arg;
         nu_relax[i] = nu_relax_arg;
         theta[i] = theta_arg;
-        minimal_coarse_space[i] = minimal_coarse_space_arg;
+        polynomial_coarse_space[i] = polynomial_coarse_space_arg;
     }
 }
 
 MultilevelParameters::MultilevelParameters(
     int num_coarsenings, int elems_per_agg, int nu_pro,
-    int nu_relax, double theta, bool minimal_coarse_space)
+    int nu_relax, double theta, int polynomial_coarse_space)
     :
     num_coarsenings(num_coarsenings),
     use_correct_nullspace(true)
@@ -95,12 +104,13 @@ MultilevelParameters::~MultilevelParameters()
     delete [] nu_pro;
     delete [] nu_relax;
     delete [] theta;
-    delete [] minimal_coarse_space;
+    delete [] polynomial_coarse_space;
 }
 
 
 void ml_produce_hierarchy_from_level(
-    int coarsenings, int starting_level, ml_data_t& ml_data, const MultilevelParameters &mlp)
+    int coarsenings, int starting_level, ml_data_t& ml_data,
+    const MultilevelParameters &mlp)
 {
     SA_ASSERT(coarsenings >= 0);
     SA_ASSERT(&ml_data);
@@ -137,13 +147,11 @@ void ml_produce_hierarchy_from_level(
         int nparts = mlp.get_nparts(i);
         // could use regular (smoothed) interp, but tent_interp is default in serial SAAMGE, we focus on it for now
         bool do_aggregates = (mlp.get_do_aggregates() && (i == coarsenings-1));
-        agg_part_rels =
-            agg_create_partitioning_coarse(A, *agg_part_rels,
-                                           tg_data->interp_data->coarse_truedof_offset,
-                                           tg_data->interp_data->mis_numcoarsedof,
-                                           tg_data->interp_data->mis_tent_interps,
-                                           tg_data->tent_interp,
-                                           &nparts, do_aggregates);
+        agg_part_rels = agg_create_partitioning_coarse(
+            A, *agg_part_rels, tg_data->interp_data->coarse_truedof_offset,
+            tg_data->interp_data->mis_numcoarsedof,
+            tg_data->interp_data->mis_tent_interps, tg_data->tent_interp,
+            &nparts, do_aggregates);
         SA_ASSERT(agg_part_rels);
         if (agg_part_rels->testmesh)
         {
@@ -162,24 +170,25 @@ void ml_produce_hierarchy_from_level(
                 out3 << agg_part_rels->dof_id_inAE[j] << std::endl;
         }
 
-        tg_data =
-            tg_init_data(*A, *agg_part_rels, mlp.get_nu_pro(i), mlp.get_nu_relax(i),
-                         mlp.get_theta(i), mlp.get_smooth_interp(i), mlp.get_use_arpack());
+        tg_data = tg_init_data(
+            *A, *agg_part_rels, mlp.get_nu_pro(i), mlp.get_nu_relax(i),
+            mlp.get_theta(i), mlp.get_smooth_interp(i),
+            mlp.get_smooth_drop_tol(), mlp.get_use_arpack());
         SA_ASSERT(tg_data);
         SA_ASSERT(tg_data->interp_data);
 
         tg_data->use_w_cycle = false;
-        tg_data->minimal_coarse_space = mlp.get_minimal_coarse_space(i);
+        tg_data->polynomial_coarse_space = mlp.get_polynomial_coarse_space(i);
 
         if (mlp.get_use_correct_nullspace() &&
             i == coarsenings-1)
         {
             tg_data->interp_data->scaling_P = true;
         }
-        ElementMatrixProvider * emp = new ElementMatrixParallelCoarse(*agg_part_rels,
-                                                                      ml_data.levels_list.coarsest);
-        tg_build_hierarchy(NULL, *A, *tg_data, *agg_part_rels,
-                           emp, NULL);
+        ElementMatrixProvider * emp = new ElementMatrixParallelCoarse(
+            *agg_part_rels, ml_data.levels_list.coarsest);
+        tg_build_hierarchy(*A, *tg_data, *agg_part_rels,
+                           emp, mlp.get_avoid_ess_bdr_dofs());
 
         if (agg_part_rels->testmesh)
         {
@@ -192,7 +201,7 @@ void ml_produce_hierarchy_from_level(
         }
 
         SA_ASSERT(!tg_data->Ac);
-        tg_update_coarse_operator(*A, tg_data, i+1 == coarsenings);
+        tg_update_coarse_operator(*A, tg_data, i+1 == coarsenings, mlp.get_coarse_direct());
         if (false)
         {
             std::stringstream s;
@@ -207,9 +216,10 @@ void ml_produce_hierarchy_from_level(
     }
     SA_ASSERT(levels_check_list(ml_data.levels_list));
     SA_RPRINTF_L(0,5, "LEVELS in levels_list = %d\n", ml_data.levels_list.num_levels);
-    SA_RPRINTF_L(0,5, "%s", "END \\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/"
-                   "\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/"
-                   "\\/\n");
+    SA_RPRINTF_L(0,5, "%s",
+                 "END \\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/"
+                 "\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/\\/"
+                 "\\/\n");
 
     ml_impose_cycle(ml_data,false);
     if (mlp.get_use_correct_nullspace())
@@ -332,7 +342,8 @@ double ml_print_data(HypreParMatrix& A, const ml_data_t& ml_data)
     }
     double overall_complexity = ml_compute_OC(A, ml_data);
     SA_RPRINTF(0,"Overall operator complexity: %g\n", overall_complexity);
-    SA_ASSERT(overall_complexity < 3.0); // let's not waste our time...
+    // SA_ASSERT(overall_complexity < 3.0); // let's not waste our time...
+
     for ((level = ml_data.levels_list.finest), (i=0); level;
          (level = level->coarser), (++i))
     {
@@ -366,10 +377,8 @@ void ml_impose_cycle(ml_data_t& ml_data, bool Wcycle)
 }
 
 ml_data_t * ml_produce_data(
-    const SparseMatrix& Al, HypreParMatrix& Ag,
-    agg_partitioning_relations_t *agg_part_rels, 
-    ElementMatrixProvider *elem_data_finest,
-    const MultilevelParameters &mlp)
+    HypreParMatrix& Ag, agg_partitioning_relations_t *agg_part_rels, 
+    ElementMatrixProvider *elem_data_finest, const MultilevelParameters &mlp)
 {
     SA_ASSERT(elem_data_finest);
     ml_data_t *ml_data = new ml_data_t;
@@ -392,22 +401,48 @@ ml_data_t * ml_produce_data(
                   "\\/\\/\\/\\/\n");
     }
 
-    tg_data_t *tg_data =
-        tg_init_data(Ag, *agg_part_rels, mlp.get_nu_pro(0), mlp.get_nu_relax(0),
-                     mlp.get_theta(0), mlp.get_smooth_interp(0), mlp.get_use_arpack());
+    tg_data_t *tg_data = tg_init_data(
+        Ag, *agg_part_rels, mlp.get_nu_pro(0), mlp.get_nu_relax(0),
+        mlp.get_theta(0), mlp.get_smooth_interp(0), mlp.get_smooth_drop_tol(),
+        mlp.get_use_arpack());
     SA_ASSERT(tg_data);
     SA_ASSERT(tg_data->interp_data);
     
     tg_data->use_w_cycle = false;
-    tg_data->minimal_coarse_space = mlp.get_minimal_coarse_space(0);
+    tg_data->polynomial_coarse_space = mlp.get_polynomial_coarse_space(0);
 
-    if (mlp.get_use_correct_nullspace())
-    // (use_correct_nulspace && (0 == coarsenings-1 || use_double_cycle) // this is the correct if, but we don't know in this routine if we're using double cycle
+    if (mlp.get_use_correct_nullspace() && 
+        (1 == mlp.get_num_coarsenings() || mlp.get_use_double_cycle()) )
     {
         tg_data->interp_data->scaling_P = true;
     }
 
-    tg_build_hierarchy(&Al, Ag, *tg_data, *agg_part_rels, NULL, elem_data_finest);
+    if (tg_data->polynomial_coarse_space == 0 ||
+        tg_data->polynomial_coarse_space == 1)
+    {
+        ElementMatrixStandardGeometric * elmat_geom = 
+            dynamic_cast<ElementMatrixStandardGeometric*>(elem_data_finest);
+        SA_ASSERT(elmat_geom);
+        ParBilinearForm * pform = elmat_geom->GetParBilinearForm();
+        ParFiniteElementSpace * pfes = pform->ParFESpace();
+        ParMesh * pmesh = pfes->GetParMesh();
+        // whew, getting that pmesh was a lot of work...
+        bool use_spectral;
+        if (mlp.get_theta(0) <= 0.0)
+            use_spectral = false;
+        else
+            use_spectral = true;
+
+        tg_build_hierarchy_with_polynomial(
+            Ag, *pmesh, *tg_data, *agg_part_rels,
+            elem_data_finest, tg_data->polynomial_coarse_space,
+            use_spectral, mlp.get_avoid_ess_bdr_dofs());
+    }
+    else
+    {
+        tg_build_hierarchy(Ag, *tg_data, *agg_part_rels,
+                           elem_data_finest, mlp.get_avoid_ess_bdr_dofs());
+    }
 
     if (agg_part_rels->testmesh)
     {
@@ -416,7 +451,8 @@ ml_data_t * ml_produce_data(
     }
 
     SA_ASSERT(!tg_data->Ac);
-    tg_update_coarse_operator(Ag, tg_data, 1 >= mlp.get_num_coarsenings()); 
+    tg_update_coarse_operator(Ag, tg_data, 1 >= mlp.get_num_coarsenings(),
+                              mlp.get_coarse_direct());
 
     levels_list_push_coarse_data(ml_data->levels_list, agg_part_rels, tg_data);
     SA_ASSERT(ml_data->levels_list.finest == ml_data->levels_list.coarsest);
@@ -469,10 +505,6 @@ int ml_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxiter,
     SA_ASSERT(level->tg_data->Ac);
     SA_ASSERT(A.M() == A.N());
     SA_ASSERT(A.M() == level->tg_data->interp->M());
-    // SA_PRINTF("A.M() = %d, b.Size() = %d, x.Size() = %d\n",
-    //       A.M(), b.Size(), x.Size());
-    // SA_ASSERT(A.M() == b.Size()); // HypreParVector reports local .Size()
-    // SA_ASSERT(A.M() == x.Size());
 
     int ml_iters = tg_run(A, level->agg_part_rels, x, b, maxiter, rtol, atol,
                           reducttol, level->tg_data, zero_rhs);
@@ -482,6 +514,7 @@ int ml_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxiter,
     return ml_iters;
 }
 
+/// not ever called? deprecated?
 int ml_pcg_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxiter,
                double rtol, double atol, ml_data_t& ml_data, bool zero_rhs,
                int from_level)
@@ -502,8 +535,6 @@ int ml_pcg_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxi
     SA_ASSERT(level->tg_data->Ac);
     SA_ASSERT(A.M() == A.N());
     SA_ASSERT(A.M() == level->tg_data->interp->M());
-    // SA_ASSERT(A.M() == b.Size());
-    // SA_ASSERT(A.M() == x.Size());
 
     int pcg_iters = tg_pcg_run(A, level->agg_part_rels, x, b, maxiter, rtol,
                                atol, level->tg_data, zero_rhs);
@@ -512,3 +543,5 @@ int ml_pcg_run(HypreParMatrix& A, HypreParVector& x, HypreParVector& b, int maxi
 
     return pcg_iters;
 }
+
+} // namespace saamge

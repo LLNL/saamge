@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -36,9 +36,9 @@
 #include "xpacks.hpp"
 #include "mbox.hpp"
 
-/* Options */
-
-CONFIG_DEFINE_CLASS(CONTRIB);
+namespace saamge
+{
+using namespace mfem;
 
 // int abs_pair_compare(const std::pair<double, int> *a, const std::pair<double, int> *b)
 int abs_pair_compare(const void *va, const void *vb)
@@ -54,96 +54,55 @@ int abs_pair_compare(const void *va, const void *vb)
         return 0;
 }
 
-/*! 
-  This is a (very) naive implementation.
-  Once upon a time we used this to do a few nonzeros per aggregate in 
-  corrected nullspace setup, but now this is orphan code.
-
-  DEPRECATED
-*/
-void n_largest(Vector &x, int n, Array<int> &locations, Array<double> &values)
+ContribTent::ContribTent(int ND, bool avoid_ess_bdr_dofs_in) :
+    rows(ND),
+    filled_cols(0),
+    avoid_ess_bdr_dofs(avoid_ess_bdr_dofs_in),
+    svd_eps(1.e-10),
+    threshold_(0.0)
 {
-    SA_ASSERT(n <= x.Size());
-    Array<std::pair<double, int> > pairs(n);
-    for (int i=0; i<n; ++i)
-    {
-        pairs[i].first = x(i);
-        pairs[i].second = i;
-    }
-    std::qsort(pairs.GetData(), pairs.Size(), sizeof(std::pair<double, int>), abs_pair_compare);
-    for (int i=n; i<x.Size(); ++i)
-    {
-        std::pair<double, int> newpair(x(i), i);
-        if (abs_pair_compare((void*) &newpair, (void*) &pairs[0]) == 1)
-        {
-            pairs[0] = newpair;
-            std::qsort(pairs.GetData(), pairs.Size(), sizeof(std::pair<double, int>), abs_pair_compare);
-        }
-    }
-    for (int i=0; i<n; ++i)
-    {
-        values[i] = pairs[i].first;
-        locations[i] = pairs[i].second;
-    }
+    tent_interp_ = new SparseMatrix(rows);
+    // next line should be optional?
+    local_coarse_one_representation = new Array<double>();
 }
 
-/* Static Functions */
-
-/* Functions */
-
-contrib_tent_struct_t *contrib_tent_init(int ND)
+ContribTent::~ContribTent()
 {
-    contrib_tent_struct_t *tent_int_struct = new contrib_tent_struct_t;
-    tent_int_struct->rows = ND;
-    tent_int_struct->filled_cols = 0;
-    tent_int_struct->tent_interp = new SparseMatrix(tent_int_struct->rows);
-    // tent_int_struct->local_coarse_one_representation = new Vector();
-    tent_int_struct->local_coarse_one_representation = new Array<double>();
-    // tent_int_struct->coarse_ones_values_per_agg = coarse_ones_values_per_agg;
-
-    return tent_int_struct;
 }
 
-SparseMatrix *contrib_tent_finalize(contrib_tent_struct_t *tent_int_struct)
+SparseMatrix * ContribTent::contrib_tent_finalize()
 {
-    SparseMatrix *tent_interp;
+    SparseMatrix *tent_interp_l;
     // on very coarse levels, the following assertion sometimes fails...
     // SA_ASSERT(tent_int_struct->filled_cols > 0);
-    SA_ASSERT(tent_int_struct->filled_cols >= 0);
-    if (tent_int_struct->filled_cols == 0)
+    SA_ASSERT(filled_cols >= 0);
+    if (filled_cols == 0)
         SA_PRINTF("%s","WARNING! no coarse degrees of freedom on this processor.\n");
-    tent_int_struct->tent_interp->Finalize();
-    tent_interp = new SparseMatrix(tent_int_struct->tent_interp->GetI(),
-                                   tent_int_struct->tent_interp->GetJ(),
-                                   tent_int_struct->tent_interp->GetData(),
-                                   tent_int_struct->tent_interp->Size(),
-                                   tent_int_struct->filled_cols);
-    tent_int_struct->tent_interp->LoseData();
-    delete (tent_int_struct->tent_interp);
-    SA_ASSERT(tent_interp->GetI() && tent_interp->GetJ() &&
-              tent_interp->GetData());
-    SA_ASSERT(tent_interp->Size() == tent_int_struct->rows);
-    SA_ASSERT(tent_interp->Width() == tent_int_struct->filled_cols);
+    tent_interp_->Finalize();
+    tent_interp_l = new SparseMatrix(tent_interp_->GetI(),
+                                     tent_interp_->GetJ(),
+                                     tent_interp_->GetData(),
+                                     tent_interp_->Size(),
+                                     filled_cols);
+    tent_interp_->LoseData();
+    delete (tent_interp_);
+    SA_ASSERT(tent_interp_l->GetI() && tent_interp_l->GetJ() &&
+              tent_interp_l->GetData());
+    SA_ASSERT(tent_interp_l->Size() == rows);
+    SA_ASSERT(tent_interp_l->Width() == filled_cols);
 
-    // delete tent_int_struct->local_coarse_one_representation;
-    delete tent_int_struct;
-    return tent_interp;
+    return tent_interp_l;
 }
 
 /**
    Extract some of the logic, in terms of essential boundary conditions,
    from contrib_tent_insert_from_local() so we can do SVD after
    we do this
-
-   ATB 16 June 2015
 */
-void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
-                             const agg_partitioning_relations_t& agg_part_rels,
-                             DenseMatrix& local, 
-                             const int *restriction)
+void ContribTent::contrib_filter_boundary(const agg_partitioning_relations_t& agg_part_rels,
+                                          DenseMatrix& local, 
+                                          const int *restriction)
 {
-    const bool avoid_ess_brd_dofs = 
-        CONFIG_ACCESS_OPTION(CONTRIB, avoid_ess_brd_dofs);
     const int vects = local.Width();
     const int dim = local.Height();
     double *data = local.Data();
@@ -168,7 +127,7 @@ void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
             const double a = data[j];
 
             if (a == 0.0 ||
-                (avoid_ess_brd_dofs &&
+                (avoid_ess_bdr_dofs &&
                  agg_is_dof_on_essential_border(agg_part_rels, row)))
             {
                 if (SA_IS_OUTPUT_LEVEL(7) && 0. != a)
@@ -184,7 +143,7 @@ void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
 
         if (atleastone)
         {
-            for (j=0; j< dim; ++j)
+            for (j=0; j<dim; ++j)
             {
                 newdatap[j] = newcolumn[j];
             }
@@ -193,8 +152,7 @@ void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
         }
         else
         {
-            SA_ALERT_PRINTF("%s","Entire column is on essential boundary, ignoring column!");
-            // wait, doesn't this imply that the entire *matrix* is on the essential boundary?
+            SA_ALERT_PRINTF("%s","Entire column is zero, possibly because of essential boundary, ignoring column!");
         }
     }
     local.SetSize(dim, col);
@@ -205,14 +163,13 @@ void contrib_filter_boundary(contrib_tent_struct_t *tent_int_struct,
 }
 
 /**
-   separated from contrib_tent_insert_from_local(),
+   Separated from contrib_tent_insert_from_local(),
    separating the essential boundary checking from the actual
    insertion so we can do SVD in between
 */
-void contrib_tent_insert_simple(contrib_tent_struct_t *tent_int_struct,
-                                const agg_partitioning_relations_t& agg_part_rels,
-                                DenseMatrix& local, 
-                                const int *restriction)
+void ContribTent::contrib_tent_insert_simple(
+    const agg_partitioning_relations_t& agg_part_rels, DenseMatrix& local, 
+    const int *restriction)
 {
     const int vects = local.Width();
     const int dim = local.Height();
@@ -222,37 +179,36 @@ void contrib_tent_insert_simple(contrib_tent_struct_t *tent_int_struct,
     SA_ASSERT(vects > 0);
     SA_ASSERT(dim >= vects);
 
-    col = tent_int_struct->filled_cols;
+    col = filled_cols;
     for (i=0; i < vects; (++i), (data += dim))
     {
         for (j=0; j< dim; ++j)
         {
             const int row = restriction[j];
-            tent_int_struct->tent_interp->Set(row, col, data[j]);
+            if (fabs(data[j]) > threshold_)
+                tent_interp_->Set(row, col, data[j]);
         }
         ++col;
     }
-    tent_int_struct->filled_cols = col;
+    filled_cols = col;
 }
 
 
 /**
-   this routine changed ATB 11 May 2015 to also modify local according
+   This routine changed ATB 11 May 2015 to also modify local according
    to boundary conditions, not just the global interp, because I think
    this is mathematically the right thing to do and because we now store
    local as a representative of coarse DoFs for multilevel extension
 
-   recently in multilevel setting we are moving from this to a combination 
-   of contrib_filter_boundary() and contrib_tent_insert_simple(), this
-   may be deprecated soon
+   Recently in multilevel setting we are moving from this to a combination 
+   of contrib_filter_boundary() and contrib_tent_insert_simple() .
+
+   DEPRECATED
 */
-void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
-                                    const agg_partitioning_relations_t& agg_part_rels,
-                                    DenseMatrix& local, 
-                                    const int *restriction)
+void ContribTent::contrib_tent_insert_from_local(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix& local, const int *restriction)
 {
-    const bool avoid_ess_brd_dofs = CONFIG_ACCESS_OPTION(CONTRIB,
-                                                         avoid_ess_brd_dofs);
     const int vects = local.Width();
     const int dim = local.Height();
     double *data = local.Data();
@@ -265,8 +221,8 @@ void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
     SA_ASSERT(vects > 0);
     SA_ASSERT(dim >= vects);
 
-    int firstcol = tent_int_struct->filled_cols;
-    col = tent_int_struct->filled_cols;
+    int firstcol = filled_cols;
+    col = filled_cols;
     double newcolumn[dim];
     int bestcase_nonzerodofs = 0;
     int nonzerodofs = 0;
@@ -281,7 +237,7 @@ void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
             const double a = data[j];
 
             if (a == 0.0 ||
-                (avoid_ess_brd_dofs &&
+                (avoid_ess_bdr_dofs &&
                  agg_is_dof_on_essential_border(agg_part_rels, row)))
             {
                 if (SA_IS_OUTPUT_LEVEL(7) && 0. != a)
@@ -296,21 +252,26 @@ void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
             adhoc_column_norm += fabs(a);
             newcolumn[j] = a;
         }
-        if (nonzerodofs > bestcase_nonzerodofs) bestcase_nonzerodofs = nonzerodofs;
-        if (adhoc_column_norm < 1.e-3) // not clear what the right tolerance here is, especially with varying coefficients
+        if (nonzerodofs > bestcase_nonzerodofs)
+            bestcase_nonzerodofs = nonzerodofs;
+
+        // not clear what the right tolerance here is, especially with varying coefficients
+        if (adhoc_column_norm < 1.e-3) 
         {
-            SA_ALERT_PRINTF("Tentative prolongator column is near zero, l1 norm %e, Ignoring column!",
+            SA_ALERT_PRINTF("Tentative prolongator column is near zero, "
+                            "l1 norm %e, Ignoring column!",
                             adhoc_column_norm);
             modified = true;
         }
         else 
         {
             if (adhoc_column_norm < 1.e-1)
-                SA_ALERT_PRINTF("Accepting column of small l1 norm %e!",adhoc_column_norm);
+                SA_ALERT_PRINTF("Accepting column of small l1 norm %e!",
+                                adhoc_column_norm);
             for (j=0; j< dim; ++j)
             {
                 const int row = restriction[j];
-                tent_int_struct->tent_interp->Set(row, col, newcolumn[j]);
+                tent_interp_->Set(row, col, newcolumn[j]);
                 newdatap[j] = newcolumn[j];
             }
             ++col;
@@ -320,13 +281,189 @@ void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
     SA_ASSERT(bestcase_nonzerodofs >= col - firstcol);
     if (modified)
     {
-        local.SetSize(dim, col - tent_int_struct->filled_cols);
+        local.SetSize(dim, col - filled_cols);
         data = local.Data();
         for (int j=0; j<dim * local.Width(); ++j)
             data[j] = newdata[j];
     }   
     delete [] newdata;
-    tent_int_struct->filled_cols = col;
+    filled_cols = col;
+}
+
+void ContribTent::ExtendWithConstants(
+    DenseMatrix ** received_mats,
+    const agg_partitioning_relations_t& agg_part_rels)
+{
+    Vector coords;
+    ExtendWithPolynomials(received_mats, agg_part_rels, 0, -1, -1, coords);
+}
+
+/// TODO: this is probably unsensible with elasticity
+void ContribTent::ExtendWithPolynomials(
+    DenseMatrix ** received_mats,
+    const agg_partitioning_relations_t& agg_part_rels,
+    int order, int spatial_dimension, 
+    int num_nodes, const Vector& coords)
+{
+    int num_mises = agg_part_rels.num_mises;
+    for (int mis=0; mis<num_mises; ++mis)
+    {
+        int owner = agg_part_rels.mis_master[mis];
+        if (owner == PROC_RANK)
+        {
+            const int mis_size = agg_part_rels.mises_size[mis];
+            // the next bit is a real hack...
+            if (received_mats[mis] == NULL)
+            {
+                received_mats[mis] = new DenseMatrix[1];
+                received_mats[mis][0].SetSize(mis_size,0);
+            }
+            DenseMatrix& local_spectral = received_mats[mis][0];
+            SA_ASSERT(local_spectral.Height() == mis_size);
+            const int swidth = local_spectral.Width();
+            int newwidth;
+            if (order == 0)
+                newwidth = swidth + 1;
+            else if (order == 1)
+                newwidth = swidth + spatial_dimension + 1;
+            else
+                throw 1;   
+            DenseMatrix extended(local_spectral.Height(), newwidth);
+            const int * row = agg_part_rels.mis_to_dof->GetRow(mis);
+            for (int k=0; k<mis_size; ++k)
+            {
+                for (int j=0; j<local_spectral.Width(); ++j)
+                    extended.Elem(k,j) = local_spectral.Elem(k,j);
+                extended.Elem(k,swidth) = 1.0;
+                if (order == 1)
+                {
+                    for (int d=0; d<spatial_dimension; ++d)
+                    {
+                        int dof_num = row[k];
+                        extended.Elem(k,swidth+d+1) = 
+                            coords(num_nodes*d + dof_num);
+                    }
+                }
+            }
+            local_spectral = extended;
+        }
+    }
+}
+
+void ContribTent::ExtendWithRBMs(
+    DenseMatrix ** received_mats,
+    const agg_partitioning_relations_t& agg_part_rels,
+    int spatial_dimension,
+    int num_nodes, const Vector& coords)
+{
+    // follow ExtendWithPolynomials pretty closely
+    // three RBMs in 2D, six in 3D (see eg. Hughes p. 88)
+    // SVD is done later
+    // We are assuming the FES is Ordering::ByVDIM here (should assert)
+
+    int num_mises = agg_part_rels.num_mises;
+    for (int mis=0; mis<num_mises; ++mis)
+    {
+        int owner = agg_part_rels.mis_master[mis];
+        if (owner == PROC_RANK)
+        {
+            // contents of MIS are SAAMGe dofs, ie, there are (dimension)*(num_nodes) of these dofs
+            const int mis_size = agg_part_rels.mises_size[mis];
+            // the next bit is a real hack...
+            if (received_mats[mis] == NULL)
+            {
+                received_mats[mis] = new DenseMatrix[1];
+                received_mats[mis][0].SetSize(mis_size,0);
+            }
+            DenseMatrix& local_spectral = received_mats[mis][0];
+            SA_ASSERT(local_spectral.Height() == mis_size);
+            const int swidth = local_spectral.Width();
+            int newwidth;
+            if (spatial_dimension == 1)
+                newwidth = swidth + 1;
+            else if (spatial_dimension == 2)
+                newwidth = swidth + 3;
+            else if (spatial_dimension == 3)
+                newwidth = swidth + 6;
+            else
+                throw 1;
+            DenseMatrix extended(local_spectral.Height(), newwidth);
+            for (int k=0; k<mis_size; ++k)
+            {
+                for (int j=0; j<local_spectral.Width(); ++j)
+                    extended.Elem(k,j) = local_spectral.Elem(k,j);
+            }
+            const int * row = agg_part_rels.mis_to_dof->GetRow(mis);
+            SA_ASSERT(mis_size % spatial_dimension == 0);
+            const int nodes_in_mis = mis_size / spatial_dimension;
+            for (int node=0; node<nodes_in_mis; ++node)
+            {
+                int node_num = row[node*spatial_dimension] / spatial_dimension;
+                SA_ASSERT(node_num < num_nodes);
+                for (int d=0; d<spatial_dimension; ++d)
+                {
+                    const int k = node*spatial_dimension + d;
+                    extended.Elem(k, swidth + d) = 1.0; // constant modes, in each of x,y,z directions
+                }
+                if (spatial_dimension > 1)
+                {
+                    const double xcoord = coords(num_nodes*0 + node_num);
+                    const double ycoord = coords(num_nodes*1 + node_num);
+                    int k = node*spatial_dimension + 0;
+                    extended.Elem(k, swidth + spatial_dimension + 0) = ycoord;
+                    k = node*spatial_dimension + 1;
+                    extended.Elem(k, swidth + spatial_dimension + 0) = -xcoord;
+                }
+                if (spatial_dimension > 2)
+                {
+                    const double xcoord = coords(num_nodes*0 + node_num);
+                    const double ycoord = coords(num_nodes*1 + node_num);
+                    const double zcoord = coords(num_nodes*2 + node_num);
+                    int k = node*spatial_dimension + 0;
+                    extended.Elem(k, swidth + spatial_dimension + 1) = 0.0;
+                    extended.Elem(k, swidth + spatial_dimension + 2) = -zcoord;
+                    k = node*spatial_dimension + 1;
+                    extended.Elem(k, swidth + spatial_dimension + 1) = zcoord;
+                    extended.Elem(k, swidth + spatial_dimension + 2) = 0.0;
+                    k = node*spatial_dimension + 2;
+                    extended.Elem(k, swidth + spatial_dimension + 1) = -ycoord;
+                    extended.Elem(k, swidth + spatial_dimension + 2) = xcoord;
+                }
+            }
+            local_spectral = extended;
+        }
+    }    
+}
+
+/**
+   Want to add linear functions also to coarse space.
+   This requires knowing coordinates of dofs.
+
+   Turns out we need to also add constants.
+   
+   coords is length (dof * spatial_dimension), is like what comes from Mesh.GetVertices()
+   or Mesh.GetNodes()
+*/
+void ContribTent::contrib_linears(
+    const agg_partitioning_relations_t& agg_part_rels,
+    int spatial_dimension, int num_nodes, const Vector& coords)
+{
+    SA_ASSERT(coords.Size() == spatial_dimension*num_nodes);
+    int num_mises = agg_part_rels.num_mises;
+
+    // DenseMatrix ** received_mats = CommunicateEigenvectors(agg_part_rels, cut_evects_arr, sec);
+    DenseMatrix ** received_mats = new DenseMatrix*[num_mises];
+    std::memset(received_mats,0,sizeof(DenseMatrix*) * num_mises);
+
+    ExtendWithPolynomials(received_mats, agg_part_rels, 1, spatial_dimension, 
+                          num_nodes, coords);
+
+    // do SVDs on owned MISes, build tentative interpolator
+    int * row_sizes = new int[num_mises];
+    for (int mis=0; mis<num_mises; ++mis)
+        row_sizes[mis] = 1;
+    SVDInsert(agg_part_rels, received_mats, row_sizes, false);
+    delete [] row_sizes;
 }
 
 /**
@@ -334,113 +471,29 @@ void contrib_tent_insert_from_local(contrib_tent_struct_t *tent_int_struct,
    that we do one coarse DOF per MIS, in particular the (normalized)
    vector of all ones
 */
-void contrib_ones(contrib_tent_struct_t *tent_int_struct,
-                  const agg_partitioning_relations_t& agg_part_rels)
+void ContribTent::contrib_ones(const agg_partitioning_relations_t& agg_part_rels)
 {
     int num_mises = agg_part_rels.num_mises;
-    const bool avoid_ess_brd_dofs = CONFIG_ACCESS_OPTION(CONTRIB,
-                                                         avoid_ess_brd_dofs);
 
-    tent_int_struct->mis_tent_interps = new DenseMatrix*[num_mises]; 
-    memset(tent_int_struct->mis_tent_interps,0,sizeof(DenseMatrix*) * num_mises);
-    Vector svals;
-    int num_coarse_dofs = 0;
-    tent_int_struct->mis_numcoarsedof = new int[num_mises];
+    // DenseMatrix ** received_mats = CommunicateEigenvectors(agg_part_rels, cut_evects_arr, sec);
+    DenseMatrix ** received_mats = new DenseMatrix*[num_mises];
+    std::memset(received_mats,0,sizeof(DenseMatrix*) * num_mises);
+
+    ExtendWithConstants(received_mats, agg_part_rels);
+
+    // do SVDs on owned MISes, build tentative interpolator
+    int * row_sizes = new int[num_mises];
     for (int mis=0; mis<num_mises; ++mis)
-    {
-        int owner = agg_part_rels.mis_master[mis];
-        if (owner == PROC_RANK)
-        {
-            int mis_size = agg_part_rels.mises_size[mis];
-            tent_int_struct->mis_numcoarsedof[mis] = 1;
-            tent_int_struct->mis_tent_interps[mis] = new DenseMatrix;
-
-            // check to see if all of this MISes DOFs are on essential boundary - copied from contrib_big_aggs()
-            // this only checks the dofs for one AE, but that should be sufficient
-            if (avoid_ess_brd_dofs)
-            {
-                bool interior_dofs = false;
-                for (int j=0; j < mis_size; ++j)
-                {
-                    const int row = agg_part_rels.mis_to_dof->GetRow(mis)[j];
-                    SA_ASSERT(tent_int_struct->rows > row);
-                    if (!agg_is_dof_on_essential_border(agg_part_rels, row))
-                    {
-                        interior_dofs = true;
-                        break;
-                    }
-                }
-                if (!interior_dofs)
-                {
-                    if (SA_IS_OUTPUT_LEVEL(6))
-                        SA_ALERT_PRINTF("All DoFs are on essential boundary."
-                                        " Ignoring the entire contribution"
-                                        " introducing not more than 1 vector(s) on"
-                                        " an aggregate of size %d!",
-                                        mis_size);
-                    tent_int_struct->mis_numcoarsedof[mis] = 0;
-                    tent_int_struct->mis_tent_interps[mis]->SetSize(mis_size, 0); // this makes future assertions and communications cleaner, but is mostly unnecessary
-                    continue; // TODO: remove this, refactor
-                }
-            }
-
-            tent_int_struct->mis_tent_interps[mis]->SetSize(mis_size, 1);
-            double scale = std::sqrt((double) mis_size);
-            for (int k=0; k<mis_size; ++k)
-                tent_int_struct->mis_tent_interps[mis]->Elem(k,0) = 1.0 / scale;
-            contrib_filter_boundary(tent_int_struct, agg_part_rels,
-                                    *tent_int_struct->mis_tent_interps[mis],
-                                    agg_part_rels.mis_to_dof->GetRow(mis));
-
-            if (agg_part_rels.testmesh)
-            {
-                std::stringstream filename;
-                filename << "mis_tent_interp_" << mis << "." << PROC_RANK << ".densemat";
-                std::ofstream out(filename.str().c_str());
-                tent_int_struct->mis_tent_interps[mis]->Print(out);
-            }
-            int filled_cols = tent_int_struct->filled_cols;
-            contrib_tent_insert_simple(tent_int_struct, agg_part_rels,
-                                       *tent_int_struct->mis_tent_interps[mis],
-                                       agg_part_rels.mis_to_dof->GetRow(mis));
-
-            filled_cols = tent_int_struct->filled_cols - filled_cols;
-            SA_ASSERT(filled_cols == tent_int_struct->mis_tent_interps[mis]->Width());
-            tent_int_struct->mis_numcoarsedof[mis] = filled_cols;
-            num_coarse_dofs += filled_cols;
-        }
-        else
-        {
-            tent_int_struct->mis_numcoarsedof[mis] = 0;
-            tent_int_struct->mis_tent_interps[mis] = new DenseMatrix; // we only do this so deletion is cleaner at the end, could avoid it at the cost of more ifs
-            // tent_int_struct->mis_tent_interps[mis]->SetSize(0,0); // ???
-        }
-    }
-
-    tent_int_struct->coarse_truedof_offset = 0;
-    MPI_Scan(&num_coarse_dofs,&tent_int_struct->coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
-    tent_int_struct->coarse_truedof_offset -= num_coarse_dofs;
-    SA_RPRINTF(PROC_NUM-1,"coarse_truedof_offset = %d\n",tent_int_struct->coarse_truedof_offset);
+        row_sizes[mis] = 1;
+    SVDInsert(agg_part_rels, received_mats, row_sizes, false);
+    delete [] row_sizes;
 }
 
-/**
-   Takes solutions to spectral problems on AEs, restricts to MISes, does
-   appropriate communication and SVD, and constructs tentative prolongator
-
-   This is one of the key communication routine for the multilevel MIS extension
-   to this solver
-
-   Possibly more attention needs to be paid to boundary conditions and
-   small (1-2 dof) MISes
-*/
-void contrib_mises(contrib_tent_struct_t *tent_int_struct,
-                   const agg_partitioning_relations_t& agg_part_rels,
-                   DenseMatrix * const *cut_evects_arr,
-                   double eps, bool scaling_P)
+DenseMatrix ** ContribTent::CommunicateEigenvectors(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix * const *cut_evects_arr,
+    SharedEntityCommunication<DenseMatrix>& sec)
 {
-    const bool avoid_ess_brd_dofs = CONFIG_ACCESS_OPTION(CONTRIB,
-                                                         avoid_ess_brd_dofs);
-
     // restrict eigenvectors to MISes
     int num_mises = agg_part_rels.num_mises;
     DenseMatrix ** restricted_evects_array;
@@ -462,15 +515,8 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
         }
     }
 
-    // agg_part_rels.mis_truemis->Print("mis_truemis_contrib.mat"); // TODO remove!!!
-
     // communication: collect MIS-restricted eigenvectors on the process that owns the MIS
-    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
-                                               *agg_part_rels.mis_truemis);
     sec.ReducePrepare();
-
-    // delete h_cd;
-
     for (int mis=0; mis<num_mises; ++mis)
     {
         // combine all the AEs into one DenseMatrix (this is complicated 
@@ -489,9 +535,9 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
         for (int j=0; j<rowsize; ++j)
         {
             int AE = row[j];
-            memcpy(send_mat.Data() + numvecs*mis_size, 
-                   restricted_evects_array[mis][j].Data(), 
-                   mis_size * cut_evects_arr[AE]->Width() * sizeof(double));
+            std::memcpy(send_mat.Data() + numvecs*mis_size, 
+                        restricted_evects_array[mis][j].Data(), 
+                        mis_size * cut_evects_arr[AE]->Width() * sizeof(double));
             numvecs += cut_evects_arr[AE]->Width();
         }
         delete [] restricted_evects_array[mis];
@@ -499,36 +545,43 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
         sec.ReduceSend(mis,send_mat);
     }
     delete [] restricted_evects_array;
-    DenseMatrix ** received_mats = sec.Collect();
+    return sec.Collect();
+}
 
-    // do SVDs on owned MISes, build tentative interpolator
+void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
+                            DenseMatrix ** received_mats, int * row_sizes,
+                            bool scaling_P)
+{
+    int num_mises = agg_part_rels.num_mises;
     DenseMatrix lsvects;
-    tent_int_struct->mis_tent_interps = new DenseMatrix*[num_mises]; // TODO: can we make this pointer to array of DenseMatrix, not DenseMatrix* ?
-    memset(tent_int_struct->mis_tent_interps,0,sizeof(DenseMatrix*) * num_mises);
+    // TODO: can we make mis_tent_interps a pointer to array of DenseMatrix, not DenseMatrix* ?
+    // maybe use a std::vector of mfem::Array or something?
+    mis_tent_interps = new DenseMatrix*[num_mises]; 
+    std::memset(mis_tent_interps,0,sizeof(DenseMatrix*) * num_mises);
     Vector svals;
     int num_coarse_dofs = 0;
-    tent_int_struct->mis_numcoarsedof = new int[num_mises];
+    mis_numcoarsedof = new int[num_mises];
     for (int mis=0; mis<num_mises; ++mis)
     {
-        // SA_PRINTF("mis %d begins:\n",mis);
         int owner = agg_part_rels.mis_master[mis];
         if (owner == PROC_RANK)
         {
-            // int local_AEs_containing = agg_part_rels.mis_to_AE->RowSize(mis);
-            // int row_size = agg_part_rels.mis_proc->RowSize(mis);
-            int row_size = sec.NumNeighbors(mis);
-            tent_int_struct->mis_tent_interps[mis] = new DenseMatrix;
+            // int row_size = sec.NumNeighbors(mis);
+            int row_size = row_sizes[mis];
+            mis_tent_interps[mis] = new DenseMatrix;
 
             // check to see if all of this MISes DOFs are on essential boundary - copied from contrib_big_aggs()
             // this only checks the dofs for one AE, but that should be sufficient
+            const int mis_size = agg_part_rels.mises_size[mis];
             const int dim = received_mats[mis][0].Height();
-            if (avoid_ess_brd_dofs)
+            SA_ASSERT(mis_size == dim);
+            if (avoid_ess_bdr_dofs)
             {
                 bool interior_dofs = false;
                 for (int j=0; j < dim; ++j)
                 {
                     const int row = agg_part_rels.mis_to_dof->GetRow(mis)[j];
-                    SA_ASSERT(tent_int_struct->rows > row);
+                    SA_ASSERT(rows > row);
                     if (!agg_is_dof_on_essential_border(agg_part_rels, row))
                     {
                         interior_dofs = true;
@@ -540,11 +593,12 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
                     if (SA_IS_OUTPUT_LEVEL(6))
                         SA_ALERT_PRINTF("All DoFs are on essential boundary."
                                         " Ignoring the entire contribution"
-                                        " introducing not more than %d vector(s) on"
-                                        " an aggregate of size %d!",
+                                        " introducing not more than %d vector(s)"
+                                        " on an aggregate of size %d!",
                                         received_mats[mis][0].Width(), dim);
-                    tent_int_struct->mis_numcoarsedof[mis] = 0;
-                    tent_int_struct->mis_tent_interps[mis]->SetSize(dim, 0); // this makes future assertions and communications cleaner, but is mostly unnecessary
+                    mis_numcoarsedof[mis] = 0;
+                    // next line makes future assertions and communications cleaner, but is mostly unnecessary
+                    mis_tent_interps[mis]->SetSize(dim, 0); 
                     delete [] received_mats[mis];
                     continue; // TODO: remove this, refactor
                 }
@@ -553,45 +607,19 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
             if (dim == 1) // could think about a kind of identity matrix whenever dim < total width, but I think SVD will take care of this
             {
                 // see assertion in contrib_tent_insert_from_local: SA_ASSERT(dim > 1 || 1. == a);
-                tent_int_struct->mis_tent_interps[mis]->SetSize(1,1);
-                tent_int_struct->mis_tent_interps[mis]->Elem(0,0) = 1.0;
+                mis_tent_interps[mis]->SetSize(1,1);
+                mis_tent_interps[mis]->Elem(0,0) = 1.0;
             }
             else
             {
-                /*
-                if (agg_part_rels.testmesh)
-                {
-                    // SA_PRINTF("  mis %d, dim %d, DenseMats in received_mats = %d\n",
-                    //        mis, dim, local_AEs_containing + row_size - 1);
-                    for (int q=0; q<local_AEs_containing + row_size - 1; ++q)
-                    {
-                        std::stringstream filename;
-                        filename << "received_mats_" << mis << "_" << q << "." << PROC_RANK << ".densemat";
-                        std::ofstream out(filename.str().c_str());
-                        received_mats[mis][q].Print(out);
-                    }
-                }
-                */
                 int total_num_columns = 0;
                 for (int q=0; q<row_size; ++q)
                 {
-                    contrib_filter_boundary(tent_int_struct, agg_part_rels,
+                    contrib_filter_boundary(agg_part_rels,
                                             received_mats[mis][q],
                                             agg_part_rels.mis_to_dof->GetRow(mis));
                     total_num_columns += received_mats[mis][q].Width();
-                    /*
-                    if (agg_part_rels.testmesh)
-                    {
-                        std::stringstream filename;
-                        filename << "received_mats_f_" << mis << "_" << q << "." << PROC_RANK << ".densemat";
-                        std::ofstream out(filename.str().c_str());
-                        received_mats[mis][q].Print(out);
-                    }
-                    */
                 }
-
-//                the change below is arguably correct, but something else is definitely going wrong with essential boundary conditions for elasticity
-                //                                                                           comparing wtih elasticity and without, the completely zero contribution does not happen without elasticity, never, and even the zero columns are pretty rare.
 
                 if (total_num_columns == 0)
                     svals.SetSize(0);
@@ -601,60 +629,120 @@ void contrib_mises(contrib_tent_struct_t *tent_int_struct,
                 {
                     SA_PRINTF("WARNING: completely zero contribution on mis %d!\n", mis);
                     SA_PRINTF("WARNING: dim = %d, row_size = %d\n", dim, row_size);
-                    tent_int_struct->mis_numcoarsedof[mis] = 0;
-                    tent_int_struct->mis_tent_interps[mis]->SetSize(dim, 0); // this makes future assertions and communications cleaner, but is mostly unnecessary
+                    mis_numcoarsedof[mis] = 0;
+                    mis_tent_interps[mis]->SetSize(dim, 0); // this makes future assertions and communications cleaner, but is mostly unnecessary
                     delete [] received_mats[mis];
                     continue; // TODO: remove this, refactor 
                 }
-                xpack_orth_set(lsvects, svals, *tent_int_struct->mis_tent_interps[mis], eps);
-                // SA_PRINTF("    mis %d of size %d: after SVD, have chosen %d independent vectors out of possible %d\n", mis,dim,tent_int_struct->mis_tent_interps[mis]->Width(), svals.Size());
+                xpack_orth_set(lsvects, svals, *mis_tent_interps[mis], svd_eps);
             }
             if (agg_part_rels.testmesh)
             {
                 std::stringstream filename;
                 filename << "mis_tent_interp_" << mis << "." << PROC_RANK << ".densemat";
                 std::ofstream out(filename.str().c_str());
-                tent_int_struct->mis_tent_interps[mis]->Print(out);
+                mis_tent_interps[mis]->Print(out);
             }
-            int filled_cols = tent_int_struct->filled_cols;
+            int filled_cols_l = filled_cols;
 
-            contrib_tent_insert_simple(tent_int_struct, agg_part_rels,
-                                       *tent_int_struct->mis_tent_interps[mis], 
+            contrib_tent_insert_simple(agg_part_rels,
+                                       *mis_tent_interps[mis], 
                                        agg_part_rels.mis_to_dof->GetRow(mis));
 
-            filled_cols = tent_int_struct->filled_cols - filled_cols;
-            // SA_PRINTF("    MIS %d producing %d cols\n", mis, filled_cols);
+            filled_cols_l = filled_cols - filled_cols_l;
 
-            SA_ASSERT(filled_cols == tent_int_struct->mis_tent_interps[mis]->Width());
-            if (scaling_P && filled_cols > 0) 
+            SA_ASSERT(filled_cols_l == mis_tent_interps[mis]->Width());
+            if (scaling_P && filled_cols_l > 0) 
             {
-                Vector x(tent_int_struct->mis_tent_interps[mis]->Width());  // size of coarse dofs for this MIS
-                Vector b(tent_int_struct->mis_tent_interps[mis]->Height());
+                Vector x(mis_tent_interps[mis]->Width());  // size of coarse dofs for this MIS
+                Vector b(mis_tent_interps[mis]->Height());
                 b = 1.0;
-                xpack_solve_lls(*tent_int_struct->mis_tent_interps[mis],b,x);
+                xpack_solve_lls(*mis_tent_interps[mis],b,x);
                 double norm = 0.0;
                 for (int k=0; k<x.Size(); ++k)
                     norm += x(k)*x(k);
                 norm = std::sqrt(norm);
                 // we can append because the coarse DOF are numbered in exactly this order, by MIS
                 for (int k=0; k<x.Size(); ++k)
-                    tent_int_struct->local_coarse_one_representation->Append(x(k) / norm);
+                    local_coarse_one_representation->Append(x(k) / norm);
             }
-            tent_int_struct->mis_numcoarsedof[mis] = filled_cols;
-            num_coarse_dofs += filled_cols;
+            mis_numcoarsedof[mis] = filled_cols_l;
+            num_coarse_dofs += filled_cols_l;
             delete [] received_mats[mis];
         }
         else
         {
-            tent_int_struct->mis_numcoarsedof[mis] = 0; 
-            tent_int_struct->mis_tent_interps[mis] = new DenseMatrix; // we only do this so deletion is cleaner at the end, could avoid it at the cost of more ifs
+            mis_numcoarsedof[mis] = 0; 
+            // we only do this new so deletion is cleaner at the end, could avoid it at the cost of more ifs
+            mis_tent_interps[mis] = new DenseMatrix;
             // tent_int_struct->mis_tent_interps[mis]->SetSize(0,0); // ???
         }
     }
     delete [] received_mats;
 
-    tent_int_struct->coarse_truedof_offset = 0;
-    MPI_Scan(&num_coarse_dofs,&tent_int_struct->coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
-    tent_int_struct->coarse_truedof_offset -= num_coarse_dofs;
-    SA_RPRINTF(PROC_NUM-1,"coarse_truedof_offset = %d\n",tent_int_struct->coarse_truedof_offset);
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs,&coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n",coarse_truedof_offset);
 }
+
+/**
+   Takes solutions to spectral problems on AEs, restricts to MISes, does
+   appropriate communication and SVD, and constructs tentative prolongator
+
+   This is one of the key communication routine for the multilevel MIS extension
+   to this solver
+
+   Possibly more attention needs to be paid to boundary conditions and
+   small (1-2 dof) MISes
+*/
+void ContribTent::contrib_mises(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix * const *cut_evects_arr, bool scaling_P)
+{
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
+                                               *agg_part_rels.mis_truemis);
+    DenseMatrix ** received_mats = CommunicateEigenvectors(agg_part_rels, cut_evects_arr, sec);
+
+    // do SVDs on owned MISes, build tentative interpolator
+    int num_mises = agg_part_rels.num_mises;
+    int * row_sizes = new int[num_mises];
+    for (int mis=0; mis<num_mises; ++mis)
+        row_sizes[mis] = sec.NumNeighbors(mis);
+    SVDInsert(agg_part_rels, received_mats, row_sizes, scaling_P);
+    delete [] row_sizes;
+}
+
+void ContribTent::contrib_composite(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix * const *cut_evects_arr, int polynomial_order,
+    int spatial_dimension, int num_nodes, const Vector& coords)
+{
+    const bool scaling_P = false;
+
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
+                                               *agg_part_rels.mis_truemis);
+    DenseMatrix ** received_mats = 
+        CommunicateEigenvectors(agg_part_rels, cut_evects_arr, sec);
+
+    if (num_nodes == agg_part_rels.ND)
+    {
+        ExtendWithPolynomials(received_mats, agg_part_rels, polynomial_order,
+                              spatial_dimension, num_nodes, coords);
+    }
+    else
+    {
+        ExtendWithRBMs(received_mats, agg_part_rels, spatial_dimension,
+                       num_nodes, coords);
+    }
+
+    // do SVDs on owned MISes, build tentative interpolator
+    int num_mises = agg_part_rels.num_mises;
+    int * row_sizes = new int[num_mises];
+    for (int mis=0; mis<num_mises; ++mis)
+        row_sizes[mis] = sec.NumNeighbors(mis);
+    SVDInsert(agg_part_rels, received_mats, row_sizes, scaling_P);
+    delete [] row_sizes;
+}
+
+} // namespace saamge

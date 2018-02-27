@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -34,9 +34,10 @@
 #include <fstream>
 #include <mfem.hpp>
 #include "tg.hpp"
-using std::ofstream;
-using std::ifstream;
-using std::snprintf;
+
+namespace saamge
+{
+using namespace mfem;
 
 /* Functions */
 
@@ -94,8 +95,8 @@ void helpers_write_vector_for_gnuplot(int num, const Vector& v)
 {
     const int namelen = 256;
     char name[namelen];
-    snprintf(name, namelen, "eigenvalues_%d.out.txt", num);
-    ofstream vect_ofs(name);
+    std::snprintf(name, namelen, "eigenvalues_%d.out.txt", num);
+    std::ofstream vect_ofs(name);
     SA_ASSERT(vect_ofs);
     vect_ofs.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
     for (int i=0; i < v.Size(); ++i)
@@ -105,7 +106,7 @@ void helpers_write_vector_for_gnuplot(int num, const Vector& v)
 
 double *helpers_read_dbl_arr(const char *filename, int *n)
 {
-    ifstream iarr(filename, ifstream::binary);
+    std::ifstream iarr(filename, std::ifstream::binary);
     SA_ASSERT(iarr);
     iarr.read((char *)n, sizeof(*n));
     double *arr = new double[*n];
@@ -116,7 +117,7 @@ double *helpers_read_dbl_arr(const char *filename, int *n)
 
 void helpers_write_dbl_arr(const char *filename, const double *arr, int n)
 {
-    ofstream oarr(filename, ofstream::binary);
+    std::ofstream oarr(filename, std::ofstream::binary);
     SA_ASSERT(oarr);
     oarr.write((char *)&n, sizeof(n));
     oarr.write((char *)arr, sizeof(*arr)*n);
@@ -125,7 +126,7 @@ void helpers_write_dbl_arr(const char *filename, const double *arr, int n)
 
 int *helpers_read_int_arr(const char *filename, int *n)
 {
-    ifstream iarr(filename, ifstream::binary);
+    std::ifstream iarr(filename, std::ifstream::binary);
     SA_ASSERT(iarr);
     iarr.read((char *)n, sizeof(*n));
     int *arr = new int[*n];
@@ -136,9 +137,11 @@ int *helpers_read_int_arr(const char *filename, int *n)
 
 void helpers_write_int_arr(const char *filename, const int *arr, int n)
 {
-    ofstream oarr(filename, ofstream::binary);
+    std::ofstream oarr(filename, std::ofstream::binary);
     SA_ASSERT(oarr);
     oarr.write((char *)&n, sizeof(n));
     oarr.write((char *)arr, sizeof(*arr)*n);
     oarr.close();
 }
+
+} // namespace saamge

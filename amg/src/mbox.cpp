@@ -3,7 +3,7 @@
     SAAMGE: smoothed aggregation element based algebraic multigrid hierarchies
             and solvers.
 
-    Copyright (c) 2016, Lawrence Livermore National Security,
+    Copyright (c) 2018, Lawrence Livermore National Security,
     LLC. Developed under the auspices of the U.S. Department of Energy by
     Lawrence Livermore National Laboratory under Contract
     No. DE-AC52-07NA27344. Written by Delyan Kalchev, Andrew T. Barker,
@@ -38,15 +38,17 @@
 #include <_hypre_parcsr_ls.h>
 #include <mfem.hpp>
 #include "xpacks.hpp"
-using std::ofstream;
-using std::ifstream;
+
+namespace saamge
+{
+using namespace mfem;
 using std::fabs;
 using std::sqrt;
 
 /* Functions */
 
-
-void hypre_par_matrix_ownership(HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts)
+void hypre_par_matrix_ownership(
+    HypreParMatrix &mat, bool &data, bool &row_starts, bool &col_starts)
 {
     hypre_ParCSRMatrix * hmat = (hypre_ParCSRMatrix*) mat;
     data = hmat->owns_data;
@@ -141,31 +143,35 @@ hypre_ParCSRMatrix * hypre_IdentityParCSRMatrix(
 
 /**
    Copied from Parelag hypreExtension/deleteZeros.c
+
+   probably better to use mfem::HypreParMatrix::Threshold (but see MFEM Issue #290)
 */
 HYPRE_Int hypre_ParCSRMatrixDeleteZeros( hypre_ParCSRMatrix *A , double tol )
 {
-    hypre_CSRMatrix * diag = hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixDiag(A), tol );
-    hypre_CSRMatrix * offd = hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixOffd(A), tol );
+    hypre_CSRMatrix * diag =
+        hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixDiag(A), tol );
+    hypre_CSRMatrix * offd =
+        hypre_CSRMatrixDeleteZeros( hypre_ParCSRMatrixOffd(A), tol );
 
-    if(diag)
+    if (diag)
     {
         hypre_CSRMatrixDestroy( hypre_ParCSRMatrixDiag(A) );
         hypre_ParCSRMatrixDiag(A) = diag;
     }
 
-    if(offd)
+    if (offd)
     {
         hypre_CSRMatrixDestroy( hypre_ParCSRMatrixOffd(A) );
         hypre_ParCSRMatrixOffd(A) = offd;
     }
 
-    if( hypre_ParCSRMatrixCommPkg(A) )
+    if (hypre_ParCSRMatrixCommPkg(A))
     {
         hypre_MatvecCommPkgDestroy(hypre_ParCSRMatrixCommPkg(A));
         hypre_MatvecCommPkgCreate(A);
     }
 
-    if( hypre_ParCSRMatrixCommPkgT(A) )
+    if (hypre_ParCSRMatrixCommPkgT(A))
     {
         hypre_MatvecCommPkgDestroy(hypre_ParCSRMatrixCommPkgT(A));
     }
@@ -304,7 +310,7 @@ DenseMatrix **mbox_copy_dense_matr_arr(DenseMatrix **src, int n)
 Table *mbox_read_table(const char *filename)
 {
     int size, i_size, j_size, *I, *J;
-    ifstream itbl(filename, ifstream::binary);
+    std::ifstream itbl(filename, std::ifstream::binary);
     SA_ASSERT(itbl);
     itbl.read((char *)&size, sizeof(size));
     itbl.read((char *)&j_size, sizeof(j_size));
@@ -323,7 +329,7 @@ Table *mbox_read_table(const char *filename)
 void mbox_write_table(const char *filename, const Table& tbl)
 {
     int size, i_size, j_size;
-    ofstream otbl(filename, ofstream::binary);
+    std::ofstream otbl(filename, std::ofstream::binary);
     SA_ASSERT(otbl);
     size = tbl.Size();
     i_size = size + 1;
@@ -337,14 +343,14 @@ void mbox_write_table(const char *filename, const Table& tbl)
 
 SparseMatrix *mbox_read_sparse_matr(const char *filename)
 {
-    ifstream ispm(filename, ifstream::binary);
+    std::ifstream ispm(filename, std::ifstream::binary);
     SA_ASSERT(ispm);
     SparseMatrix *spm = mbox_read_sparse_matr(ispm);
     ispm.close();
     return spm;
 }
 
-SparseMatrix *mbox_read_sparse_matr(ifstream& ispm)
+SparseMatrix *mbox_read_sparse_matr(std::ifstream& ispm)
 {
     int size, width, i_size, j_size, *I, *J;
     double *data;
@@ -1698,7 +1704,7 @@ void mbox_sqrt_daig_parallel_matrix(HypreParMatrix& A)
     }
 }
 
-void mbox_add_daig_parallel_matrix(HypreParMatrix& A, double c)
+void mbox_add_diag_parallel_matrix(HypreParMatrix& A, double c)
 {
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
     hypre_ParCSRMatrix *hA = (hypre_ParCSRMatrix *)A;
@@ -1932,3 +1938,5 @@ void mbox_project_parallel(HypreParMatrix& A, HypreParMatrix& interp,
     delete coarse;
     delete restr;
 }
+
+} // namespace saamge
