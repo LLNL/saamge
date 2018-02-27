@@ -29,10 +29,8 @@
 */
 
 /**
-   Driver for most multilevel SAAMGe tests.
-
-   This arguably does too much and should be divided into several executables,
-   it takes a million command line arguments.
+   try a DoubleCycle with smoother interpolation of the minimal space
+   and no smoothing of the spectral space
 
    Andrew T. Barker
    atb@llnl.gov
@@ -47,6 +45,89 @@
 
 using namespace mfem;
 using namespace saamge;
+
+/**
+   just takes two mfem::Solvers and applies them both, either additively or
+   multiplicatively
+
+   not to be confused with DoubleCycle, which uses two different *coarse grid*
+   solvers in a similar way
+*/
+class DoublePreconditioner : public mfem::Solver
+{
+public:
+    DoublePreconditioner(const mfem::Solver& inner_solver,
+                         const mfem::Solver& outer_solver,
+                         bool symmetric = true,
+                         bool additive = false,
+                         bool iterative_mode = false);
+    virtual ~DoublePreconditioner();
+    virtual void SetOperator(const Operator &op);
+    virtual void Mult(const Vector &x, Vector &y) const;
+private:
+    HypreParMatrix *A;
+    const mfem::Solver& inner_solver;
+    const mfem::Solver& outer_solver;
+    bool symmetric, additive;
+};
+
+DoublePreconditioner::DoublePreconditioner(const mfem::Solver& inner_solver,
+                                           const mfem::Solver& outer_solver,
+                                           bool symmetric,
+                                           bool additive,
+                                           bool iterative_mode)
+    : mfem::Solver(inner_solver.Height(), iterative_mode),
+      inner_solver(inner_solver),
+      outer_solver(outer_solver),
+      symmetric(symmetric),
+      additive(additive)
+{
+}
+
+DoublePreconditioner::~DoublePreconditioner()
+{
+}
+
+void DoublePreconditioner::SetOperator(const Operator &op)
+{
+    A = const_cast<HypreParMatrix *>(dynamic_cast<const HypreParMatrix *>(&op));
+    if (A == NULL)
+        mfem_error("HypreSmoother::SetOperator : not HypreParMatrix!");
+}
+
+void DoublePreconditioner::Mult(const Vector &b, Vector &x) const
+{
+    MFEM_ASSERT(!additive,"Additive cycle not implemented!");
+
+    Vector x1(x);
+    Vector res1(x);
+    if (iterative_mode)
+    {
+        A->Mult(x,res1);
+        subtract(b, res1, res1);
+    }
+    if (!iterative_mode)
+    {
+        x = 0.0;
+        res1 = b;
+    }
+
+    outer_solver.Mult(res1, x1);
+    
+    A->Mult(x1, res1);
+    subtract(b, res1, res1);
+
+    inner_solver.Mult(res1, x1);
+    add(x, x1, x);
+    
+    if (symmetric)
+    {
+        A->Mult(x, res1);
+        subtract(b, res1, res1);
+        outer_solver.Mult(res1, x1);
+        add(x, x1, x);
+    }    
+}
 
 /**
   generate hexahedral mesh, usually for SPE10
@@ -164,14 +245,11 @@ double checkboard_coef(Vector& x)
          ((((int)ceil(x(2)*d) & 1) &&
            ((int)ceil(x(0)*d) & 1) == ((int)ceil(x(1)*d) & 1)) ||
           (!((int)ceil(x(2)*d) & 1) &&
-           ((int)ceil(x(0)*d) & 1) != ((int)ceil(x(1)*d) & 1)))))
+          ((int)ceil(x(0)*d) & 1) != ((int)ceil(x(1)*d) & 1)))))
     {
         return 1e6;
-    } 
-    else
-    {
+    } else
         return 1e0;
-    }
 }
 
 double rhs_func(Vector& x)
@@ -204,19 +282,9 @@ fem_create_test_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
     //XXX: This will stay allocated in MESH till the end.
     elem_to_elem = mbox_copy_table(&(mesh->ElementToElementTable()));
 
-    // fes.BuildElementToDofTable(); //XXX: This remains allocated in FES till the
-    //                            //     end.
-    if (fes.GetVDim() == 1)
-    {
-        // scalar problem
-        elem_to_dof = mbox_copy_table(&(fes.GetElementToDofTable()));
-    }
-    else
-    {
-        // elasticity
-        elem_to_dof = vector_valued_elem_to_dof(
-            fes.GetElementToDofTable(), fes.GetVDim(), fes.GetOrdering());
-    }
+    //fes.BuildElementToDofTable(); //XXX: This remains allocated in FES till the
+    //                             //     end.
+    elem_to_dof = mbox_copy_table(&(fes.GetElementToDofTable()));
 
     int * partitioning = NULL;
     if (PROC_NUM == 1)
@@ -306,114 +374,75 @@ int main(int argc, char *argv[])
 
     Mesh *mesh;
     ParMesh *pmesh;
+    int *proc_partitioning;
     ParGridFunction x;
     ParLinearForm *b;
     ParBilinearForm *a;
     agg_partitioning_relations_t *agg_part_rels;
-    ml_data_t *ml_data;
+    ml_data_t *ml_data_minimal;
+    ml_data_t *ml_data_spectral;
+
+    const char *mesh_file = "/home/barker29/meshes/cube474.mesh3d";
+    const char *perm_file = "/g/g14/barker29/spe10/spe_perm.dat";
+    bool visualize = true;
+
+    int serial_times_refine = 0;
+    int times_refine = 0;
+    int first_nu_pro = -1;
+    int nu_pro = 0;
+    int nu_relax = 3;
+    int spe10_scale = 5; // default is "full" SPE10
+    double theta = 0.003;
+    double first_theta = -1.0;
+    int num_levels = 2;
+    int elems_per_agg = 256;
+    int first_elems_per_agg = -1;
+    bool constant_coefficient = false;
+
+    bool spe10 = false;
+    bool zero_rhs = false;
+    // bool minimal_coarse = false;
+    // bool correct_nulspace = true;
 
     OptionsParser args(argc, argv);
-    const char *mesh_file = "/home/barker29/meshes/mltest.mesh";
     args.AddOption(&mesh_file, "-m", "--mesh",
                    "Mesh file to use.");
-    const char *perm_file = "/g/g14/barker29/spe10/spe_perm.dat";
     args.AddOption(&perm_file, "-pf", "--perm",
                    "Permeability data, only relevant with --spe10.");
-    bool visualize = true;
     args.AddOption(&visualize, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
-    int serial_times_refine = 0;
     args.AddOption(&serial_times_refine, "-sr", "--serial-refine",
                    "How many times to refine mesh before parallel partition.");
-    int times_refine = 0;
     args.AddOption(&times_refine, "-r", "--refine", 
                    "How many times to refine the mesh (in parallel).");
-    int nu_pro = 0;
     args.AddOption(&nu_pro, "-p", "--nu-pro",
                    "Degree of the smoother for the smoothed aggregation for first coarsening.");
-    int first_nu_pro = -1;
     args.AddOption(&first_nu_pro, "-fp", "--first-nu-pro",
                    "Degree of smoother for smoothed aggregation on later coarsenings.");
-    int nu_relax = 3;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation.");
-    int spe10_scale = 5;
     args.AddOption(&spe10_scale, "-ss", "--spe10-scale",
                    "Scale of SPE10, 5 is full, smaller is smaller, larger does not make sense.");
-    int order = 1;
-    args.AddOption(&order, "-o", "--order",
-                   "Polynomial order of finite element space.");
-    double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems.");
-    double first_theta = -1.0;
     args.AddOption(&first_theta, "-ft", "--first-theta",
                    "Tolerance for eigenvalue problems for first (finest) coarsening.");
-    int num_levels = 2;
     args.AddOption(&num_levels, "-l", "--num-levels",
                    "Number of levels in multilevel algorithm.");
-    int elems_per_agg = 256;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
-    int first_elems_per_agg = -1;
     args.AddOption(&first_elems_per_agg, "-fe", "--first-elems-per-agg",
                    "Number of elements per AE for first (finest) coarsening.");
-    int generate_mesh = -1;
-    args.AddOption(&generate_mesh, "--generate-mesh", "--generate-mesh",
-                   "Generate 2D quad mesh with this number of elements per side (instead of loading).");
-    bool constant_coefficient = false;
     args.AddOption(&constant_coefficient, "-k", "--constant-coefficient",
                    "-nk", "--no-constant-coefficient",
                    "Use a constant coefficient instead of the default checkerboard.");
-    bool spe10 = false;
     args.AddOption(&spe10, "-s", "--spe10",
                    "-ns", "--no-spe10",
                    "Use the SPE10 geometry and permeability data set.");
-    bool w_cycle = false;
-    args.AddOption(&w_cycle, "-w", "--w-cycle",
-                   "-nw", "--no-w-cycle",
-                   "Use a W-cycle (instead of V-cycle).");
-    bool zero_rhs = false;
     args.AddOption(&zero_rhs, "-z", "--zero-rhs",
                    "-nz", "--no-zero-rhs",
                    "Solve CG with zero RHS and random initial guess.");
-    bool minimal_coarse = false;
-    args.AddOption(&minimal_coarse, "-mc", "--minimal-coarse",
-                   "-nmc", "--no-minimal-coarse",
-                   "Minimal coarse space, ie, vector of all ones.");
-    bool linear_coarse = false;
-    args.AddOption(&linear_coarse, "-lc", "--linear-coarse",
-                   "-nlc", "--no-linear-coarse",
-                   "Add linear functions to coarse basis (only for finest coarsening).");
-    bool correct_nulspace = true;
-    args.AddOption(&correct_nulspace, "-c", "--correct-nulspace",
-                   "-nc", "--no-correct-nulspace",
-                   "Use the corrected nulspace technique on coarsest level.");
-    bool double_cycle = false;
-    args.AddOption(&double_cycle, "-d", "--double-cycle",
-                   "-nd", "--no-double-cycle",
-                   "Use the double cycle combined preconditioner.");
-    bool coarse_direct = false;
-    args.AddOption(&coarse_direct, "--coarse-direct", "--coarse-direct",
-                   "--coarse-amg", "--coarse-amg",
-                   "Use a direct solver on coarsest level, rather than default AMG V-cycle.");
-    bool direct_eigensolver = true;
-    args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
-                   "-nq", "--no-direct-eigensolver",
-                   "Use direct eigensolver from LAPACK instead of default ARPACK.");
-    bool do_aggregates = false;
-    args.AddOption(&do_aggregates, "-agg", "--do-aggregates",
-                   "-nagg", "--no-do-aggregates",
-                   "On coarsest coarsening, use aggregates instead of MISes for lower complexity.");
-    bool elasticity = false;
-    args.AddOption(&elasticity, "-el", "--elasticity",
-                   "-nel", "--no-elasticity",
-                   "Try elasticity instead of usual scalar elliptic problem.");
-    bool identity_partition = false;
-    args.AddOption(&identity_partition, "-ip", "--identity-partition",
-                   "-nip", "--no-identity-partition",
-                   "No agglomeration, one element per agglomerate.");
 
     args.Parse();
     if (!args.Good())
@@ -424,13 +453,13 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (PROC_RANK == 0)
+    {
+        SA_RPRINTF(0,"%s","Running partialsmooth example.\n\n");
         args.PrintOptions(cout);
+    }
     if (first_elems_per_agg < 0) first_elems_per_agg = elems_per_agg;
     if (first_theta < 0.0) first_theta = theta;
     if (first_nu_pro < 0) first_nu_pro = nu_pro;
-
-    SA_ASSERT(!w_cycle); // no longer implemented
-    SA_ASSERT(!(correct_nulspace && minimal_coarse));
 
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
     bool mltest = false;
@@ -454,10 +483,6 @@ int main(int argc, char *argv[])
         InversePermeabilityFunction::SetMeshSizes(hx, hy, hz);
         InversePermeabilityFunction::ReadPermeabilityFile(perm_file);
     }
-    else if (generate_mesh > 0)
-    {
-        mesh = new Mesh(generate_mesh, generate_mesh, Element::QUADRILATERAL, 1);
-    }
     else
     {
         // Read the mesh from the given mesh file.
@@ -475,9 +500,7 @@ int main(int argc, char *argv[])
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
     ess_bdr = 0;
     if (mltest)
-    {
         ess_bdr[3] = 1; // marked as 4 in mltest.mesh, but MFEM subtracts 1 because it's insane
-    }
     else if (spe10)
     {
         ess_bdr = 1;
@@ -485,12 +508,12 @@ int main(int argc, char *argv[])
         ess_bdr[1] = 0; 
     }
     else
-    {
         ess_bdr = 1; // Dirichlet boundaries all around
-    }
+        
+    FunctionCoefficient bdr_coeff(bdr_cond);
+    FunctionCoefficient rhs(rhs_func);
 
     int nprocs = PROC_NUM;
-    int *proc_partitioning;
     if (nprocs > 1 && mltest)
         proc_partitioning = fem_partition_test_mesh(*mesh, &nprocs);
     else
@@ -501,18 +524,8 @@ int main(int argc, char *argv[])
     delete [] proc_partitioning;
     fem_refine_mesh_times(times_refine, *pmesh);
 
-    FiniteElementCollection * fec;
-    ParFiniteElementSpace *fes;
-    if (elasticity)
-    {
-        fec = new H1_FECollection(order, pmesh->Dimension());
-        fes = new ParFiniteElementSpace(pmesh, fec, pmesh->Dimension(), Ordering::byVDIM);
-    }
-    else
-    {
-        fec = new H1_FECollection(order);
-        fes = new ParFiniteElementSpace(pmesh, fec);
-    }
+    FiniteElementCollection * fec = new LinearFECollection;
+    ParFiniteElementSpace * fes = new ParFiniteElementSpace(pmesh, fec);
     int pNV = pmesh->GetNV();
     int pNE = pmesh->GetNE();
     int pND = fes->GetNDofs();
@@ -523,77 +536,14 @@ int main(int argc, char *argv[])
     FiniteElementCollection * cfec = new L2_FECollection(0, pmesh->Dimension());
     ParFiniteElementSpace * cfes = new ParFiniteElementSpace(pmesh, cfec);
 
-    FunctionCoefficient bdr_coeff(bdr_cond);
-    FunctionCoefficient rhs(rhs_func);
-
-    Vector bdr_vec(pmesh->Dimension()); // for elasticity
-    bdr_vec = 1.0;
-    VectorConstantCoefficient vec_bdr_coeff(bdr_vec);
-
     MatrixFunctionCoefficient * matrix_conductivity = NULL; 
     Coefficient * conduct_func = NULL;
     ParGridFunction conductivity(cfes);
     GridFunctionCoefficient * conduct_coeff = NULL; 
-    if (elasticity)
+    if (spe10 && !constant_coefficient)
     {
-        if (constant_coefficient)
-            conduct_func = new ConstantCoefficient(1.0);
-        else
-            conduct_func = new FunctionCoefficient(checkboard_coef);
-        conductivity.ProjectCoefficient(*conduct_func);
-        conduct_coeff = new GridFunctionCoefficient(&conductivity);
-
-        const int dim = pmesh->Dimension();
-        conduct_func = new ConstantCoefficient(1.0);
-        // fem_build_discrete_problem(fes, rhs, bdr_coeff, *conduct_coeff, true, x, b,
-        //                         a, &ess_bdr);
-        SA_RPRINTF_L(0, 4, "%s", "Building discrete elasticity problem...\n");
-
-        const bool bdr_cond_impose = true;
-        if (bdr_cond_impose)
-        {
-            // fem_init_with_bdr_cond(x, fes, vec_bdr_coeff);
-            x.SetSpace(fes);
-            x.ProjectCoefficient(vec_bdr_coeff);
-        }
-        else
-        {
-            x.SetSpace(fes);
-        }
-        SA_RPRINTF_L(0, 4, "%s", "  Initialized boundary conditions.\n");
-
-        // b = fem_assemble_rhs(fespace, rhs);
-        VectorArrayCoefficient f(dim); // should live outside the if...
-        for (int i = 0; i < dim; i++)
-            f.Set(i, new ConstantCoefficient(0.0));
-
-        b = new ParLinearForm(fes);
-        b->AddBoundaryIntegrator(new VectorBoundaryLFIntegrator(f));
-        b->Assemble();
-
-        // a = fem_assemble_stiffness(fes, *conduct_coeff, x, *b, bdr_cond_impose, &ess_bdr);
-        SA_RPRINTF_L(0, 4, "%s", "Assembling global elasticity stiffness matrix...\n");
-        a = new ParBilinearForm(fes);
-        a->AddDomainIntegrator(new ElasticityIntegrator(*conduct_coeff,1.0,1.0));
-        // a->AddDomainIntegrator(new ElasticityIntegrator(lambda_func, mu_func));
-        a->Assemble();
-        if (bdr_cond_impose)
-        {
-            SA_RPRINTF_L(0, 4, "%s", "Imposing boundary conditions...\n");
-            // Impose Dirichlet boundary conditions.
-            SA_ASSERT(ess_bdr.Size() == fes->GetMesh()->bdr_attributes.Max());
-            Array<int> ess_dofs;
-            fes->GetEssentialVDofs(ess_bdr, ess_dofs);
-            const bool keep_diag = true;
-            a->EliminateEssentialBCFromDofs(ess_dofs, x, *b, keep_diag);
-        }
-        SA_RPRINTF_L(0, 4, "%s", "Finalizing global stiffness matrix...\n");
-        a->Finalize(0);
-    }
-    else if (spe10 && !constant_coefficient)
-    {
-        matrix_conductivity = new MatrixFunctionCoefficient(
-            pmesh->Dimension(), InversePermeabilityFunction::PermeabilityTensor);
+        matrix_conductivity = new MatrixFunctionCoefficient(pmesh->Dimension(),
+                                                            InversePermeabilityFunction::PermeabilityTensor);
         fem_build_discrete_problem(fes, rhs, bdr_coeff, *matrix_conductivity, true, x, b,
                                    a, &ess_bdr);
     }
@@ -628,7 +578,6 @@ int main(int argc, char *argv[])
     SA_RPRINTF(0, "%s", "\n");
     HypreBoomerAMG *hbamg = new HypreBoomerAMG(*Ag);
     hbamg->SetPrintLevel(0);
-    hbamg->SetSystemsOptions(pmesh->Dimension());
 
     CGSolver * pcg = new CGSolver(MPI_COMM_WORLD);
     pcg->SetOperator(*Ag);
@@ -653,12 +602,6 @@ int main(int argc, char *argv[])
     SA_RPRINTF(0, "TIMING: setup and solve with Hypre BoomerAMG preconditioned CG %f seconds.\n", 
                chrono.RealTime());
 
-    if (num_levels == 1)
-    {
-        // buncha undeleted memory...
-        return 0;
-    }
-
     // some actual AMGe stuff
     chrono.Clear();
     chrono.Start();
@@ -667,9 +610,7 @@ int main(int argc, char *argv[])
     if (mltest)
     {
         nparts_arr[0] = 4 / PROC_NUM;
-        const bool do_aggregates_here = do_aggregates && (num_levels == 2);
-        agg_part_rels = fem_create_test_partitioning(
-            *Ag, *fes, bdr_dofs, nparts_arr, do_aggregates_here);
+        agg_part_rels = fem_create_test_partitioning(*Ag, *fes, bdr_dofs, nparts_arr, false);
         if (num_levels > 2)
             nparts_arr[1] = 2 / PROC_NUM;
         if (num_levels > 3)
@@ -678,20 +619,8 @@ int main(int argc, char *argv[])
     else
     {
         nparts_arr[0] = pmesh->GetNE() / first_elems_per_agg;
-        if (nparts_arr[0] == 0)
-            nparts_arr[0] = 1;
-        const bool do_aggregates_here = do_aggregates && (num_levels == 2);
-        if (identity_partition)
-        {
-            agg_part_rels = fem_create_partitioning_identity(*Ag, *fes, bdr_dofs,
-                                                             nparts_arr);
-        }
-        else
-        {
-            agg_part_rels = fem_create_partitioning(
-                *Ag, *fes, bdr_dofs, nparts_arr, do_aggregates_here);
-        }
-        for (int i=1; i < num_levels-1; ++i)
+        agg_part_rels = fem_create_partitioning(*Ag, *fes, bdr_dofs, nparts_arr, false);
+        for(int i=1; i < num_levels-1; ++i)
         {
             nparts_arr[i] = (int) round((double) nparts_arr[i-1] / (double) elems_per_agg);
             if (nparts_arr[i] < 1) nparts_arr[i] = 1;
@@ -703,30 +632,30 @@ int main(int argc, char *argv[])
         fes->Dof_TrueDof_Matrix()->Print("Dof_TrueDof.mat");
     if (visualize)
     {
-        fem_parallel_visualize_partitioning(
-            *pmesh, agg_part_rels->partitioning, nparts_arr[0]);
+        fem_parallel_visualize_partitioning(*pmesh, agg_part_rels->partitioning,
+                                            nparts_arr[0]);
+        // fem_parallel_visualize_aggregates(fes, agg_part_rels->aggregates, nparts_arr[0]);
     }
-    ElementMatrixProvider * emp =
-        new ElementMatrixStandardGeometric(*agg_part_rels, Al, a);
-    int polynomial_coarse;
-    if (minimal_coarse)
-        polynomial_coarse = 0;
-    else
-        polynomial_coarse = -1;
-    MultilevelParameters mlp(
-        num_levels-1, nparts_arr, first_nu_pro, nu_pro, nu_relax,first_theta,
-        theta, polynomial_coarse, correct_nulspace, !direct_eigensolver,
-        do_aggregates);
-    if (double_cycle)
-        mlp.set_use_double_cycle(true);
-    if (linear_coarse || elasticity)
-        mlp.set_polynomial_coarse_space(0,1);
-    if (coarse_direct)
-        mlp.set_coarse_direct(true);
-    ml_data = ml_produce_data(*Ag, agg_part_rels, emp, mlp);
+
+    const bool use_arpack = true;
+    const bool do_aggregates = false;
+    MultilevelParameters mlp(num_levels-1, nparts_arr, 
+                             first_nu_pro, nu_pro,
+                             nu_relax, 0.0, 0.0, 
+                             0, false, use_arpack, do_aggregates); // polynomial_coarse, correct_nullspace
+    ElementMatrixProvider * emp = new ElementMatrixStandardGeometric(
+        *agg_part_rels, Al, a);
+    ml_data_minimal = ml_produce_data(*Ag, agg_part_rels, emp, mlp);
+
+    MultilevelParameters mlp_spectral(num_levels-1, nparts_arr, 0, 0,
+                                      nu_relax, first_theta, theta, 
+                                      -1, true, use_arpack, do_aggregates); // polynomial_coarse, correct_nullspace
+    ElementMatrixProvider * emp_spectral = new ElementMatrixStandardGeometric(
+        *agg_part_rels, Al, a);
+    ml_data_spectral = ml_produce_data(*Ag, agg_part_rels, emp_spectral, mlp_spectral);
+
     chrono.Stop();
-    SA_RPRINTF(0,"TIMING: multilevel spectral SA-AMGe setup %f seconds.\n",
-               chrono.RealTime());
+    SA_RPRINTF(0,"TIMING: multilevel spectral SA-AMGe setup %f seconds.\n", chrono.RealTime());
 
     if (zero_rhs)
     {
@@ -753,16 +682,16 @@ int main(int argc, char *argv[])
     int iterations = -1;
     int converged = -1;
     Solver * Bprec;
-    if (double_cycle) 
-    {
-        Bprec = new DoubleCycle(*Ag, *ml_data);
-    }
-    else
-    {
-        levels_level_t * level = levels_list_get_level(ml_data->levels_list, 0);
-        Bprec = new VCycleSolver(level->tg_data, false);
-        Bprec->SetOperator(*Ag);
-    }
+
+    levels_level_t * level_spectral = levels_list_get_level(ml_data_spectral->levels_list, 0);
+    levels_level_t * level_minimal = levels_list_get_level(ml_data_minimal->levels_list, 0);
+    VCycleSolver inner_solver(level_spectral->tg_data, false);
+    VCycleSolver outer_solver(level_minimal->tg_data, false);
+    inner_solver.SetOperator(*Ag);
+    outer_solver.SetOperator(*Ag);
+    Bprec = new DoublePreconditioner(inner_solver, outer_solver); // inner, outer is standard
+    Bprec->SetOperator(*Ag);
+
     CGSolver hpcg(MPI_COMM_WORLD);
     hpcg.SetOperator(*Ag);
     hpcg.SetRelTol(1e-6); // for some reason MFEM squares this...
@@ -772,20 +701,21 @@ int main(int argc, char *argv[])
     hpcg.Mult(*bg,*pxg);
     iterations = hpcg.GetNumIterations();
     converged = hpcg.GetConverged();
+
     delete Bprec;
     if (converged)
         SA_RPRINTF(0, "Outer PCG converged in %d iterations.\n", iterations);
     else
-        SA_RPRINTF(0, "Outer PCG failed to converge after %d iterations!\n",
-                   iterations);
+        SA_RPRINTF(0, "Outer PCG failed to converge after %d iterations!\n", iterations);
     x = *pxg;
     if (false)
         fem_parallel_visualize_gf(*pmesh, x);
     chrono.Stop();
-    SA_RPRINTF(0,"TIMING: solve with SA-AMGe preconditioned CG %f seconds.\n",
-               chrono.RealTime());
+    SA_RPRINTF(0,"TIMING: solve with SA-AMGe preconditioned CG %f seconds.\n", chrono.RealTime());
 
-    ml_free_data(ml_data);
+    ml_free_data(ml_data_spectral);
+    ml_free_data(ml_data_minimal);
+
     agg_free_partitioning(agg_part_rels);
 
     delete pxg;
