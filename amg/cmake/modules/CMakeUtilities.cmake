@@ -26,38 +26,33 @@
 # License along with this program; if not, see
 # <http://www.gnu.org/licenses/>.
 
-#!/bin/bash
+# Contents of this file stolen from Parelag's ParELAGCMakeUtilities.cmake
 
-SAAMGE_BASE_DIR=${HOME}/saamge/for-lido/amg
-SAAMGE_BUILD_DIR=${SAAMGE_BASE_DIR}/build
-SAAMGE_INSTALL_DIR=${SAAMGE_BASE_DIR}/install
+# Function that uses "dumb" logic to try to figure out if a library
+# file is a shared or static library. This won't work on Windows; it
+# will just return "unknown" for everything.
+function(parelag_determine_library_type lib_name output_var)
 
-mkdir -p $SAAMGE_BUILD_DIR
-cd $SAAMGE_BUILD_DIR
+  # Test if ends in ".a"
+  string(REGEX MATCH "\\.a$" _static_match ${lib_name})
+  if (_static_match)
+    set(${output_var} STATIC PARENT_SCOPE)
+    return()
+  endif (_static_match)
 
-# Force a reconfigure
-rm CMakeCache.txt
-rm -rf CMakeFiles
+  # Test if ends in ".so(.version.id.whatever)"
+  string(REGEX MATCH "\\.so($|..*$)" _shared_match ${lib_name})
+  if (_shared_match)
+    set(${output_var} SHARED PARENT_SCOPE)
+    return()
+  endif (_shared_match)
 
-# DEBUG or OPTIMIZED
+  # Test if ends in ".dylib(.version.id.whatever)"
+  string(REGEX MATCH "\\.dylib($|\\..*$)" _mac_shared_match ${lib_name})
+  if (_mac_shared_match)
+    set(${output_var} SHARED PARENT_SCOPE)
+    return()
+  endif (_mac_shared_match)
 
-cmake \
-    -DCMAKE_BUILD_TYPE=DEBUG \
-    \
-    -DMETIS_DIR=${HOME}/bin \
-    -DHYPRE_DIR=${HOME}/hypre/debug \
-    -DMFEM_DIR=${HOME}/mfem/debug-nopetsc \
-    -DSuiteSparse_DIR=${HOME}/bin \
-    \
-    -DUSE_ARPACK=ON \
-    -DARPACK_DIR=${HOME}/arpack/arpack-ng-install \
-    -DARPACKPP_DIR=${HOME}/arpack/arpackpp \
-    \
-    -DLINK_NETCDF=OFF \
-    -DNETCDF_DIR=${HOME}/packages/netcdf \
-    \
-    -DBLAS_LIBRARIES=/usr/lib64/libblas.so \
-    -DLAPACK_LIBRARIES=/usr/lib64/liblapack.so \
-    \
-    -DCMAKE_INSTALL_PREFIX=${SAAMGE_INSTALL_DIR} \
-    ${SAAMGE_BASE_DIR}
+  set(${output_var} "UNKNOWN" PARENT_SCOPE)
+endfunction(parelag_determine_library_type lib_name output)

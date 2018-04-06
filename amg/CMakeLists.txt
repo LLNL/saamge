@@ -42,6 +42,7 @@ cmake_minimum_required(VERSION 2.8.11 FATAL_ERROR)
 set(PROJECT_NAME saamge)
 project(${PROJECT_NAME})
 set(HOME_DIR $ENV{HOME})
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules)
 
 set(MESH_DIR ${HOME_DIR}/meshes)
 
@@ -132,58 +133,9 @@ else()
 endif()
 
 # SuiteSparse
-find_path(SUITESPARSE_INCLUDE_PATH umfpack.h
-  HINTS ${SUITESPARSE_DIR} ${SUITESPARSE_DIR}/include $ENV{SUITESPARSE_DIR}/include)
-# set(SUITESPARSE_LIB_NAME libumfpack.a libcholmod.a libamd.a libcolamd.a libsuitesparseconfig.a)
-set(SUITESPARSE_LIB_NAME libumfpack.a)
-
-find_path(SUITESPARSE_LIBRARY_PATH ${SUITESPARSE_LIB_NAME}
-  HINTS ${SUITESPARSE_DIR} ${SUITESPARSE_DIR}/lib $ENV{SUITESPARSE_DIR} 
-        $ENV{SUITESPARSE_DIR}/lib)
-
-if(SUITESPARSE_LIBRARY_PATH)
-  include_directories(${SUITESPARSE_INCLUDE_PATH})
-  add_library(UMFPACK_LIB STATIC IMPORTED)
-  set_property(TARGET UMFPACK_LIB PROPERTY IMPORTED_LOCATION ${SUITESPARSE_LIBRARY_PATH}/libumfpack.a)
-  list(APPEND TPL_LIBRARIES UMFPACK_LIB)
-else()
-  find_library(UMFPACK_LIB umfpack
-    HINTS ${SUITESPARSE_LIBRARY_PATH}
-    $ENV{SUITESPARSE_DIR}/lib
-    )
-  list(APPEND TPL_LIBRARIES ${UMFPACK_LIB})
-endif()
-
-find_library(CHOLMOD_LIB cholmod
-        HINTS ${SUITESPARSE_LIBRARY_PATH}
-              $ENV{SUITESPARSE_DIR}/lib
-            )
-list(APPEND TPL_LIBRARIES ${CHOLMOD_LIB})
-find_library(KLU_LIB klu
-  HINTS ${SUITESPARSE_LIBRARY_PATH}
-        $ENV{SUITESPARSE_DIR}/lib
-      )
-list(APPEND TPL_LIBRARIES ${KLU_LIB})
-find_library(BTF_LIBRARY btf
-  HINTS ${SUITESPARSE_LIBRARY_PATH}
-        $ENV{SUITESPARSE_DIR}/lib
-      )
-list(APPEND TPL_LIBRARIES ${BTF_LIBRARY})
-find_library(AMD_LIB amd
-  HINTS ${SUITESPARSE_LIBRARY_PATH}
-        $ENV{SUITESPARSE_DIR}/lib
-      )
-list(APPEND TPL_LIBRARIES ${AMD_LIB})
-find_library(COLAMD_LIB colamd
-  HINTS ${SUITESPARSE_LIBRARY_PATH}
-        $ENV{SUITESPARSE_DIR}/lib
-      )
-list(APPEND TPL_LIBRARIES ${COLAMD_LIB})
-find_library(SUITESPARSECONFIG_LIB suitesparseconfig
-  HINTS ${SUITESPARSE_LIBRARY_PATH}
-        $ENV{SUITESPARSE_DIR}/lib
-      )
-list(APPEND TPL_LIBRARIES ${SUITESPARSECONFIG_LIB})
+find_package(SuiteSparse REQUIRED UMFPACK KLU AMD BTF CHOLMOD COLAMD CAMD CCOLAMD config)
+include_directories(${SuiteSparse_INCLUDE_DIRS})
+list(APPEND TPL_LIBRARIES ${SuiteSparse_LIBRARIES})
 
 # ARPACK 
 option(USE_ARPACK "Should ARPACK be enabled?" ON)
