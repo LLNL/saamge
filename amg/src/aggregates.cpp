@@ -277,6 +277,8 @@ void SortByTrueDof(Array<int> &dofs, HypreParMatrix& DofTrueDof)
     int * dtd_diag_J = dtd_diag->j;
     int * dtd_offd_I = dtd_offd->i;
     int * dtd_offd_J = dtd_offd->j;
+    int * dtd_colmap = h_dof_truedof->col_map_offd;
+    int * dtd_col_starts = h_dof_truedof->col_starts;
 
     std::vector<std::pair<int, int> > pairs;
 
@@ -285,9 +287,9 @@ void SortByTrueDof(Array<int> &dofs, HypreParMatrix& DofTrueDof)
         int truedof;
         int dof = dofs[k];
         if (dtd_diag_I[dof+1] != dtd_diag_I[dof])
-            truedof = dtd_diag_J[dtd_diag_I[dof]];
+            truedof = dtd_col_starts[0] + dtd_diag_J[dtd_diag_I[dof]];
         else
-            truedof = dtd_offd_J[dtd_offd_I[dof]];
+            truedof = dtd_colmap[dtd_offd_J[dtd_offd_I[dof]]];
         pairs.push_back(std::make_pair(truedof,dof));
     }
     std::sort(pairs.begin(),pairs.end());
