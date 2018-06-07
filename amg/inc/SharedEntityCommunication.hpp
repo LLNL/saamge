@@ -662,7 +662,7 @@ void SharedEntityCommunication<T>::BroadcastData(T ** mats)
     for (int j = 0; j < ete_offd->num_cols; ++j)
     {
         const int e = ete_offdT_J[j];
-        const int te = GetTrueEntity[e];
+        const int te = GetTrueEntity(e);
         te_to_e.insert(std::pair<int, int>(te, e));
     }
 
@@ -673,7 +673,7 @@ void SharedEntityCommunication<T>::BroadcastData(T ** mats)
         const int trueentity = receive_headers[(j+1) * header_length - 1];
         it = te_to_e.find(trueentity);
         MFEM_ASSERT(te_to_e.end() != it, "Cannot find entity associated with true entity!");
-        const int entity = it->second();
+        const int entity = it->second;
         MFEM_ASSERT(owner == entity_master[entity], "Ownership mismatch!");
         ReceiveData(
             *mats[entity], &(receive_headers[j * header_length]),
