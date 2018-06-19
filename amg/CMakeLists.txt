@@ -196,6 +196,13 @@ set_tests_properties(mltest
   PASS_REGULAR_EXPRESSION
   "Outer PCG converged in 3 iterations.")
 
+add_test(pmltest
+  mpirun -n 2 test/mltest -m ${PROJECT_SOURCE_DIR}/test/mltest.mesh --num-levels 2 --no-visualization --no-correct-nulspace)
+set_tests_properties(mltest
+  PROPERTIES
+  PASS_REGULAR_EXPRESSION
+  "Outer PCG converged in 3 iterations.")
+
 add_test(mltest2
   test/mltest -m ${PROJECT_SOURCE_DIR}/test/mltest.mesh --num-levels 2 --no-visualization --no-correct-nulspace --order 2)
 set_tests_properties(mltest2
