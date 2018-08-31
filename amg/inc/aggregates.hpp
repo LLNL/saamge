@@ -133,7 +133,35 @@ typedef struct {
     mfem::Table *AE_to_elem; /*!< The relation table that relates AEs to elements. */
     mfem::Table *elem_to_AE; /*!< The relation table that relates elements to AEs. */
     mfem::Table *elem_to_elem; /*!< The relation table that relates elements to
-                              elements. */
+                                    elements. */
+
+    // Face relations are used in the nonconforming coarsening algorithms.
+    // Coarse faces can be seen as MISes in terms of faces instead of DoFs. That is, MISes in the respective RT0 space.
+    // In fact, once elements and faces are "broken" with the first coarsening, the usual DoF MISes and face MISes should
+    // mark the same further coarse faces.
+    mfem::Table *elem_to_face; /*!< The relation table that relates elements to
+                                    their faces. */
+    mfem::Table *face_to_dof; /*!< The relation table that relates faces to
+                                   their DoFs. */
+    mfem::Table *AE_to_face; /*!< The relation table that relates AEs to (fine) faces. */
+    mfem::Table *cface_to_face; /*!< The relation table that relates coarse faces to fine faces. */
+    mfem::Table *AE_to_cface; /*!< The relation table that relates AEs to coarse faces. */
+    mfem::Table *cface_to_dof; /*!< The relation table that relates coarse faces to fine DoFs. */
+    mfem::Table *dof_to_cface; /*!< The relation table that relates fine DoFs to coarse faces. */
+    mfem::HypreParMatrix *face_to_trueface; /*!< On the finest level, this should be obtained from MFEM
+                                                 otherwise it is built on coarse level, where coarse faces (agglomerated faces)
+                                                 take the role of faces. */
+    int num_owned_cfaces; /*!< The number of coarse faces locally owned on this processor. */
+    int num_cfaces; /*!< number of coarse faces we know about on this processor, including some we share with others */
+    int *cfaces; /*!< An array that for every (fine) face matches the coarse face it belongs to.
+                      -1 is for internal faces that do not belong to any coarse face. */
+    int *cfaces_size; /*!< An array with the sizes of the coarse (agglomerated) faces in number of (fine) faces. */
+    int *cfaces_dof_size; /*!< An array with the sizes of the coarse (agglomerated) faces in number of (fine) DoFs. */
+    int *cface_master; /*!< Tells you the master processor for this coarse face. */
+    mfem::HypreParMatrix *cface_to_truecface; /*!< Connects local coarse faces to true global coarse faces. */
+    mfem::HypreParMatrix *cface_cDof_TruecDof; /*!< Coarse DoF to coarse true DoF but restricted only to coarse faces. */
+    mfem::HypreParMatrix *cface_TruecDof_cDof; /*!< Thee transposed of cface_cDof_TruecDof. */
+    int *dof_num_gcfaces; /*!< An array that contains the number of global (across all CPUs) number of coarse faces that contain a DoF. */
 
     mfem::Table *AE_to_dof; /*!< The relation table that relates AEs to DoFs. */
     mfem::Table *dof_to_AE; /*!< The relation table that relates DoFs to AEs. */
@@ -142,6 +170,7 @@ typedef struct {
                            XXX: This array alone does not provide enough
                                 information. It is combined with \b dof_to_AE
                                 to get the final result. */
+    int *dof_num_gAEs; /*!< An array that contains the number of global (across all CPUs) number of AEs that contain a DoF. */
 
 
     // TODO TODO TODO
@@ -167,7 +196,7 @@ typedef struct {
                        (fine) DoFs. */ 
 
     int *mis_coarsedofoffsets; /*!< keep track of which MIS has which coarse dof, might be more useful to have a full mis_coarsedof mfem::Table (this lives on coarse agg_part_rels, empty on the finest level) */
-    
+
     int *dof_masterproc;
     // ------ end proposed replacement
 
@@ -324,6 +353,14 @@ void agg_restrict_to_agg_enforce(int part,
                                  const int *restriction, mfem::DenseMatrix& cut_evects,
                                  mfem::DenseMatrix& restricted);
 
+/*! \brief The same as agg_restrict_to_agg_enforce but only for a single vector.
+*/
+void agg_restrict_vec_to_agg_enforce(
+    int part,
+    const agg_partitioning_relations_t& agg_part_rels, int agg_size,
+    const int *restriction, const mfem::Vector& vec,
+    mfem::Vector& restricted);
+
 /*! \brief Restricts a globally defined vector to an AE.
 
     \param part (IN) The id (number) of the AE in question.
@@ -413,6 +450,16 @@ void agg_create_partitioning_tables(
     const agg_dof_status_t *bdr_dofs, int *nparts,
     mfem::HypreParMatrix *dof_truedof, bool do_aggregates);
 
+/*! \brief Constructs only the face relations.
+
+  This function counts on already built relation tables (like AEs) and only
+  fills in the face and coarse face relations by constructing the coarse faces.
+  The arguments should be obtained from MFEM on the finest level, while on the coarsest level they are produced
+  by replacing element with AE and face with coarse face (coarse DoF also should appear at some point).
+  The arguments become possessions of the agg_part_rels structure.
+*/
+void agg_build_face_relations(agg_partitioning_relations_t *agg_part_rels, mfem::Table *elem_to_face, mfem::Table *face_to_dof, mfem::HypreParMatrix *face_to_trueface);
+
 /*! \brief builds finedof_to_dof, a local Table, based on some parallel relations
 
     fairly experimental
@@ -445,6 +492,21 @@ void agg_build_coarse_Dof_TrueDof(agg_partitioning_relations_t &agg_part_rels_co
                                   const agg_partitioning_relations_t &agg_part_rels_fine,
                                   int coarse_truedof_offset, int * mis_numcoarsedof,
                                   mfem::DenseMatrix ** mis_tent_interps);
+
+/*! Builds and returns the coarse DoF to coarse true DoF but restricted only to coarse faces
+    (unless the fullrelations flag is set, which enforces the inclusion of interior DoFs).
+    This is suited for nonconforming methods, where the coarse faces are the only ones that have shared DoFs.
+*/
+mfem::HypreParMatrix *agg_build_cface_cDof_TruecDof(const agg_partitioning_relations_t &agg_part_rels,
+                                                    int coarse_truedof_offset, mfem::DenseMatrix **cfaces_bases,
+                                                    int celements_cdofs=0, bool fullrelations=false);
+
+/*! A wrapper for \b agg_build_cface_cDof_TruecDof, that simply fills in the respective
+    relations inside \a agg_part_rels.
+*/
+void agg_create_cface_cDof_TruecDof_relations(agg_partitioning_relations_t &agg_part_rels,
+                                              int coarse_truedof_offset, mfem::DenseMatrix **cfaces_bases,
+                                              int celements_cdofs=0, bool fullrelations=false);
 
 /*! \brief Creates all relations for a non-geometric level.
 

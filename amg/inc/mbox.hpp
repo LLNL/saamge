@@ -213,6 +213,19 @@ double mbox_energy_inner_prod_sparse(
 double mbox_energy_inner_prod_dense(
     const mfem::DenseMatrix& A, const mfem::Vector& x, const mfem::Vector& y);
 
+/*! \brief Computes the energy inner product with diagonal \a D.
+
+    \a y'\a D\a x.
+
+    \param D (IN) A diagonal of a matrix.
+    \param x (IN) One vector.
+    \param y (IN) Another vector.
+
+    \returns The energy inner product of \a x and \a y.
+*/
+double mbox_energy_inner_prod_diag(
+    const mfem::Vector& D, const mfem::Vector& x, const mfem::Vector& y);
+
 /*! \brief Computes the generalized Rayleigh quotient of matrix pair (A,B).
 
     Computes the generalized Rayleigh quotient of matrix pair (A,B) for vector
@@ -1380,6 +1393,24 @@ void mbox_project_parallel(mfem::HypreParMatrix& interp, mfem::HypreParVector& v
 */
 void mbox_project_parallel(mfem::HypreParMatrix& A, mfem::HypreParMatrix& interp,
                            mfem::HypreParVector& v);
+
+/*! \brief Restricts a vector only to faces. Suitable for the non-conforming method.
+
+    Assumes that on each processor the elements' DoFs come first in the numbering,
+    followed by the faces' DoFs. Depending on the arguments, can work for (local) DoFs
+    as well as true DoFs.
+
+    \param vec (IN) The vector to restrict.
+    \param elements_dofs (IN) Number of local (on CPU) DoFs associated with elements.
+                              That is, DoFs to be skipped.
+    \param new_processor_offsets (IN) The offsets in the restricted vector. Usually easily
+                                      obtainable from the appropriate DoF_TrueDoF relation.
+    \param new_glob_size (IN) The global size of the of the restricted vector.
+
+    \returns The restricted parallel vector. Must be freed by the caller.
+*/
+mfem::HypreParVector *mbox_restrict_vec_to_faces(const mfem::Vector& vec, int elements_dofs,
+                                                 HYPRE_Int *new_processor_offsets, int new_glob_size);
 
 /* Inline Functions */
 /*! \brief A wrapper of \b mbox_orthogonalize for sparse \a D.

@@ -103,6 +103,8 @@ public:
         const agg_partitioning_relations_t &agg_part_rels,
         int threshold=std::numeric_limits<int>::max());
 
+    ~Eigensolver();
+
     /**
        Solve() replaces the original typedef (spect_local_prob_solve_sparse_ft)
        and its implementation will borrow a lot of original code.
@@ -113,6 +115,17 @@ public:
         const mfem::SparseMatrix& A, mfem::SparseMatrix *& B, 
         int part, int agg_id, int aggregate_size, double& theta,
         mfem::DenseMatrix& cut_evects);
+
+    /**
+       Returns the obtained eigenvalues (if any) providing the ownership to the
+       caller who needs to free the memory.
+    */
+    mfem::Vector *StealEigenvalues()
+    {
+        mfem::Vector *evals = eigenvalues;
+        eigenvalues = NULL;
+        return evals;
+    }
 
     void GetStatistics(
         int &o_count_solves, int &o_count_direct_solves,
@@ -222,6 +235,9 @@ private:
         this is \lambda_{m_T + 1} in Brezina-Vassilevski (16)
     */
     double smallest_eigenvalue_skipped;
+
+    //! Stores (at least temporary) the obtained eigenvalues.
+    mfem::Vector *eigenvalues;
 };
 
 /*! \brief Augments a subspace matrix for the Schur complement eigenproblem.

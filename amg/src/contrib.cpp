@@ -55,8 +55,14 @@ int abs_pair_compare(const void *va, const void *vb)
 }
 
 ContribTent::ContribTent(int ND, bool avoid_ess_bdr_dofs_in) :
+    celements_cdofs(0),
+    celements_cdofs_offsets(NULL),
+    cfaces_truecdofs_offsets(NULL),
+    cfaces_cdofs_offsets(NULL),
     rows(ND),
     filled_cols(0),
+    tent_interp_(NULL),
+    tent_restr_(NULL),
     avoid_ess_bdr_dofs(avoid_ess_bdr_dofs_in),
     svd_eps(1.e-10),
     threshold_(0.0)
@@ -68,6 +74,11 @@ ContribTent::ContribTent(int ND, bool avoid_ess_bdr_dofs_in) :
 
 ContribTent::~ContribTent()
 {
+    delete tent_interp_;
+    delete tent_restr_;
+    delete [] celements_cdofs_offsets;
+    delete [] cfaces_truecdofs_offsets;
+    delete [] cfaces_cdofs_offsets;
 }
 
 SparseMatrix * ContribTent::contrib_tent_finalize()
@@ -79,19 +90,37 @@ SparseMatrix * ContribTent::contrib_tent_finalize()
     if (filled_cols == 0)
         SA_PRINTF("%s","WARNING! no coarse degrees of freedom on this processor.\n");
     tent_interp_->Finalize();
-    tent_interp_l = new SparseMatrix(tent_interp_->GetI(),
-                                     tent_interp_->GetJ(),
-                                     tent_interp_->GetData(),
-                                     tent_interp_->Size(),
-                                     filled_cols);
-    tent_interp_->LoseData();
-    delete (tent_interp_);
+
+    if (tent_interp_->Width() == filled_cols)
+    {
+        tent_interp_l = tent_interp_;
+    } else
+    {
+        tent_interp_l = new SparseMatrix(tent_interp_->GetI(),
+                                         tent_interp_->GetJ(),
+                                         tent_interp_->GetData(),
+                                         tent_interp_->Size(),
+                                         filled_cols);
+        tent_interp_->LoseData();
+        delete (tent_interp_);
+    }
+    tent_interp_ = NULL;
     SA_ASSERT(tent_interp_l->GetI() && tent_interp_l->GetJ() &&
               tent_interp_l->GetData());
     SA_ASSERT(tent_interp_l->Size() == rows);
     SA_ASSERT(tent_interp_l->Width() == filled_cols);
 
     return tent_interp_l;
+}
+
+SparseMatrix * ContribTent::contrib_restr_finalize()
+{
+    SparseMatrix *tent_restr_l;
+    if (NULL != tent_restr_)
+        tent_restr_->Finalize();
+    tent_restr_l = tent_restr_;
+    tent_restr_ = NULL;
+    return tent_restr_l;
 }
 
 /**
@@ -288,6 +317,92 @@ void ContribTent::contrib_tent_insert_from_local(
     }   
     delete [] newdata;
     filled_cols = col;
+}
+
+void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, const DenseMatrix * const *cut_evects_arr,
+                                                  const DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels)
+{
+    int nloc_cbasis = 0;
+    for (int i=0; i < nparts; ++i)
+        nloc_cbasis += cut_evects_arr[i]->Width();
+    for (int i=0; i < num_cfaces; ++i)
+        if (PROC_RANK == agg_part_rels.cface_master[i])
+            nloc_cbasis += cfaces_bases[i]->Width();
+    delete tent_interp_;
+    tent_interp_ = new SparseMatrix(rows, nloc_cbasis);
+    SA_ASSERT(NULL == tent_restr_);
+    tent_restr_ = new SparseMatrix(nloc_cbasis, rows);
+
+    celements_cdofs = 0;
+    delete [] celements_cdofs_offsets;
+    delete [] cfaces_truecdofs_offsets;
+    delete [] cfaces_cdofs_offsets;
+    celements_cdofs_offsets = new int[nparts + 1];
+    cfaces_truecdofs_offsets = new int[num_cfaces + 1];
+    cfaces_cdofs_offsets = new int[num_cfaces + 1];
+
+    SA_ASSERT(agg_part_rels.dof_to_cface->Size() == agg_part_rels.ND);
+
+    filled_cols = 0;
+    for (int i=0; i < nparts; ++i)
+    {
+        celements_cdofs_offsets[i] = filled_cols;
+        const DenseMatrix * const interior_basis = cut_evects_arr[i];
+        SA_ASSERT(interior_basis->Height() == agg_part_rels.AE_to_dof->RowSize(i));
+        const int * const restriction = agg_part_rels.AE_to_dof->GetRow(i);
+        for (int dof=0; dof < interior_basis->Height(); ++dof)
+        {
+            const int ldof = restriction[dof];
+            SA_ASSERT(0 <= ldof && ldof < agg_part_rels.ND);
+            double scale = 1.0;
+            SA_ASSERT(agg_part_rels.dof_num_gcfaces[ldof] >= agg_part_rels.dof_to_cface->RowSize(ldof));
+            SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] >= agg_part_rels.dof_to_AE->RowSize(ldof));
+            if (agg_part_rels.dof_num_gcfaces[ldof] > 0)
+            {
+                SA_ASSERT(agg_part_rels.dof_to_cface->RowSize(ldof) > 0);
+                SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] > 1);
+                scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
+            }
+            for (int base=0; base < interior_basis->Width(); ++base)
+            {
+                tent_interp_->Set(ldof, filled_cols + base, scale * (*interior_basis)(dof, base));
+                tent_restr_->Set(filled_cols + base, ldof, (*interior_basis)(dof, base));
+            }
+        }
+        filled_cols += interior_basis->Width();
+    }
+    celements_cdofs_offsets[nparts] = celements_cdofs = filled_cols;
+
+    int ldof_ctr = 0;
+    for (int i=0; i < num_cfaces; ++i)
+    {
+        const DenseMatrix * const interface_basis = cfaces_bases[i];
+        cfaces_truecdofs_offsets[i] = -1;
+        cfaces_cdofs_offsets[i] = ldof_ctr;
+        ldof_ctr += interface_basis->Width();
+        if (PROC_RANK == agg_part_rels.cface_master[i])
+        {
+            cfaces_truecdofs_offsets[i] = filled_cols - celements_cdofs;
+            SA_ASSERT(interface_basis->Height() == agg_part_rels.cface_to_dof->RowSize(i));
+            const int * const restriction = agg_part_rels.cface_to_dof->GetRow(i);
+            for (int dof=0; dof < interface_basis->Height(); ++dof)
+            {
+                const int ldof = restriction[dof];
+                SA_ASSERT(agg_part_rels.dof_to_cface->RowSize(ldof) > 0);
+                SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] > 1);
+                const double scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
+                for (int base=0; base < interface_basis->Width(); ++base)
+                {
+                    tent_interp_->Set(ldof, filled_cols + base, scale * (*interface_basis)(dof, base));
+                    tent_restr_->Set(filled_cols + base, ldof, (*interface_basis)(dof, base));
+                }
+            }
+            filled_cols += interface_basis->Width();
+        }
+    }
+    SA_ASSERT(filled_cols == nloc_cbasis);
+    cfaces_cdofs_offsets[num_cfaces] = ldof_ctr;
+    cfaces_truecdofs_offsets[num_cfaces] = filled_cols - celements_cdofs;
 }
 
 void ContribTent::ExtendWithConstants(
@@ -548,6 +663,69 @@ DenseMatrix ** ContribTent::CommunicateEigenvectors(
     return sec.Collect();
 }
 
+DenseMatrix ** ContribTent::CommunicateEigenvectorsCFaces(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix * const *cut_evects_arr,
+    SharedEntityCommunication<DenseMatrix>& sec)
+{
+    // restrict local eigenvectors to local coarse faces
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix ** restricted_evects_array;
+    restricted_evects_array = new DenseMatrix*[num_cfaces];
+    Table *cface_to_AE = Transpose(*(agg_part_rels.AE_to_cface));
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        const int local_AEs_containing = cface_to_AE->RowSize(cface);
+        SA_ASSERT(1 <= local_AEs_containing && local_AEs_containing <= 2);
+        const int cface_dof_size = agg_part_rels.cfaces_dof_size[cface];
+        restricted_evects_array[cface] = new DenseMatrix[local_AEs_containing];
+        // restrict local AE to this coarse face
+        for (int ae=0; ae < local_AEs_containing; ++ae)
+        {
+            int AE_id = cface_to_AE->GetRow(cface)[ae];
+            agg_restrict_to_agg_enforce(AE_id, agg_part_rels, cface_dof_size,
+                                        agg_part_rels.cface_to_dof->GetRow(cface),
+                                        *(cut_evects_arr[AE_id]),
+                                        restricted_evects_array[cface][ae]);
+        }
+    }
+
+    // communication: collect cface-restricted eigenvectors on the process that owns the coarse face
+    // so SVD can be performed by the master processor.
+    sec.ReducePrepare();
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        // combine all the AEs into one DenseMatrix (this is complicated
+        // and expensive in memory but might save us latency costs...)
+        // This can possibly be avoided but needs broader code modification.
+        const int cface_dof_size = agg_part_rels.cfaces_dof_size[cface];
+        const int rowsize = cface_to_AE->RowSize(cface);
+        const int * const row = cface_to_AE->GetRow(cface);
+        int numvecs = 0;
+        for (int j=0; j < rowsize; ++j)
+        {
+            const int AE = row[j];
+            numvecs += cut_evects_arr[AE]->Width();
+        }
+        DenseMatrix send_mat(cface_dof_size, numvecs);
+        numvecs = 0;
+        for (int j=0; j < rowsize; ++j)
+        {
+            const int AE = row[j];
+            std::memcpy(send_mat.Data() + numvecs * cface_dof_size,
+                        restricted_evects_array[cface][j].Data(),
+                        cface_dof_size * cut_evects_arr[AE]->Width() * sizeof(double));
+            numvecs += cut_evects_arr[AE]->Width();
+        }
+        delete [] restricted_evects_array[cface];
+
+        sec.ReduceSend(cface, send_mat);
+    }
+    delete cface_to_AE;
+    delete [] restricted_evects_array;
+    return sec.Collect();
+}
+
 void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
                             DenseMatrix ** received_mats, int * row_sizes,
                             bool scaling_P)
@@ -686,6 +864,67 @@ void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
     SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n",coarse_truedof_offset);
 }
 
+DenseMatrix **ContribTent::CFacesSVD(const agg_partitioning_relations_t& agg_part_rels,
+                                     DenseMatrix **received_mats, int *row_sizes, bool full_space)
+{
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix lsvects;
+    DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
+    std::memset(cfaces_bases, 0, sizeof(DenseMatrix*) * num_cfaces);
+    Vector svals;
+    int num_coarse_dofs = 0;
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        int owner = agg_part_rels.cface_master[cface];
+        cfaces_bases[cface] = new DenseMatrix;
+        SA_ASSERT((owner == PROC_RANK && received_mats[cface] != NULL) || (owner != PROC_RANK && received_mats[cface] == NULL));
+        if (owner == PROC_RANK)
+        {
+            const int row_size = row_sizes[cface];
+
+            // Check to see if all of this cface's DOFs are on essential boundary (this should not happen with coarse faces
+            // since we consider only interior coarse faces).
+            {
+                const int dim = received_mats[cface][0].Height();
+                SA_ASSERT(agg_part_rels.cfaces_dof_size[cface] == dim);
+                SA_ASSERT(dim > 1); // Maybe not good for some nonconforming spaces.
+                bool interior_dofs = false;
+                for (int j=0; j < dim; ++j)
+                {
+                    const int row = agg_part_rels.cface_to_dof->GetRow(cface)[j];
+                    SA_ASSERT(rows > row);
+                    if (!agg_is_dof_on_essential_border(agg_part_rels, row))
+                    {
+                        interior_dofs = true;
+                        break;
+                    }
+                }
+                SA_ASSERT(interior_dofs);
+            }
+
+            if (full_space)
+                cfaces_bases[cface]->Diag(1.0, agg_part_rels.cfaces_dof_size[cface]);
+            else
+            {
+                xpack_svd_dense_arr(received_mats[cface], row_size, lsvects, svals);
+                SA_ASSERT(svals.Size() > 0);
+                xpack_orth_set(lsvects, svals, *cfaces_bases[cface], svd_eps);
+            }
+            delete [] received_mats[cface];
+            SA_ASSERT(cfaces_bases[cface]->Width() > 0);
+            num_coarse_dofs += cfaces_bases[cface]->Width();
+        }
+    }
+    delete [] received_mats;
+
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs, &coarse_truedof_offset, 1, MPI_INT, MPI_SUM, PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n", coarse_truedof_offset);
+
+    return cfaces_bases;
+}
+
 /**
    Takes solutions to spectral problems on AEs, restricts to MISes, does
    appropriate communication and SVD, and constructs tentative prolongator
@@ -711,6 +950,31 @@ void ContribTent::contrib_mises(
         row_sizes[mis] = sec.NumNeighbors(mis);
     SVDInsert(agg_part_rels, received_mats, row_sizes, scaling_P);
     delete [] row_sizes;
+}
+
+DenseMatrix **ContribTent::contrib_cfaces(const agg_partitioning_relations_t& agg_part_rels,
+                                          DenseMatrix * const *cut_evects_arr, bool full_space)
+{
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
+                                               *agg_part_rels.cface_to_truecface);
+    // First stage of communication. All parties restrict and send their eigenvectors to the master,
+    // for each shared coarse face.
+    DenseMatrix **received_mats = CommunicateEigenvectorsCFaces(agg_part_rels, cut_evects_arr, sec);
+
+    // Do SVDs on owned coarse faces (i.e., performed by the masters) and obtain the coarse
+    // face bases on them.
+    int num_cfaces = agg_part_rels.num_cfaces;
+    int *row_sizes = new int[num_cfaces];
+    for (int cface=0; cface < num_cfaces; ++cface)
+        row_sizes[cface] = sec.NumNeighbors(cface);
+    DenseMatrix **cfaces_bases = CFacesSVD(agg_part_rels, received_mats, row_sizes, full_space);
+    delete [] row_sizes;
+
+    // Second stage of communication. The masters redistribute the obtained orthogonalized (via SVD)
+    // coarse face basis to the respective slaves.
+    sec.Broadcast(cfaces_bases);
+
+    return cfaces_bases;
 }
 
 void ContribTent::contrib_composite(

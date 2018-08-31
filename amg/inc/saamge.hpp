@@ -55,5 +55,6 @@
 #include <tg.hpp>
 #include <xpacks.hpp>
 #include <DoubleCycle.hpp>
+#include <nonconf.hpp>
 
 #endif // _SAAMGE_HPP

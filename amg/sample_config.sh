@@ -28,7 +28,7 @@
 
 #!/bin/bash
 
-SAAMGE_BASE_DIR=${HOME}/saamge/for-lido/amg
+SAAMGE_BASE_DIR=${HOME}/opus/projs/saamge/amg
 SAAMGE_BUILD_DIR=${SAAMGE_BASE_DIR}/build
 SAAMGE_INSTALL_DIR=${SAAMGE_BASE_DIR}/install
 
@@ -44,20 +44,20 @@ rm -rf CMakeFiles
 cmake \
     -DCMAKE_BUILD_TYPE=DEBUG \
     \
-    -DMETIS_DIR=${HOME}/bin \
-    -DHYPRE_DIR=${HOME}/hypre/debug \
-    -DMFEM_DIR=${HOME}/mfem/debug-nopetsc \
-    -DSuiteSparse_DIR=${HOME}/bin \
+    -DMETIS_DIR=${HOME}/opus/projs/lib/metis-5.1.0/final \
+    -DHYPRE_DIR=${HOME}/opus/projs/lib/hypre-2.11.2/src/hypre \
+    -DMFEM_DIR=${HOME}/opus/projs/lib/mfem-3.3.2 \
+    -DSuiteSparse_DIR=${HOME}/opus/projs/lib/SuiteSparse \
     \
-    -DUSE_ARPACK=ON \
+    -DUSE_ARPACK=OFF \
     -DARPACK_DIR=${HOME}/arpack/arpack-ng-install \
     -DARPACKPP_DIR=${HOME}/arpack/arpackpp \
     \
     -DLINK_NETCDF=OFF \
     -DNETCDF_DIR=${HOME}/packages/netcdf \
     \
-    -DBLAS_LIBRARIES=/usr/lib64/libblas.so \
-    -DLAPACK_LIBRARIES=/usr/lib64/liblapack.so \
+    -DBLAS_LIBRARIES=/usr/lib64/libblas.so.3 \
+    -DLAPACK_LIBRARIES=/usr/lib64/liblapack.so.3 \
     \
     -DCMAKE_INSTALL_PREFIX=${SAAMGE_INSTALL_DIR} \
     ${SAAMGE_BASE_DIR}

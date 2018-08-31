@@ -56,6 +56,10 @@ typedef struct {
     mfem::HypreParMatrix *tent_interp; /*!< The global (among all processes)
                                          tentative interpolant. */
 
+    mfem::SparseMatrix *ltent_restr; /*!< The local (for the process) tentative
+                                          restriction. */
+
+
     /*! for corrected nullspace, replaces coarse_one_representation */
     mfem::HypreParMatrix * scaling_P; 
 

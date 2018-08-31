@@ -83,6 +83,10 @@ public:
     */
     mfem::SparseMatrix *contrib_tent_finalize();
 
+    /*! \brief Similar to \b contrib_tent_finalize but for the restriction.
+    */
+    mfem::SparseMatrix *contrib_restr_finalize();
+
     /*!
       Like contrib_ones, except contrib spatial_dimension linear functions
       instead of constants.
@@ -117,6 +121,29 @@ public:
         const agg_partitioning_relations_t& agg_part_rels,
         mfem::DenseMatrix * const *cut_evects_arr, bool scaling_P);
 
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions.
+
+      XXX: It would be good to combine the functions with similar functionality.
+           However, I currently prefer to not interfere with existing code, but instead to simply augment it.
+
+      \param agg_part_rels (IN) The partitioning relations.
+      \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_cfaces(const agg_partitioning_relations_t& agg_part_rels,
+                                       mfem::DenseMatrix * const *cut_evects_arr, bool full_space=false);
+
+    /*! \brief Inserts (embeds) the bases for the nonconforming method.
+
+        Sets the entries of the local "interpolation" and "restriction" matrices
+        for the nonconforming case using the bases on coarse (agglomerated) faces and
+        coarse (agglomerated) elements.
+    */
+    void insert_from_cfaces_celems_bases(int nparts, int num_cfaces, const mfem::DenseMatrix * const *cut_evects_arr,
+                                         const mfem::DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels);
+
     /**
        Do both spectral and linears.
     */
@@ -134,6 +161,25 @@ public:
     int * get_mis_numcoarsedof() {return mis_numcoarsedof;}
     mfem::DenseMatrix ** get_mis_tent_interps() {return mis_tent_interps;}
     void set_threshold(double val) {threshold_ = val;}
+    int get_celements_cdofs() {return celements_cdofs;}
+    int *get_celements_cdofs_offsets()
+    {
+        int *celements_cdofs_offsets_ = celements_cdofs_offsets;
+        celements_cdofs_offsets = NULL;
+        return celements_cdofs_offsets_;
+    }
+    int *get_cfaces_truecdofs_offsets()
+    {
+        int *cfaces_truecdofs_offsets_ = cfaces_truecdofs_offsets;
+        cfaces_truecdofs_offsets = NULL;
+        return cfaces_truecdofs_offsets_;
+    }
+    int *get_cfaces_cdofs_offsets()
+    {
+        int *cfaces_cdofs_offsets_ = cfaces_cdofs_offsets;
+        cfaces_cdofs_offsets = NULL;
+        return cfaces_cdofs_offsets_;
+    }
 
 private:
     /*! \brief Deals with essential boundary conditions in the interpolator.
@@ -177,6 +223,20 @@ private:
         SharedEntityCommunication<mfem::DenseMatrix>& sec);
 
     /**
+       Takes cut_evects_arr, which are vectors defined on local AEs,
+       and do the appropriate communication on shared coarse (agglomerate) faces,
+       returning the synchronized matrices of restricted eigenvectors that are now
+       ready for SVD.
+
+       XXX: It would be good to combine the functions with similar functionality.
+            However, I currently prefer to not interfere with existing code, but instead to simply augment it.
+    */
+    mfem::DenseMatrix ** CommunicateEigenvectorsCFaces(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DenseMatrix * const *cut_evects_arr,
+        SharedEntityCommunication<mfem::DenseMatrix>& sec);
+
+    /**
        Given a received_mats array, either from CommunicateEigenvectors() or
        possibly basically empty, add constant functions to it.
     */
@@ -215,6 +275,19 @@ private:
                    mfem::DenseMatrix ** received_mats, int * row_sizes,
                    bool scaling_P);
 
+    /**
+       Take received_mats, do SVDs on coarse faces, and then destroy received_mats.
+
+       Returns the obtained coarse face bases on owned coarse faces. On the faces that are not owned
+       an empty DenseMatrix is defined. Needs to be freed by the caller.
+
+       Does not deal with essential boundary conditions, only basic linear dependence filtering.
+
+       Note well that received_mats is totally deleted by this routine.
+    */
+    mfem::DenseMatrix **CFacesSVD(const agg_partitioning_relations_t& agg_part_rels,
+                                  mfem::DenseMatrix **received_mats, int *row_sizes, bool full_space=false);
+
     /*! building coarse_one_representation on the fly (we are going to just
       copy this pointer to interp_data) */
     mfem::Array<double> * local_coarse_one_representation; 
@@ -222,11 +295,20 @@ private:
     int * mis_numcoarsedof;
     mfem::DenseMatrix ** mis_tent_interps;
 
-    int rows; /*!< The rows of the interpolant matrix. */
+
+    /*! See \b interp_data_t for explaining these variables. */
+    int celements_cdofs;
+    int *celements_cdofs_offsets;
+    int *cfaces_truecdofs_offsets;
+    int *cfaces_cdofs_offsets;
+
+    const int rows; /*!< The rows of the interpolant matrix. */
     int filled_cols; /*!< How many columns are currently introduced in the
                           interpolant matrix. */
     mfem::SparseMatrix *tent_interp_; /*!< The partially built matrix of the tentative
                                     interpolant. */
+    mfem::SparseMatrix *tent_restr_; /*!< The partially built matrix of the tentative
+                                    restriction. */
 
     bool avoid_ess_bdr_dofs;
     double svd_eps; // tolerance for SVD calculation

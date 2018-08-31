@@ -146,12 +146,9 @@ int adapt_approx_xbad(HypreParMatrix& A,
 
         err_prev = err_;
 
-        /*
-        tg_cycle(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), b,
-                 tg_data->pre_smoother, tg_data->post_smoother, xbad,
-                 tg_data->coarse_solver, tg_data->poly_data);
-        */
-        SA_ASSERT(false);
+        tg_cycle_atb(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), b,
+                     tg_data->pre_smoother, tg_data->post_smoother, xbad,
+                     *(tg_data->coarse_solver), tg_data->poly_data);
 
         err_ = mbox_energy_norm_parallel(A, xbad);
         cf_ = err_/err_prev;

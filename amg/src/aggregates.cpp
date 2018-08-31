@@ -653,12 +653,227 @@ int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
 }
 
 /**
+   XXX: An adaptation of agg_construct_mises_local. Of course, the code should be combined
+   and generalized by simply improving on the interface. However, I prefer the conservative approach that
+   does not involve modifying existing functionalities in the code. Once everything seems to work properly,
+   this should be done right.
+
+   Returns a pointer to face_to_cface, which should be freed by the caller.
+*/
+Table *agg_construct_cfaces(agg_partitioning_relations_t& agg_part_rels,
+                            HypreParMatrix *face_to_gAE, HypreParMatrix *gAE_to_face, const HypreParMatrix *face_trueface_face)
+{
+    SA_ASSERT(!agg_part_rels.cface_to_face);
+    SA_ASSERT(!agg_part_rels.cfaces);
+    SA_ASSERT(!agg_part_rels.cfaces_size);
+    SA_ASSERT(!agg_part_rels.cface_master);
+    SA_ASSERT(!agg_part_rels.cface_to_truecface);
+    SA_ASSERT(face_to_gAE);
+    SA_ASSERT(gAE_to_face);
+    SA_ASSERT(agg_part_rels.face_to_trueface);
+
+    int num_local_faces = face_to_gAE->GetNumRows();
+
+    hypre_ParCSRMatrix *hface_to_gAE = *face_to_gAE;
+    int *face_to_gAE_diag_I = hypre_CSRMatrixI(hypre_ParCSRMatrixDiag(hface_to_gAE));
+    int *face_to_gAE_diag_J = hypre_CSRMatrixJ(hypre_ParCSRMatrixDiag(hface_to_gAE));
+    int *face_to_gAE_offd_I = hypre_CSRMatrixI(hypre_ParCSRMatrixOffd(hface_to_gAE));
+    int *face_to_gAE_offd_J = hypre_CSRMatrixJ(hypre_ParCSRMatrixOffd(hface_to_gAE));
+
+    hypre_ParCSRMatrix *hgAE_to_face = *gAE_to_face;
+    int *gAE_to_face_diag_I = hypre_CSRMatrixI(hypre_ParCSRMatrixDiag(hgAE_to_face));
+    int *gAE_to_face_diag_J = hypre_CSRMatrixJ(hypre_ParCSRMatrixDiag(hgAE_to_face));
+
+    bool *distributed = new bool[num_local_faces];
+    agg_part_rels.cfaces = new int[num_local_faces];
+
+    memset(distributed, 0, sizeof(bool) * num_local_faces);
+    memset(agg_part_rels.cfaces, -1, sizeof(int) * num_local_faces);
+
+    int *rowsums = new int[num_local_faces];
+    for (int i=0; i < num_local_faces; ++i)
+    {
+        rowsums[i] = face_to_gAE_diag_I[i+1] - face_to_gAE_diag_I[i] + face_to_gAE_offd_I[i+1] - face_to_gAE_offd_I[i];
+        SA_ASSERT(1 <= rowsums[i] && rowsums[i] <= 2);
+    }
+
+    // only use sec here to determine ownership of faces
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM, *agg_part_rels.face_to_trueface);
+
+    Array<bool> own_cfaces(num_local_faces);
+    Array<int> cface_master_a(num_local_faces);
+    agg_part_rels.num_owned_cfaces = 0;
+    agg_part_rels.num_cfaces = 0;
+
+    // loop over local faces
+    for (int i=0; i < num_local_faces; ++i)
+    {
+        // Distributed is only set if we did distribution on this processor.
+        // Only interface faces form coarse faces. I don't think we care about boundary faces at this point.
+        if (distributed[i] || rowsums[i] < 2)
+            continue;
+
+        // face i becomes the root of a new coarse face being determined
+
+        int new_cface_size = 0;
+        int master_proc;
+        bool own_cface;
+
+        int iAEs[2];
+        int idx=0;
+
+        // collect all AEs that contain local face i on this processor
+        for (int j=face_to_gAE_diag_I[i]; j < face_to_gAE_diag_I[i+1]; ++j)
+        {
+            SA_ASSERT(idx < 2);
+            iAEs[idx++] = face_to_gAE_diag_J[j];
+        }
+        const int local_idx = idx;
+        SA_ASSERT(1 <= local_idx && local_idx <= 2);
+
+        // collect all AEs that contain local face i on other processors
+        for (int j=face_to_gAE_offd_I[i]; j < face_to_gAE_offd_I[i+1]; ++j)
+        {
+            SA_ASSERT(idx < 2);
+            iAEs[idx++] = face_to_gAE_offd_J[j];
+        }
+
+        // The coarse faces will be marked and determined in this loop.
+        // The procedure is to visit all faces in all AEs on this processor that share face i and look for ones
+        // that have the same set of global AEs as face i. This will capture coarse faces on processor boundaries, but
+        // obtain them only locally on this processor (synchronisation is performed afterwards).
+        for (int k=0; k < local_idx; ++k)
+        {
+            const int iAE = iAEs[k];
+            for (int l=gAE_to_face_diag_I[iAE]; l < gAE_to_face_diag_I[iAE+1]; ++l)
+            {
+                const int f = gAE_to_face_diag_J[l];
+                SA_ASSERT(0 <= f && f < num_local_faces);
+                if (distributed[f] || rowsums[f] < 2 || face_to_gAE_diag_I[f+1] - face_to_gAE_diag_I[f] != local_idx)
+                    continue;
+
+                int fAEs[2];
+                idx=0;
+
+                // collect all AEs that contain local face f on this processor
+                for (int j=face_to_gAE_diag_I[f]; j < face_to_gAE_diag_I[f+1]; ++j)
+                {
+                    SA_ASSERT(idx < 2);
+                    fAEs[idx++] = face_to_gAE_diag_J[j];
+                }
+                SA_ASSERT(1 <= idx && idx <= 2);
+
+                // collect all AEs that contain local face f on other processors
+                for (int j=face_to_gAE_offd_I[f]; j < face_to_gAE_offd_I[f+1]; ++j)
+                {
+                    SA_ASSERT(idx < 2);
+                    fAEs[idx++] = face_to_gAE_offd_J[j];
+                }
+
+                // Check if faces i and f are on the same coarse face. In particular, f can coincide with i.
+                if ((iAEs[0] == fAEs[0] && iAEs[1] == fAEs[1]) || (2 == local_idx && iAEs[0] == fAEs[1] && iAEs[1] == fAEs[0]))
+                {
+                    // The actual face distribution happens here.
+                    if (0 == new_cface_size)
+                        master_proc = sec.Owner(f);
+                    else if (sec.Owner(f) < master_proc)
+                        master_proc = sec.Owner(f);
+                    if (PROC_RANK == master_proc)
+                        own_cface = true;
+                    else
+                        own_cface = false;
+                    agg_part_rels.cfaces[f] = agg_part_rels.num_cfaces;
+                    ++new_cface_size;
+                    distributed[f] = true;
+                }
+            }
+        }
+        cface_master_a[agg_part_rels.num_cfaces] = master_proc;
+        own_cfaces[agg_part_rels.num_cfaces++] = own_cface;
+        if (own_cface)
+            ++agg_part_rels.num_owned_cfaces;
+    }
+    delete[] rowsums;
+    delete[] distributed;
+    SA_ASSERT(1 == agg_part_rels.nparts || agg_part_rels.num_cfaces);
+    agg_part_rels.cface_master = new int[agg_part_rels.num_cfaces];
+    for (int i=0; i < agg_part_rels.num_cfaces; ++i)
+        agg_part_rels.cface_master[i] = cface_master_a[i];
+
+    Table *face_to_cface = new Table(num_local_faces, agg_part_rels.cfaces);
+    face_to_cface->Finalize();
+    agg_part_rels.cface_to_face = new Table;
+    Transpose(*face_to_cface, *agg_part_rels.cface_to_face, agg_part_rels.num_cfaces);
+    SA_ASSERT(agg_part_rels.cface_to_face->Size() == agg_part_rels.num_cfaces);
+
+    // Get consistent (across processors) ordering of (fine) faces in coarse faces.
+    agg_part_rels.cfaces_size = new int[agg_part_rels.num_cfaces];
+    Array<int> row;
+    for (int i=0; i < agg_part_rels.num_cfaces; ++i)
+    {
+        row.MakeRef(agg_part_rels.cface_to_face->GetRow(i), agg_part_rels.cface_to_face->RowSize(i));
+        // Think of "Dof" as "Face". The function is general.
+        SortByTrueDof(row, *agg_part_rels.face_to_trueface);
+        agg_part_rels.cfaces_size[i] = agg_part_rels.cface_to_face->RowSize(i);
+    }
+
+    // Collect the local true coarse faces (i.e., ones that are owned locally).
+    Table truecface_to_face;
+    truecface_to_face.MakeI(agg_part_rels.num_owned_cfaces);
+    int truecface_cntr = 0;
+    for (int i=0; i < agg_part_rels.num_cfaces; ++i)
+    {
+        if (own_cfaces[i])
+            truecface_to_face.AddColumnsInRow(truecface_cntr++, agg_part_rels.cface_to_face->RowSize(i));
+    }
+    truecface_to_face.MakeJ();
+    truecface_cntr = 0;
+    for (int i=0; i < agg_part_rels.num_cfaces; ++i)
+    {
+        if (own_cfaces[i])
+            truecface_to_face.AddConnections(truecface_cntr++, agg_part_rels.cface_to_face->GetRow(i), agg_part_rels.cface_to_face->RowSize(i));
+    }
+    truecface_to_face.ShiftUpI();
+    truecface_to_face.Finalize();
+
+    // This is the parallel portion of the routine. Coarse faces are globally identified and synchronized by relating them to
+    // true coarse faces via the global cface_to_truecface table.
+
+    Array<int> row_offsets(3); // these get destroyed at end of routine...
+    int global_num_rows;
+    proc_determine_offsets(truecface_to_face.Size(), row_offsets, global_num_rows);
+    row_offsets.Append(global_num_rows);
+    Array<int> col_offsets(3);
+    col_offsets[0] = agg_part_rels.face_to_trueface->GetRowStarts()[0];
+    col_offsets[1] = agg_part_rels.face_to_trueface->GetRowStarts()[1];
+    col_offsets[2] = agg_part_rels.face_to_trueface->M();
+    HypreParMatrix g_truecface_to_face(PROC_COMM, global_num_rows, agg_part_rels.face_to_trueface->M(), row_offsets.GetData(), col_offsets.GetData(),
+                                       &truecface_to_face);
+    Array<int> row_offsets0(3); // these get destroyed at end of routine, so the matrix better too.
+    proc_determine_offsets(agg_part_rels.cface_to_face->Size(), row_offsets0, global_num_rows);
+    row_offsets0.Append(global_num_rows);
+    HypreParMatrix g_cface_to_face(PROC_COMM, global_num_rows, agg_part_rels.face_to_trueface->M(), row_offsets0.GetData(), col_offsets.GetData(),
+                                   agg_part_rels.cface_to_face);
+
+    HypreParMatrix *temp = ParMult(&g_cface_to_face, face_trueface_face); // rows owned by row_offsets0, cols by trueface_to_face
+    HypreParMatrix *g_face_to_truecface = g_truecface_to_face.Transpose();
+
+    agg_part_rels.cface_to_truecface = ParMult(temp, g_face_to_truecface); // rows owned by row_offsets0, cols by g_face_to_truecface
+    mbox_make_owner_rowstarts_colstarts(*agg_part_rels.cface_to_truecface);
+
+    delete g_face_to_truecface;
+    delete temp;
+
+    return face_to_cface;
+}
+
+/**
    Given Dof_TrueDof_Dof relation and local partitioning (in the form l_AE_to_dof),
    construct and return a global DofToAE matrix, suitable for input to 
    agg_construct_mises_local()
 */
 HypreParMatrix * BuildGlobalDofToAE(HypreParMatrix * Dof_TrueDof_Dof,
-                                    Table& l_AE_to_dof)
+                                    Table& l_AE_to_dof, HypreParMatrix **gAEtoDof=NULL)
 {
     // construct dof_to_gAE
     Array<int> row_offsets;
@@ -686,9 +901,48 @@ HypreParMatrix * BuildGlobalDofToAE(HypreParMatrix * Dof_TrueDof_Dof,
 
     HypreParMatrix * Dof_to_gAE = gAE_to_Dof->Transpose(); // should own everything
     delete AE_to_dof;
-    delete gAE_to_Dof;
+    if (gAEtoDof)
+    {
+        mbox_make_owner_rowstarts_colstarts(*gAE_to_Dof);
+        *gAEtoDof = gAE_to_Dof;
+    } else
+        delete gAE_to_Dof;
 
     return Dof_to_gAE;
+}
+
+HypreParMatrix *BuildGlobalDofToTrueCface(HypreParMatrix *Dof_TrueDof_Dof,
+                                          Table& l_cface_to_dof, HypreParMatrix *cface_to_truecface)
+{
+    Array<int> row_offsets;
+    int global_num_rows;
+    proc_determine_offsets(l_cface_to_dof.Size(), row_offsets, global_num_rows);
+    row_offsets.Append(global_num_rows);
+
+    Array<int> col_offsets(3);
+    col_offsets[0] = Dof_TrueDof_Dof->GetRowStarts()[0];
+    col_offsets[1] = Dof_TrueDof_Dof->GetRowStarts()[1];
+    col_offsets[2] = Dof_TrueDof_Dof->M();
+
+    // the local cface_to_dof has no knowledge of cfaces on other processors
+    HypreParMatrix *cface_to_dof = new HypreParMatrix(PROC_COMM, global_num_rows,
+                                                      Dof_TrueDof_Dof->M(),
+                                                      row_offsets.GetData(),
+                                                      col_offsets.GetData(),
+                                                      &l_cface_to_dof);
+
+    // gcface_to_Dof has row starts owned cface_to_dof, col starts owned by TrueDof_Dof
+    HypreParMatrix *gcface_to_Dof = ParMult(cface_to_dof, Dof_TrueDof_Dof);
+    hypre_ParCSRMatrixDeleteZeros(*gcface_to_Dof, 1.e-10); // if the matrix is square, it has wrong zeros on diagonal sometimes (rare corner case)
+
+    HypreParMatrix *Dof_to_gcface = gcface_to_Dof->Transpose(); // should own everything
+    HypreParMatrix *Dof_to_gtruecface = ParMult(Dof_to_gcface, cface_to_truecface);
+
+    delete gcface_to_Dof;
+    delete cface_to_dof;
+    delete Dof_to_gcface;
+
+    return Dof_to_gtruecface;
 }
 
 /**
@@ -726,6 +980,22 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     HypreParMatrix * Dof_to_gAE = BuildGlobalDofToAE(Dof_TrueDof_Dof, l_AE_to_dof);
     if (agg_part_rels.testmesh)
         Dof_to_gAE->Print("Dof_to_gAE.mat");
+
+    SA_ASSERT(Dof_to_gAE->GetNumRows() == agg_part_rels.ND);
+    hypre_ParCSRMatrix * hDof_to_gAE = *Dof_to_gAE;
+    hypre_CSRMatrix * diag = hypre_ParCSRMatrixDiag(hDof_to_gAE);
+    hypre_CSRMatrix * offd = hypre_ParCSRMatrixOffd(hDof_to_gAE);
+    int * Dof_to_gAE_diag_I = hypre_CSRMatrixI(diag);
+    int * Dof_to_gAE_offd_I = hypre_CSRMatrixI(offd);
+
+    SA_ASSERT(NULL == agg_part_rels.dof_num_gAEs);
+    agg_part_rels.dof_num_gAEs = new int[agg_part_rels.ND];
+    for (int i=0; i < agg_part_rels.ND; ++i)
+    {
+        agg_part_rels.dof_num_gAEs[i] = Dof_to_gAE_diag_I[i+1] - Dof_to_gAE_diag_I[i] +
+                                        Dof_to_gAE_offd_I[i+1] - Dof_to_gAE_offd_I[i];
+        SA_ASSERT(agg_part_rels.dof_num_gAEs[i] >= 0);
+    }
 
     // construct local agg_part_rels.mis_to_dof, truemis_to_dof, other stuff; 
     int out;
@@ -781,6 +1051,11 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     }
 
     // TODO: wait, why can't I just do mis_to_dof * dof_to_truemis? why Dof_TrueDof_Dof?
+    // I think we need Dof_TrueDof_Dof, while mis_to_dof * dof_to_truemis is not sufficient. Both mis_to_dof and dof_to_truemis have
+    // only diagonal blocks living on the current processor. mis_to_dof * dof_to_truemis will only connect local MISes with true MISes
+    // that are owned locally and cannot cross processor boundaries. Dof_TrueDof_Dof allows crossing the processor boundaries by connecting
+    // DoFs on different CPUs via true DoFs. Thus, MISes on the current processor get connected with true MISes on other processors via
+    // the knowledge about how DoFs are shared, which is informative on how MISes are shared. -- DZK
     HypreParMatrix * temp = ParMult(mis_to_dof, Dof_TrueDof_Dof); // rows owned by row_offsets3, cols by TrueDof_Dof
     HypreParMatrix * dof_to_truemis = truemis_to_dof->Transpose();
 
@@ -1178,6 +1453,32 @@ void agg_restrict_to_agg_enforce(
     restricted.Transpose();
 }
 
+void agg_restrict_vec_to_agg_enforce(
+    int part,
+    const agg_partitioning_relations_t& agg_part_rels, int agg_size,
+    const int *restriction, const Vector& vec,
+    Vector& restricted)
+{
+    int i;
+    SA_ASSERT(agg_part_rels.AE_to_dof);
+
+    SA_ASSERT(agg_size > 0 &&
+              agg_part_rels.AE_to_dof->RowSize(part) >= agg_size);
+    SA_ASSERT(vec.Size() == agg_part_rels.AE_to_dof->RowSize(part));
+
+    restricted.SetSize(agg_size);
+
+    // Do the restriction.
+    for (i=0; i < agg_size; ++i)
+    {
+        SA_ASSERT(0 <= restriction[i] && restriction[i] < agg_part_rels.ND);
+        const int AE_dof = agg_map_id_glob_to_AE(restriction[i], part,
+                                                 agg_part_rels);
+        SA_ASSERT(0 <= AE_dof && AE_dof < vec.Size());
+        restricted(i) = vec(AE_dof);
+    }
+}
+
 void agg_restrict_vect_to_AE(int part,
                              const agg_partitioning_relations_t& agg_part_rels,
                              const Vector& glob_vect, Vector& restricted)
@@ -1382,6 +1683,14 @@ void agg_create_partitioning_tables(
                                   agg_part_rels->AE_to_elem);
     Mult(*(agg_part_rels->AE_to_elem), *(agg_part_rels->elem_to_dof),
          *(agg_part_rels->AE_to_dof));
+
+//    Array<int> row;
+//    for (int i=0; i < agg_part_rels->nparts; ++i)
+//    {
+//        row.MakeRef(agg_part_rels->AE_to_dof->GetRow(i), agg_part_rels->AE_to_dof->RowSize(i));
+//        SortByTrueDof(row, *agg_part_rels->Dof_TrueDof);
+//    }
+
     Transpose(*(agg_part_rels->AE_to_dof), *(agg_part_rels->dof_to_AE));
     agg_build_glob_to_AE_id_map(*agg_part_rels);
 
@@ -1440,6 +1749,93 @@ void agg_create_partitioning_tables(
         SA_ASSERT(0 <= agg_part_rels->agg_flags[i] &&
                   agg_part_rels->agg_flags[i] <= AGG_ALL_FLAGS);
 #endif
+}
+
+
+/**
+    Large portion of this function is essentially a copy of MISes (minimal intersection sets) construction but in terms of faces,
+    i.e. MISes that represent the intersection of two AEs form a coarse face (agglomerated face).
+*/
+void agg_build_face_relations(agg_partitioning_relations_t *agg_part_rels, Table *elem_to_face, Table *face_to_dof, HypreParMatrix *face_to_trueface)
+{
+    SA_ASSERT(agg_part_rels);
+    SA_ASSERT(elem_to_face);
+    SA_ASSERT(face_to_dof);
+    SA_ASSERT(face_to_trueface);
+    SA_ASSERT(!agg_part_rels->elem_to_face);
+    SA_ASSERT(!agg_part_rels->face_to_dof);
+    SA_ASSERT(!agg_part_rels->AE_to_face);
+    SA_ASSERT(!agg_part_rels->AE_to_cface);
+    SA_ASSERT(!agg_part_rels->cface_to_dof);
+    SA_ASSERT(!agg_part_rels->dof_to_cface);
+    SA_ASSERT(!agg_part_rels->cfaces_dof_size);
+    SA_ASSERT(agg_part_rels->AE_to_elem);
+
+    agg_part_rels->elem_to_face = elem_to_face;
+    agg_part_rels->face_to_dof = face_to_dof;
+    agg_part_rels->face_to_trueface = face_to_trueface;
+    agg_part_rels->AE_to_face = Mult(*(agg_part_rels->AE_to_elem), *elem_to_face);
+
+    // Obtain the relation from faces to global AEs, i.e. AEs in global numbering and the relation stored in a global parallel matrix.
+    // The local faces in the relation are also "globalised" in the sense that their numbering is concatenated and shared (between processes) faces appear multiple times.
+
+    HypreParMatrix *trueface_to_face = face_to_trueface->Transpose();
+    // This connects local faces in "globalised" numbering that represent the same true global face.
+    HypreParMatrix *face_trueface_face = ParMult(face_to_trueface, trueface_to_face); // face_trueface_face has rows owned by face_to_trueface, cols by trueface_to_face.
+    // The function is general enough and one can think of "Dofs" as "faces" in the function name.
+    // The relation face_to_gAE is based on true faces. That is, even though faces are in local "globalised" numbering, they will be connected to global AEs,
+    // which possess the respective true face. Thus, a face on a processes' boundary is seen by all sharing processes (in their respective local face numbering) as
+    // belonging to the respective AEs on the sharing processes.
+    HypreParMatrix *gAE_to_face;
+    HypreParMatrix *face_to_gAE = BuildGlobalDofToAE(face_trueface_face, *(agg_part_rels->AE_to_face), &gAE_to_face);
+
+    // Coarse (agglomerated) face construction.
+    const Table * const face_to_cface = agg_construct_cfaces(*agg_part_rels, face_to_gAE, gAE_to_face, face_trueface_face);
+
+    delete gAE_to_face;
+    delete face_to_gAE;
+    delete face_trueface_face;
+    delete trueface_to_face;
+
+    agg_part_rels->cface_to_dof = Mult(*(agg_part_rels->cface_to_face), *face_to_dof);
+    // Consistent ordering of the DoFs on a coarse face across processors.
+    agg_part_rels->cfaces_dof_size = new int[agg_part_rels->num_cfaces];
+    Array<int> row;
+    for (int i=0; i < agg_part_rels->num_cfaces; ++i)
+    {
+        row.MakeRef(agg_part_rels->cface_to_dof->GetRow(i), agg_part_rels->cface_to_dof->RowSize(i));
+        SortByTrueDof(row, *(agg_part_rels->Dof_TrueDof));
+        agg_part_rels->cfaces_dof_size[i] = agg_part_rels->cface_to_dof->RowSize(i);
+    }
+    agg_part_rels->dof_to_cface = new Table;
+    Transpose(*(agg_part_rels->cface_to_dof), *(agg_part_rels->dof_to_cface), agg_part_rels->ND);
+    agg_part_rels->AE_to_cface = Mult(*agg_part_rels->AE_to_face, *face_to_cface);
+    delete face_to_cface;
+
+    HypreParMatrix * Dof_TrueDof = agg_part_rels->Dof_TrueDof;
+    HypreParMatrix * TrueDof_Dof = Dof_TrueDof->Transpose();
+    // Dof_TrueDof_Dof has rows owned by Dof_TrueDof, cols by TrueDof_Dof
+    HypreParMatrix * Dof_TrueDof_Dof = ParMult(Dof_TrueDof, TrueDof_Dof);
+
+    HypreParMatrix * Dof_to_gcface = BuildGlobalDofToTrueCface(Dof_TrueDof_Dof, *(agg_part_rels->cface_to_dof), agg_part_rels->cface_to_truecface);
+    SA_ASSERT(Dof_to_gcface->GetNumRows() == agg_part_rels->ND);
+    hypre_ParCSRMatrix * hDof_to_gcface = *Dof_to_gcface;
+    hypre_CSRMatrix * diag = hypre_ParCSRMatrixDiag(hDof_to_gcface);
+    hypre_CSRMatrix * offd = hypre_ParCSRMatrixOffd(hDof_to_gcface);
+    int * diag_I = hypre_CSRMatrixI(diag);
+    int * offd_I = hypre_CSRMatrixI(offd);
+
+    SA_ASSERT(NULL == agg_part_rels->dof_num_gcfaces);
+    agg_part_rels->dof_num_gcfaces = new int[agg_part_rels->ND];
+    for (int i=0; i < agg_part_rels->ND; ++i)
+    {
+        agg_part_rels->dof_num_gcfaces[i] = diag_I[i+1] - diag_I[i] + offd_I[i+1] - offd_I[i];
+        SA_ASSERT(agg_part_rels->dof_num_gcfaces[i] >= 0);
+    }
+
+    delete TrueDof_Dof;
+    delete Dof_TrueDof_Dof;
+    delete Dof_to_gcface;
 }
 
 Table * agg_create_finedof_to_dof(agg_partitioning_relations_t& agg_part_rels,
@@ -1729,6 +2125,98 @@ void agg_build_coarse_Dof_TrueDof(agg_partitioning_relations_t &agg_part_rels_co
     // return Dof_TrueDof;
 }
 
+HypreParMatrix *agg_build_cface_cDof_TruecDof(const agg_partitioning_relations_t &agg_part_rels,
+                                              int coarse_truedof_offset, DenseMatrix **cfaces_bases,
+                                              int celements_cdofs, bool fullrelations)
+{
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
+                                               *agg_part_rels.cface_to_truecface);
+    const int num_cfaces = agg_part_rels.num_cfaces;
+
+    if (fullrelations)
+    {
+        int coarse_elem_truedof_offset = 0;
+        MPI_Scan(&celements_cdofs, &coarse_elem_truedof_offset, 1, MPI_INT, MPI_SUM, PROC_COMM);
+        coarse_elem_truedof_offset -= celements_cdofs;
+        coarse_truedof_offset += coarse_elem_truedof_offset;
+    }
+
+    // Figure out coarse DoFs, communicate the offsets and counts.
+    // Only coarse DoFs associated with coarse faces can be shared and coarse DoFs associated
+    // with coarse elements always belong to the respective CPU. That is, even though course
+    // DoFs in coarse elements can be supported on shared fine DoFs, the respective coarse DoFs
+    // make no sense to be shared.
+    int *truedof_offsets = new int[num_cfaces];
+    int truedof_counter = fullrelations?celements_cdofs:0;
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        if (PROC_RANK == agg_part_rels.cface_master[cface])
+        {
+            truedof_offsets[cface] = coarse_truedof_offset + truedof_counter;
+            truedof_counter += cfaces_bases[cface]->Width();
+        }
+        else
+        {
+            truedof_offsets[cface] = -1;
+        }
+    }
+    sec.BroadcastFixedSize(truedof_offsets, 1);
+
+    // Assemble the coarse face Dof_TrueDof matrix.
+    int dof_counter = fullrelations?celements_cdofs:0;
+    for (int cface=0; cface < num_cfaces; ++cface)
+        dof_counter += cfaces_bases[cface]->Width();
+    Array<int> I(dof_counter + 1);
+    Array<int> J(dof_counter);
+    int nnz = 0;
+    I[0] = 0;
+    if (fullrelations)
+        for (int i=0; i < celements_cdofs; ++i)
+        {
+            J[nnz] = coarse_truedof_offset + i;
+            ++nnz;
+            I[nnz] = nnz;
+        }
+    for (int cface=0; cface < num_cfaces; ++cface)
+        for (int i=0; i < cfaces_bases[cface]->Width(); ++i)
+        {
+            J[nnz] = truedof_offsets[cface] + i;
+            ++nnz;
+            I[nnz] = nnz;
+        }
+    delete [] truedof_offsets;
+    SA_ASSERT(nnz == dof_counter);
+
+    // Build the actual coarse face Dof_TrueDof HypreParMatrix.
+    double *data = new double[nnz];
+    for (int i=0; i < nnz; ++i)
+        data[i] = 1.0;
+    Array<int> dof_offsets;
+    Array<int> a_truedof_offsets;
+    int total_dof, total_truedof;
+    proc_determine_offsets(dof_counter, dof_offsets, total_dof);
+    proc_determine_offsets(truedof_counter, a_truedof_offsets, total_truedof);
+    HypreParMatrix *Dof_TrueDof =
+        new HypreParMatrix(PROC_COMM, dof_counter, total_dof, total_truedof,
+                           I.GetData(), J.GetData(), data, dof_offsets, a_truedof_offsets);
+    delete [] data;
+
+    return Dof_TrueDof;
+}
+
+void agg_create_cface_cDof_TruecDof_relations(agg_partitioning_relations_t &agg_part_rels,
+                                              int coarse_truedof_offset, DenseMatrix **cfaces_bases,
+                                              int celements_cdofs, bool fullrelations)
+{
+    SA_ASSERT(NULL == agg_part_rels.cface_cDof_TruecDof);
+    SA_ASSERT(NULL == agg_part_rels.cface_TruecDof_cDof);
+    agg_part_rels.cface_cDof_TruecDof = agg_build_cface_cDof_TruecDof(agg_part_rels,
+                                                                      coarse_truedof_offset,
+                                                                      cfaces_bases, celements_cdofs,
+                                                                      fullrelations);
+    agg_part_rels.cface_TruecDof_cDof = agg_part_rels.cface_cDof_TruecDof->Transpose();
+}
+
 /**
    Don't think we're gonna need the global matrix A...
 */
@@ -1840,6 +2328,7 @@ void agg_free_partitioning(agg_partitioning_relations_t *agg_part_rels)
     delete agg_part_rels->elem_to_dof;
     delete agg_part_rels->AE_to_dof;
     delete agg_part_rels->dof_to_AE;
+    delete [] agg_part_rels->dof_num_gAEs;
 
     // new ATB 7 April 2015
     delete agg_part_rels->truemis_to_dof;
@@ -1858,6 +2347,23 @@ void agg_free_partitioning(agg_partitioning_relations_t *agg_part_rels)
     delete agg_part_rels->elem_to_AE;
     delete agg_part_rels->elem_to_elem;
 
+    delete agg_part_rels->elem_to_face;
+    delete agg_part_rels->face_to_dof;
+    delete agg_part_rels->AE_to_face;
+    delete agg_part_rels->cface_to_face;
+    delete agg_part_rels->AE_to_cface;
+    delete agg_part_rels->cface_to_dof;
+    delete agg_part_rels->dof_to_cface;
+    delete agg_part_rels->face_to_trueface;
+    delete [] agg_part_rels->cfaces;
+    delete [] agg_part_rels->cfaces_size;
+    delete [] agg_part_rels->cfaces_dof_size;
+    delete [] agg_part_rels->cface_master;
+    delete agg_part_rels->cface_to_truecface;
+    delete agg_part_rels->cface_cDof_TruecDof;
+    delete agg_part_rels->cface_TruecDof_cDof;
+    delete [] agg_part_rels->dof_num_gcfaces;
+
     if (agg_part_rels->owns_Dof_TrueDof)
     {
         delete [] agg_part_rels->mis_coarsedofoffsets;
@@ -1869,6 +2375,8 @@ void agg_free_partitioning(agg_partitioning_relations_t *agg_part_rels)
     delete agg_part_rels;
 }
 
+
+// TODO: This function does not copy everything currently.
 agg_partitioning_relations_t
     *agg_copy_partitioning(const agg_partitioning_relations_t *src)
 {
@@ -1888,11 +2396,31 @@ agg_partitioning_relations_t
     dst->elem_to_AE = mbox_copy_table(src->elem_to_AE);
     dst->elem_to_elem = mbox_copy_table(src->elem_to_elem);
 
+    dst->elem_to_face = mbox_copy_table(src->elem_to_face);
+    dst->face_to_dof = mbox_copy_table(src->face_to_dof);
+    dst->AE_to_face = mbox_copy_table(src->AE_to_face);
+    dst->cface_to_face = mbox_copy_table(src->cface_to_face);
+    dst->AE_to_cface = mbox_copy_table(src->AE_to_cface);
+    dst->cface_to_dof = mbox_copy_table(src->cface_to_dof);
+    dst->dof_to_cface = mbox_copy_table(src->dof_to_cface);
+    dst->face_to_trueface = mbox_clone_parallel_matrix(src->face_to_trueface);
+    dst->num_owned_cfaces = src->num_owned_cfaces;
+    dst->num_cfaces = src->num_cfaces;
+    dst->cfaces = helpers_copy_int_arr(src->cfaces, src->face_to_dof->Size());
+    dst->cfaces_size = helpers_copy_int_arr(src->cfaces_size, src->num_cfaces);
+    dst->cfaces_dof_size = helpers_copy_int_arr(src->cfaces_dof_size, src->num_cfaces);
+    dst->cface_master = helpers_copy_int_arr(src->cface_master, src->num_cfaces);
+    dst->cface_to_truecface = mbox_clone_parallel_matrix(src->cface_to_truecface);
+    dst->cface_cDof_TruecDof = mbox_clone_parallel_matrix(src->cface_cDof_TruecDof);
+    dst->cface_TruecDof_cDof = mbox_clone_parallel_matrix(src->cface_TruecDof_cDof);
+    dst->dof_num_gcfaces = helpers_copy_int_arr(src->dof_num_gcfaces, src->ND);
+
     dst->AE_to_dof = mbox_copy_table(src->AE_to_dof);
     dst->dof_to_AE = mbox_copy_table(src->dof_to_AE);
     SA_ASSERT(src->dof_to_AE);
     dst->dof_id_inAE = helpers_copy_int_arr(src->dof_id_inAE,
                            src->dof_to_AE->Size_of_connections());
+    dst->dof_num_gAEs = helpers_copy_int_arr(src->dof_num_gAEs, src->ND);
 
     dst->agg_flags = new agg_dof_status_t[src->ND];
     std::copy(src->agg_flags, src->agg_flags + src->ND, dst->agg_flags);

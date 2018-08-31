@@ -201,6 +201,19 @@ double mbox_energy_inner_prod_dense(const DenseMatrix& A, const Vector& x,
     return A.InnerProduct(x, y);
 }
 
+double mbox_energy_inner_prod_diag(const Vector& D, const Vector& x,
+                                   const Vector& y)
+{
+    SA_ASSERT(D.Size() == x.Size());
+    SA_ASSERT(D.Size() == y.Size());
+
+    double prod = 0.0;
+    for (int i=0; i < D.Size(); ++i)
+        prod += D(i)*x(i)*y(i);
+
+    return prod;
+}
+
 double mbox_gen_rayleigh_quot_sparse(const SparseMatrix& A,
                                      const SparseMatrix& B, const Vector& x)
 {
@@ -260,12 +273,9 @@ Table *mbox_copy_table(const Table *src)
 void mbox_free_matr_arr(Matrix **arr, int n)
 {
     if (!arr) return;
-    SA_ASSERT(n > 0);
+    SA_ASSERT(n >= 0);
     for (int i=0; i < n; ++i)
-    {
-        SA_ASSERT(arr[i]);
         delete arr[i];
-    }
     delete [] arr;
 }
 
@@ -1802,7 +1812,9 @@ HypreParVector *mbox_get_diag_parallel_matrix(HypreParMatrix& A)
     */
     SA_ASSERT(ldiag.Size() == A.ColPart()[1] -
                               A.ColPart()[0]);
-    A.GetDiag(ldiag);
+    SparseMatrix sdiag;
+    A.GetDiag(sdiag);
+    sdiag.GetDiag(ldiag);
     SA_ASSERT(ldiag.Size() == A.ColPart()[1] -
                               A.ColPart()[0]);
     double *p;
@@ -1937,6 +1949,18 @@ void mbox_project_parallel(HypreParMatrix& A, HypreParMatrix& interp,
     delete amg;
     delete coarse;
     delete restr;
+}
+
+HypreParVector *mbox_restrict_vec_to_faces(const Vector& vec, int elements_dofs,
+                                           HYPRE_Int *new_processor_offsets, int new_glob_size)
+{
+    HypreParVector *restr_vec = new HypreParVector(PROC_COMM, new_glob_size, new_processor_offsets);
+    mbox_make_owner_partitioning(*restr_vec);
+    SA_ASSERT(vec.Size() - elements_dofs == restr_vec->Size());
+    for (int i=0; i < restr_vec->Size(); i++)
+        (*restr_vec)(i) = vec(elements_dofs + i);
+
+    return restr_vec;
 }
 
 } // namespace saamge

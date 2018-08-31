@@ -57,8 +57,14 @@ Eigensolver::Eigensolver(
     count_solves(0),
     count_direct_solves(0),
     count_max_used(0),
-    smallest_eigenvalue_skipped(std::numeric_limits<double>::max())
+    smallest_eigenvalue_skipped(std::numeric_limits<double>::max()),
+    eigenvalues(NULL)
 {
+}
+
+Eigensolver::~Eigensolver()
+{
+    delete eigenvalues;
 }
 
 void Eigensolver::GetStatistics(
@@ -130,7 +136,9 @@ bool Eigensolver::SolveDirect(
 {
     DenseMatrix *cut_ptr, cut_helper;
     DenseMatrix deA, deB;
-    Vector evals;
+    delete eigenvalues;
+    eigenvalues = new Vector;
+    Vector &evals = *eigenvalues;
     const double lmax = 1.; // Special choice which is good when the weighted
                             // l1-smoother is used
     const int cut_evects_num_beg = cut_evects.Width(); // Number of vectors in
@@ -248,7 +256,9 @@ bool Eigensolver::SolveIterative(
     SA_ASSERT(!all_eigens); // not implemented, and difficult with ARPACK
 
     DenseMatrix *cut_ptr, cut_helper;
-    Vector evals;
+    delete eigenvalues;
+    eigenvalues = new Vector;
+    Vector &evals = *eigenvalues;
     const double lmax = 1.; // Special choice which is good when the weighted
                             // l1-smoother is used
     const int cut_evects_num_beg = cut_evects.Width(); // Number of vectors in

@@ -303,7 +303,20 @@ void interp_free_data(interp_data_t *interp_data,
 
     mbox_free_matr_arr((Matrix**) interp_data->mis_tent_interps,
                        interp_data->num_mises);
-    
+
+    mbox_free_matr_arr((Matrix **)interp_data->Aii, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->Abb, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->Aib, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->invAii, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->invAiiAib, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->AbiinvAii, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->schurs, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->cfaces_bases, interp_data->num_cfaces);
+
+    delete [] interp_data->celements_cdofs_offsets;
+    delete [] interp_data->cfaces_truecdofs_offsets;
+    delete [] interp_data->cfaces_cdofs_offsets;
+
     delete interp_data;
 }
 
@@ -329,6 +342,25 @@ interp_data_t *interp_copy_data(const interp_data_t *src)
     dst->times_apply_smoother = src->times_apply_smoother;
 
     src->tent_interp_offsets.Copy(dst->tent_interp_offsets);
+    dst->total_cols_interp = src->total_cols_interp;
+
+    dst->Aii = mbox_copy_dense_matr_arr(src->Aii, src->nparts);
+    dst->Abb = mbox_copy_dense_matr_arr(src->Abb, src->nparts);
+    dst->Aib = mbox_copy_dense_matr_arr(src->Aib, src->nparts);
+    dst->invAii = mbox_copy_dense_matr_arr(src->invAii, src->nparts);
+    dst->invAiiAib = mbox_copy_dense_matr_arr(src->invAiiAib, src->nparts);
+    dst->AbiinvAii = mbox_copy_dense_matr_arr(src->AbiinvAii, src->nparts);
+    dst->schurs = mbox_copy_dense_matr_arr(src->schurs, src->nparts);
+    dst->cfaces_bases = mbox_copy_dense_matr_arr(src->cfaces_bases, src->num_cfaces);
+    dst->num_cfaces = src->num_cfaces;
+
+    dst->celements_cdofs = src->celements_cdofs;
+    dst->celements_cdofs_offsets = helpers_copy_int_arr(src->celements_cdofs_offsets,
+                                                        src->nparts + 1);
+    dst->cfaces_truecdofs_offsets = helpers_copy_int_arr(src->cfaces_truecdofs_offsets,
+                                                         src->num_cfaces + 1);
+    dst->cfaces_cdofs_offsets = helpers_copy_int_arr(src->cfaces_cdofs_offsets,
+                                                     src->num_cfaces + 1);
 
     return dst;
 }
@@ -592,6 +624,136 @@ void interp_compute_vectors(
         eigensolver.PrintStatistics();
 }
 
+Vector **interp_compute_vectors_nostore(const agg_partitioning_relations_t& agg_part_rels,
+    const interp_data_t& interp_data, ElementMatrixProvider *elem_data, double theta, bool full_space)
+{
+    const int nparts = agg_part_rels.nparts;
+
+    DenseMatrix ** const cut_evects_arr = interp_data.cut_evects_arr;
+    SparseMatrix *rhs_matrix;
+    SparseMatrix *AE_stiffm;
+    Vector **evals = new Vector*[nparts];
+
+    SA_ASSERT(0 < nparts);
+    SA_ASSERT(cut_evects_arr);
+
+    SA_RPRINTF_L(0, 5, "theta: %g\n", theta);
+
+    int arpack_size_threshold;
+    if (interp_data.use_arpack)
+        arpack_size_threshold = ARPACK_SIZE_THRESHOLD; // Some hard-coded parameter.
+    else
+        arpack_size_threshold = std::numeric_limits<int>::max();
+    Eigensolver eigensolver(NULL, agg_part_rels, arpack_size_threshold);
+
+    // Loop over AEs.
+    for (int i=0; i < nparts; ++i)
+    {
+        if (nparts < 10 || i % (nparts / 10) == 0)
+            SA_RPRINTF_L(0, 5, "  local eigenvalue problem %d / %d\n", i, nparts);
+
+        SA_PRINTF_L(6, "%d ---------------------------------------------------"
+                    "---------------------------------------------\n", i);
+
+        SA_PRINTF_L(9, "%s", "Assembling local stiffness matrix...\n");
+        SA_ASSERT(elem_data);
+        SA_ASSERT(interp_data.AEs_stiffm);
+        SA_ASSERT(!interp_data.AEs_stiffm[i]);
+        AE_stiffm = elem_data->BuildAEStiff(i);
+        if (full_space)
+            interp_data.AEs_stiffm[i] = AE_stiffm;
+        SA_ASSERT(AE_stiffm);
+        SA_ASSERT(AE_stiffm->Width() == AE_stiffm->Height());
+        SA_ASSERT(NULL != interp_data.rhs_matrices_arr);
+        SA_ASSERT(NULL == interp_data.rhs_matrices_arr[i]);
+        interp_data.rhs_matrices_arr[i] = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
+        if (agg_part_rels.testmesh &&
+            !elem_data->IsGeometric())
+        {
+            std::stringstream filename;
+            filename << "AE_stiffm_" << i << "." << PROC_RANK << ".mat";
+            std::ofstream out(filename.str().c_str());
+            AE_stiffm->Print(out);
+        }
+
+        SA_PRINTF_L(9, "AE size (DoFs): %d\n", agg_part_rels.AE_to_dof->RowSize(i));
+
+        // Simply allocate memory for the matrix of cut vectors.
+        // This is in case the hierarchy is being built from scratch, which is the only case in this routine.
+        SA_ASSERT(!cut_evects_arr[i]);
+        cut_evects_arr[i] = new DenseMatrix;
+        SA_ASSERT(cut_evects_arr[i]);
+
+        // Solve local eigenvalue problem.
+        if (full_space)
+        {
+            int nintdofs = 0;
+            for (int j=0; j < AE_stiffm->Width(); ++j)
+            {
+                const int gj = agg_num_col_to_glob(*agg_part_rels.AE_to_dof, i, j);
+                SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+                if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                    ++nintdofs;
+            }
+            cut_evects_arr[i]->SetSize(AE_stiffm->Width(), nintdofs);
+            nintdofs = 0;
+            for (int j=0; j < AE_stiffm->Width(); ++j)
+            {
+                const int gj = agg_num_col_to_glob(*agg_part_rels.AE_to_dof, i, j);
+                SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+                if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                {
+                    SA_ASSERT(nintdofs < cut_evects_arr[i]->Width());
+                    cut_evects_arr[i]->Elem(j, nintdofs) = 1.0;
+                    ++nintdofs;
+                }
+            }
+            //cut_evects_arr[i]->Diag(1.0, AE_stiffm->Width());
+            evals[i] = NULL;
+        } else
+        {
+            rhs_matrix = NULL;
+            eigensolver.Solve(*AE_stiffm, rhs_matrix, i, -1, -1, theta, *(cut_evects_arr[i]));
+            delete rhs_matrix;
+            delete AE_stiffm;
+            evals[i] = eigensolver.StealEigenvalues();
+            SA_ASSERT(NULL != evals[i]);
+        }
+
+        // test routine for mltest, put an extra eigenvector on AE 0 [on processor 0]
+        if (agg_part_rels.testmesh && i == 0 && PROC_RANK == 0)
+        {
+            int h = cut_evects_arr[i]->Height();
+            int w = cut_evects_arr[i]->Width() + 1;
+
+            double * temp = new double[h * w];
+            memcpy(temp, cut_evects_arr[i]->Data(), h * (w-1) * sizeof(double));
+            for (int j=0; j<h; ++j)
+                temp[h * (w-1) + j] = 1.0;
+            delete cut_evects_arr[i];
+            cut_evects_arr[i] = new DenseMatrix(h,w);
+            memcpy(cut_evects_arr[i]->Data(), temp, h * w * sizeof(double));
+            delete [] temp;
+        }
+
+        if (agg_part_rels.testmesh)
+        {
+            std::stringstream filename;
+            filename << "cut_evects_arr_" << i << "." << PROC_RANK << ".densemat";
+            std::ofstream out(filename.str().c_str());
+            cut_evects_arr[i]->Print(out);
+        }
+    }
+
+    SA_PRINTF_L(6, "%s", "end ------------------------------------------------"
+                         "------------------------------------------------\n");
+
+    if (SA_IS_OUTPUT_LEVEL(5))
+        eigensolver.PrintStatistics();
+
+    return evals;
+}
+
 /**
    Idea here is to build spectral + polynomial space.
 */
@@ -763,9 +925,15 @@ HypreParMatrix *interp_global_tent_assemble(
      interp_data_t& interp_data, SparseMatrix *local_tent_interp)
 {
     int total_columns;
-    proc_determine_offsets(local_tent_interp->Width(),
-                           interp_data.tent_interp_offsets,
-                           total_columns);
+    if (interp_data.tent_interp_offsets.Size() > 0)
+        total_columns = interp_data.total_cols_interp;
+    else
+    {
+        proc_determine_offsets(local_tent_interp->Width(),
+                               interp_data.tent_interp_offsets,
+                               total_columns);
+        interp_data.total_cols_interp = total_columns;
+    }
 
     int * dof_offsets = agg_part_rels.Dof_TrueDof->RowPart();
     // may need to append the total number because Tzanio is a fool
@@ -787,6 +955,40 @@ HypreParMatrix *interp_global_tent_assemble(
     delete tent_interp_dof;
 
     return tent_interp_tdof;
+}
+
+HypreParMatrix *interp_global_restr_assemble(
+     const agg_partitioning_relations_t& agg_part_rels,
+     interp_data_t& interp_data, SparseMatrix *local_tent_restr)
+{
+    int total_rows;
+    if (interp_data.tent_interp_offsets.Size() > 0)
+        total_rows = interp_data.total_cols_interp;
+    else
+    {
+        proc_determine_offsets(local_tent_restr->Height(),
+                               interp_data.tent_interp_offsets,
+                               total_rows);
+        interp_data.total_cols_interp = total_rows;
+    }
+
+    int * dof_offsets = agg_part_rels.Dof_TrueDof->RowPart();
+    // May need to append the total number. XXX: This is a weird thing.
+
+    HypreParMatrix *tent_restr_dof = new HypreParMatrix(
+        PROC_COMM, total_rows, agg_part_rels.Dof_TrueDof->GetGlobalNumRows(),
+        (int *)(interp_data.tent_interp_offsets), dof_offsets,
+        local_tent_restr);
+
+    SA_ASSERT(tent_restr_dof->GetGlobalNumCols() ==
+              agg_part_rels.Dof_TrueDof->GetGlobalNumRows());
+
+    HypreParMatrix *tent_restr_tdof = ParMult(tent_restr_dof, agg_part_rels.Dof_TrueDof);
+    mbox_make_owner_rowstarts_colstarts(*tent_restr_tdof);
+
+    delete tent_restr_dof;
+
+    return tent_restr_tdof;
 }
 
 /**

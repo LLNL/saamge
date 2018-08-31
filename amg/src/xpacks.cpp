@@ -544,7 +544,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
                 PROC_STR_STREAM << norm << " ";
             if (SA_REAL_ALMOST_LE(norm, 0.))
             {
-                SA_PRINTF("      WARNING: zero eigenvector. arr_size = %d, minimal = %d, "
+                SA_PRINTF_L(6, "      WARNING: zero eigenvector. arr_size = %d, minimal = %d, "
                           "m = %d, n = %d, i = %d, norm = %e\n",
                           arr_size, minimal, m, n, i, norm);
                 n = n - 1;

@@ -99,17 +99,17 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
     SA_ASSERT(Ac.GetGlobalNumRows() == Ac.GetGlobalNumCols());
     SA_ASSERT(interp.GetGlobalNumRows() == A.GetGlobalNumRows());
     SA_ASSERT(restr.GetGlobalNumCols() == A.GetGlobalNumCols());
-    SA_ASSERT(interp.GetGlobalNumRows() >= interp.GetGlobalNumCols());
+    //SA_ASSERT(interp.GetGlobalNumRows() >= interp.GetGlobalNumCols());
     SA_ASSERT(interp.GetGlobalNumCols() == restr.GetGlobalNumRows());
-    SA_ASSERT(restr.GetGlobalNumRows() == Ac.GetGlobalNumRows());
+    // SA_ASSERT(restr.GetGlobalNumRows() == Ac.GetGlobalNumRows()); // Does not hold in the nonconforming case.
     // SA_ASSERT(mbox_parallel_vector_size(b) == A.GetGlobalNumRows());
     // SA_ASSERT(mbox_parallel_vector_size(x) == A.GetGlobalNumRows());
     SA_ASSERT(pre_smoother);
     SA_ASSERT(post_smoother);
     // SA_ASSERT(coarse_solver.solver);
 
-    Vector res(b.Size()), resc(mbox_rows_in_current_process(Ac));
-    Vector xc(mbox_rows_in_current_process(Ac));
+    Vector res(b.Size()), resc(mbox_rows_in_current_process(restr));
+    Vector xc(mbox_rows_in_current_process(restr));
     xc = 0.0;
 
     pre_smoother(A, b, x, data);
@@ -118,10 +118,10 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
     subtract(b, res, res);
     restr.Mult(res, resc);
 
-    HypreParVector RESC(PROC_COMM, Ac.GetGlobalNumRows(), resc.GetData(),
-                        Ac.GetRowStarts());
-    HypreParVector XC(PROC_COMM, Ac.GetGlobalNumRows(), xc.GetData(),
-                      Ac.GetRowStarts());
+    HypreParVector RESC(PROC_COMM, restr.GetGlobalNumRows(), resc.GetData(),
+                        restr.GetRowStarts());
+    HypreParVector XC(PROC_COMM, restr.GetGlobalNumRows(), xc.GetData(),
+                      restr.GetRowStarts());
 
     // could repeat this for W-cycle...
     // coarse_solver.solver(Ac, RESC, XC, coarse_solver.data);
@@ -940,6 +940,7 @@ void tg_free_data(tg_data_t *tg_data)
     interp_free_data(tg_data->interp_data, tg_data->doing_spectral,
                      tg_data->theta);
     delete tg_data->ltent_interp;
+    delete tg_data->ltent_restr;
     delete tg_data->tent_interp;
     delete tg_data->scaling_P;
     delete tg_data->interp;
@@ -962,6 +963,7 @@ tg_data_t *tg_copy_data(const tg_data_t *src)
     dst->Ac = mbox_clone_parallel_matrix(src->Ac);
 
     dst->ltent_interp = mbox_copy_sparse_matr(src->ltent_interp);
+    dst->ltent_restr = mbox_copy_sparse_matr(src->ltent_restr);
     dst->tent_interp = mbox_clone_parallel_matrix(src->tent_interp);
     dst->interp = mbox_clone_parallel_matrix(src->interp);
     dst->restr = mbox_clone_parallel_matrix(src->restr);

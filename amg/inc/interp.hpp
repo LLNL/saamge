@@ -59,10 +59,40 @@ typedef struct {
                                           for all AEs. */
     /** See \b interp_sparse_tent_build. These are the \em cut_evects used for
         building the current hierarchy. */
-    mfem::DenseMatrix **cut_evects_arr; 
+    mfem::DenseMatrix **cut_evects_arr;
     /** See \b interp_sparse_tent_build. Here the local stiffness matrices are
         saved and if necessary reused. */
     mfem::SparseMatrix **AEs_stiffm;
+
+    /** Some matrices and bases for the nonconforming method. */
+    mfem::DenseMatrix **Aii;
+    mfem::DenseMatrix **Abb;
+    mfem::DenseMatrix **Aib;
+    mfem::DenseMatrix **invAii;
+    mfem::DenseMatrix **invAiiAib;
+    mfem::DenseMatrix **AbiinvAii;
+    mfem::DenseMatrix **schurs;
+    mfem::DenseMatrix **cfaces_bases;
+    int num_cfaces;
+
+    /** Some information to map the coarse DoFs for the first refinement on a processor in the nonconforming method.
+        Particularly, celements_cdofs is the number of coarse DoFs associated with all
+        coarse (agglomerated) elements on the processor. The coarse DoFs on the processor
+        are ordered in such a way that all DoFs associated with elements come first and
+        ordered according to the elements' order and their local (within an element) ordering.
+        Then, all coarse faces' DoFs come also ordered according to the cfaces' order and
+        the local (within a face) ordering. This principle would hold for both (local) DoFs and
+        true DoFs. In fact, only cface DoFs can be shared and make sense to be seen as local and true
+        DoFs, while element DoFs are always true DoFs. In particular, true DoFs follow the ordering principle but
+        include only cfaces owned by the processor, while local DoFs include all cfaces known to the processor.
+        This is the ordering of the columns in the "prolongator" and the rows in the "restriction".
+        Here, we have the offsets of the cDoFs for every single coarse element and the offsets (starting with zero, i.e. the
+        actual offset is obtained by adding celements_cdofs) of both local and true cDoFs for the faces. If a cface is not owned,
+        its true offset is -1. */
+    int celements_cdofs;
+    int *celements_cdofs_offsets;
+    int *cfaces_truecdofs_offsets;
+    int *cfaces_cdofs_offsets;
 
     int nu_pro; /*!< Nu for the interpolant smoother. */
     int interp_smoother_degree; /*!< The degree of the polynomial of the
@@ -76,15 +106,18 @@ typedef struct {
                                          (within the process) tentative
                                          prolongator w.r.t. the global
                                          numbering across all processes. */
+    int total_cols_interp; /*!< Total number of columns in the global interpolant. */
 
     mfem::Array<double> * local_coarse_one_representation; /*! ATB building coarse_one_representation on the fly */
 
     bool use_arpack; /*! ATB whether to use ARPACK or do direct eigensolver */
     bool scaling_P; /*! ATB whether or not to do the coarse_one_representation, scaling_P business */
 
-    int * mis_numcoarsedof;
+    int * mis_numcoarsedof; /*!< How many true coarse DoFs a MIS contributed, i.e., how many columns of the interpolation matrix. */
 
-    int coarse_truedof_offset; /*!< TODO this may be the same as tent_interp_offsets... */
+    int coarse_truedof_offset; /*!< TODO this may be the same as tent_interp_offsets... (Yes, it is for the MIS method, but not for the non-conforming. DZK)
+                                    In the non-conforming method, this is the offset of the coarse faces' (true) coarse DoFs (i.e., ignoring the coarse elements' coarse DoFs)
+                                    for the current processor in the global true coarse DoF numbering, restricted to coarse faces. */
     int num_mises;
     /** tentative interpolants localized to each MIS,
         (a) a waste of memory if we also have tent_interp and
@@ -258,6 +291,19 @@ void interp_compute_vectors(
     const mfem::Vector *xbad, bool transf, bool readapting,
     bool all_eigens, bool spect_update, bool bdr_cond_imposed);
 
+/*! \brief A simple version of \a interp_compute_vectors() that does not store all matrix information.
+
+    Since it stores no local matrix information it is not suitable for adaptivity and, therefore, it provides no such
+    functionality. It serves only for building a hierarchy from scratch that will not be subject to any adaptation.
+
+    The main purpose of this function is to be used in the nonconforming hierarchies. Therefore, it fills in
+    interp_data.rhs_matrices_arr with the diagonals of the respective local (on AE) stiffness matrices.
+
+    Returns an array of the eigenvalues computed on all AEs. Must be freed by the caller.
+*/
+mfem::Vector **interp_compute_vectors_nostore(const agg_partitioning_relations_t& agg_part_rels,
+    const interp_data_t& interp_data, ElementMatrixProvider *elem_data, double theta, bool full_space=false);
+
 /**
    Build composite coarse space with both spectral and polynomial
    degrees of freedom.
@@ -356,6 +402,12 @@ mfem::SparseMatrix *interp_sparse_tent_assemble(
 mfem::HypreParMatrix *interp_global_tent_assemble(
      const agg_partitioning_relations_t& agg_part_rels,
      interp_data_t& interp_data, mfem::SparseMatrix *local_tent_interp);
+
+/*! \brief Similar to \b interp_global_tent_assemble but for the restriction.
+*/
+mfem::HypreParMatrix *interp_global_restr_assemble(
+     const agg_partitioning_relations_t& agg_part_rels,
+     interp_data_t& interp_data, mfem::SparseMatrix *local_tent_restr);
 
 /*! \brief assembles global coarse representation of ones (ie, near null space)
 

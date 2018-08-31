@@ -423,6 +423,14 @@ fem_create_partitioning_from_matrix(const mfem::SparseMatrix& A,
                                     mfem::HypreParMatrix *dof_truedof,
                                     mfem::Array<int>& isolated_cells);
 
+/*! \brief Constructs only the face relations.
+
+  This function counts on already built relation tables (like AEs) and only
+  fills in the face and coarse face relations by constructing the coarse faces.
+  It essentially obtains from MFEM the arguments on the finest level for agg_build_face_relations.
+*/
+void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, mfem::ParFiniteElementSpace& fes);
+
 /* Function Templates Definitions */
 template <class T>
 mfem::ParBilinearForm *fem_assemble_stiffness(

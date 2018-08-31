@@ -336,7 +336,8 @@ void fem_parallel_visualize_partitioning(ParMesh& mesh, int *partitioning,
         //        i, partitioning[i], offsets[0], lpartitioning[i], p(i));
     }
 
-    sol_sock << "parallel " << PROC_NUM << " " << PROC_RANK << std::endl;
+    if (PROC_NUM > 1)
+        sol_sock << "parallel " << PROC_NUM << " " << PROC_RANK << std::endl;
 
     if (2 == mesh.Dimension())
         sol_sock << "fem2d_gf_data_keys\n";
@@ -759,6 +760,57 @@ fem_create_partitioning_from_matrix(const SparseMatrix& A, int *nparts,
     
     SA_ASSERT(agg_part_rels);
     return agg_part_rels;
+}
+
+void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, ParFiniteElementSpace& fes)
+{
+    Mesh *mesh = fes.GetMesh();
+    SA_ASSERT(2 <= mesh->Dimension() && mesh->Dimension() <= 4);
+    const int num_faces = (3 <= mesh->Dimension() ? mesh->GetNFaces() : mesh->GetNEdges());
+
+    // Element to facet relation obtained from MFEM.
+    Table *elem_to_face = mbox_copy_table(3 <= mesh->Dimension() ?
+                                          &(mesh->ElementToFaceTable()) :
+                                          &(mesh->ElementToEdgeTable()));
+    SA_ASSERT(elem_to_face->Width() == num_faces);
+
+    // Facet to DoF relation required a bit more attention. It is reasonable to assume that
+    // all facets have the same number of DoFs.
+    Array<int> dofs;
+    fes.GetFaceDofs(0, dofs);
+    const int num_face_dofs = dofs.Size();
+    SA_ASSERT(num_face_dofs > 0);
+    Table *face_to_dof = new Table(num_faces, num_face_dofs);
+    for (int j=0; j < num_face_dofs; ++j)
+        SA_VERIFY(face_to_dof->Push(0, dofs[j]) >= 0);
+    for (int i=1; i < num_faces; ++i)
+    {
+        fes.GetFaceDofs(i, dofs);
+        SA_ASSERT(dofs.Size() == num_face_dofs);
+        for (int j=0; j < num_face_dofs; ++j)
+            SA_VERIFY(face_to_dof->Push(i, dofs[j]) >= 0);
+    }
+
+    // The facet to true facet relation is obtained as in ParElag.
+    // I'm not a big fan of this gymnastics with RT0 spaces, but it works.
+    // It constructs a parallel RT0 finite element space on the parallel mesh
+    // and the facet to true facet relation is DoF to true DoF in that space.
+    // Signs in the relation that represent some orientation of facets are currently unimportant.
+    ParMesh *pmesh = fes.GetParMesh();
+    RT_FECollection RT0_fec(0, pmesh->Dimension());
+    ParFiniteElementSpace RT0_fes(pmesh, &RT0_fec);
+    // XXX: This is very weird! I'm not sure if memory is well managed here.
+    signed char diagOwner = RT0_fes.Dof_TrueDof_Matrix()->OwnsDiag();
+    signed char offdOwner = RT0_fes.Dof_TrueDof_Matrix()->OwnsOffd();
+    signed char colMapOwner = RT0_fes.Dof_TrueDof_Matrix()->OwnsColMap();
+    RT0_fes.Dof_TrueDof_Matrix()->SetOwnerFlags(-1,-1,-1);
+    hypre_ParCSRMatrix *mat = RT0_fes.Dof_TrueDof_Matrix()->StealData();
+    HypreParMatrix *face_to_trueface = new HypreParMatrix(mat);
+    face_to_trueface->SetOwnerFlags(diagOwner, offdOwner, colMapOwner);
+    mbox_make_owner_rowstarts_colstarts(*face_to_trueface);
+
+    // Finally, call the aggregation routine.
+    agg_build_face_relations(agg_part_rels, elem_to_face, face_to_dof, face_to_trueface);
 }
 
 } // namespace saamge
