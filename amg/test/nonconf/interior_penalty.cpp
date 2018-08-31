@@ -29,7 +29,9 @@
 */
 
 /**
-   Nonconforming SAAMGe as an interior penalty discretization appearing as a "coarse" space.
+    Nonconforming SAAMGe as an interior penalty discretization appearing as a "coarse" space.
+    It is intended for solver setting, which means that we consider essential BCs that
+    can only be zero. By tradition, BCs are messy in this code.
 */
 
 #include <mfem.hpp>
