@@ -221,7 +221,10 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, theta, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
+    if (full_space && !schur)
+        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
+    else
+        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
 
     mfem::Solver *solver;
     mfem::Solver *fsolver;
@@ -305,11 +308,14 @@ int main(int argc, char *argv[])
 
         amg_tg_data = tg_produce_data(*tg_data->Ac, *amg_agg_part_rels, 3, 3, emp, theta, false, -1, !direct_eigensolver, true);
         tg_fillin_coarse_operator(*tg_data->Ac, amg_tg_data, false);
+        if (coarse_direct)
+            amg_tg_data->coarse_solver = new HypreDirect(*amg_tg_data->Ac);
+        else
+            amg_tg_data->coarse_solver = new AMGSolver(*amg_tg_data->Ac, false);
 
         HypreParVector xg(*tg_data->Ac);
-        HypreParVector bg(*tg_data->Ac);
-        bg = 0.0;
-        tg_run(*tg_data->Ac, agg_part_rels, xg, bg, 1000, 10e-12, 10e-24, 1., amg_tg_data, true, true);
+        xg = 0.0;
+        tg_run(*tg_data->Ac, agg_part_rels, xg, cbg, 1000, 10e-12, 10e-24, 1., amg_tg_data, true, true);
 
         delete amg_tg_data;
         delete amg_agg_part_rels;

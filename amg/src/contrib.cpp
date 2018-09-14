@@ -977,6 +977,50 @@ DenseMatrix **ContribTent::contrib_cfaces(const agg_partitioning_relations_t& ag
     return cfaces_bases;
 }
 
+DenseMatrix **ContribTent::contrib_cfaces_full(const agg_partitioning_relations_t& agg_part_rels)
+{
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
+    int num_coarse_dofs = 0;
+    for (int i=0; i < num_cfaces; ++i)
+    {
+        const int ndofs = agg_part_rels.cface_to_dof->RowSize(i);
+        int nintdofs = 0;
+        for (int j=0; j < ndofs; ++j)
+        {
+            const int gj = agg_num_col_to_glob(*agg_part_rels.cface_to_dof, i, j);
+            SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+            if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                ++nintdofs;
+        }
+        SA_ASSERT(ndofs >= nintdofs);
+        cfaces_bases[i] = new DenseMatrix(ndofs, nintdofs);
+        SA_ASSERT(cfaces_bases[i]);
+        int intdofs_ctr = 0;
+        for (int j=0; j < ndofs; ++j)
+        {
+            const int gj = agg_num_col_to_glob(*agg_part_rels.cface_to_dof, i, j);
+            SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+            if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+            {
+                SA_ASSERT(intdofs_ctr < nintdofs);
+                cfaces_bases[i]->Elem(j, intdofs_ctr) = 1.0;
+                ++intdofs_ctr;
+            }
+        }
+        SA_ASSERT(intdofs_ctr == nintdofs);
+        if (agg_part_rels.cface_master[i] == PROC_RANK)
+            num_coarse_dofs += cfaces_bases[i]->Width();
+    }
+
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs,&coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n",coarse_truedof_offset);
+
+    return cfaces_bases;
+}
+
 void ContribTent::contrib_composite(
     const agg_partitioning_relations_t& agg_part_rels,
     DenseMatrix * const *cut_evects_arr, int polynomial_order,

@@ -65,9 +65,9 @@ typedef struct {
     mfem::SparseMatrix **AEs_stiffm;
 
     /** Some matrices and bases for the nonconforming method. */
-    mfem::DenseMatrix **Aii;
-    mfem::DenseMatrix **Abb;
-    mfem::DenseMatrix **Aib;
+    mfem::Matrix **Aii;
+    mfem::Matrix **Abb;
+    mfem::Matrix **Aib;
     mfem::DenseMatrix **invAii;
     mfem::DenseMatrix **invAiiAib;
     mfem::DenseMatrix **AbiinvAii;

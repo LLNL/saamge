@@ -135,6 +135,16 @@ public:
     mfem::DenseMatrix **contrib_cfaces(const agg_partitioning_relations_t& agg_part_rels,
                                        mfem::DenseMatrix * const *cut_evects_arr, bool full_space=false);
 
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions for the "full" space.
+
+      \param agg_part_rels (IN) The partitioning relations.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_cfaces_full(const agg_partitioning_relations_t& agg_part_rels);
+
+
     /*! \brief Inserts (embeds) the bases for the nonconforming method.
 
         Sets the entries of the local "interpolation" and "restriction" matrices

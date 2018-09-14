@@ -343,6 +343,11 @@ mfem::SparseMatrix **mbox_copy_sparse_matr_arr(mfem::SparseMatrix **src, int n);
 */
 mfem::DenseMatrix **mbox_copy_dense_matr_arr(mfem::DenseMatrix **src, int n);
 
+/*!
+    Copies an array of matrices.
+*/
+mfem::Matrix **mbox_copy_matr_arr(mfem::Matrix **src, int n);
+
 /*! \brief Loads a table from a file.
 
     \a filename is a binary file with format:

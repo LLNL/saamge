@@ -344,9 +344,9 @@ interp_data_t *interp_copy_data(const interp_data_t *src)
     src->tent_interp_offsets.Copy(dst->tent_interp_offsets);
     dst->total_cols_interp = src->total_cols_interp;
 
-    dst->Aii = mbox_copy_dense_matr_arr(src->Aii, src->nparts);
-    dst->Abb = mbox_copy_dense_matr_arr(src->Abb, src->nparts);
-    dst->Aib = mbox_copy_dense_matr_arr(src->Aib, src->nparts);
+    dst->Aii = mbox_copy_matr_arr(src->Aii, src->nparts);
+    dst->Abb = mbox_copy_matr_arr(src->Abb, src->nparts);
+    dst->Aib = mbox_copy_matr_arr(src->Aib, src->nparts);
     dst->invAii = mbox_copy_dense_matr_arr(src->invAii, src->nparts);
     dst->invAiiAib = mbox_copy_dense_matr_arr(src->invAiiAib, src->nparts);
     dst->AbiinvAii = mbox_copy_dense_matr_arr(src->AbiinvAii, src->nparts);

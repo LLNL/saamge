@@ -317,6 +317,15 @@ DenseMatrix **mbox_copy_dense_matr_arr(DenseMatrix **src, int n)
     return dst;
 }
 
+Matrix **mbox_copy_matr_arr(Matrix **src, int n)
+{
+    if (!src) return NULL;
+    SA_ASSERT(n > 0);
+    if (dynamic_cast<DenseMatrix *>(src[0]))
+        return (Matrix **)mbox_copy_dense_matr_arr((DenseMatrix **)src, n);
+    return (Matrix **)mbox_copy_sparse_matr_arr((SparseMatrix **)src, n);
+}
+
 Table *mbox_read_table(const char *filename)
 {
     int size, i_size, j_size, *I, *J;
