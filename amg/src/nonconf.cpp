@@ -35,6 +35,7 @@
 #include "mbox.hpp"
 #include "aggregates.hpp"
 #include "interp.hpp"
+#include "helpers.hpp"
 
 namespace saamge
 {
@@ -959,6 +960,140 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
     delete tg_data.Ac;
     tg_data.Ac = nonconf_ip_discretization_assemble(*tg_data.interp_data, agg_part_rels,
                     *agg_part_rels.cface_cDof_TruecDof);
+}
+
+agg_partitioning_relations_t *
+nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_nonconf,
+                            const interp_data_t& interp_data_nonconf)
+{
+    const int nparts = agg_part_rels_nonconf.nparts;
+    const int num_cfaces = agg_part_rels_nonconf.num_cfaces;
+
+    agg_partitioning_relations_t *agg_part_rels =
+        new agg_partitioning_relations_t;
+    memset(agg_part_rels, 0, sizeof(*agg_part_rels));
+
+    agg_part_rels->nparts = nparts;
+    agg_part_rels->Dof_TrueDof = mbox_clone_parallel_matrix(agg_part_rels_nonconf.cface_cDof_TruecDof);
+    agg_part_rels->ND = agg_part_rels->Dof_TrueDof->GetNumRows();
+    SA_ASSERT(interp_data_nonconf.celements_cdofs
+              + interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] == agg_part_rels->ND);
+    agg_part_rels->owns_Dof_TrueDof = true;
+    agg_part_rels->partitioning = helpers_copy_int_arr(agg_part_rels_nonconf.partitioning,
+                                                       agg_part_rels_nonconf.elem_to_elem->Size());
+    agg_part_rels->elem_to_elem = mbox_copy_table(agg_part_rels_nonconf.elem_to_elem);
+    agg_part_rels->AE_to_elem = mbox_copy_table(agg_part_rels_nonconf.AE_to_elem);
+    agg_part_rels->elem_to_AE = mbox_copy_table(agg_part_rels_nonconf.elem_to_AE);
+
+    // This seems to matter only during local assembly on the finest level but
+    // we never do global assembly here and essential boundary DoFs are eliminated.
+    agg_part_rels->agg_flags = new agg_dof_status_t[agg_part_rels->ND];
+    memset(agg_part_rels->agg_flags, 0, sizeof(agg_dof_status_t) * agg_part_rels->ND);
+
+    agg_part_rels->AE_to_dof = new Table();
+    Table& AE_to_dof = *agg_part_rels->AE_to_dof;
+    AE_to_dof.MakeI(nparts);
+    for (int i=0; i < nparts; ++i)
+    {
+        SA_ASSERT(interp_data_nonconf.cut_evects_arr[i]->Width() == interp_data_nonconf.celements_cdofs_offsets[i+1]
+                                                                    - interp_data_nonconf.celements_cdofs_offsets[i]);
+        AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.cut_evects_arr[i]->Width());
+        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
+        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
+        for (int j=0; j < ncfaces; ++j)
+        {
+            const int cface = cfaces[j];
+            SA_ASSERT(0 <= cface && cface < num_cfaces);
+            SA_ASSERT(interp_data_nonconf.cfaces_bases[cface]->Width() == interp_data_nonconf.cfaces_cdofs_offsets[cface+1]
+                                                                          - interp_data_nonconf.cfaces_cdofs_offsets[cface]);
+            AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.cfaces_bases[cface]->Width());
+        }
+    }
+    AE_to_dof.MakeJ();
+
+    for (int i=0; i < nparts; ++i)
+    {
+        const int idofs = interp_data_nonconf.cut_evects_arr[i]->Width();
+        int ioffset = interp_data_nonconf.celements_cdofs_offsets[i];
+        for (int k=0; k < idofs; ++k, ++ioffset)
+            AE_to_dof.AddConnection(i, ioffset);
+        SA_ASSERT(ioffset == interp_data_nonconf.celements_cdofs_offsets[i+1]);
+        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
+        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
+        for (int j=0; j < ncfaces; ++j)
+        {
+            const int cface = cfaces[j];
+            SA_ASSERT(0 <= cface && cface < num_cfaces);
+            const int fdofs = interp_data_nonconf.cfaces_bases[cface]->Width();
+            int foffset = interp_data_nonconf.celements_cdofs + interp_data_nonconf.cfaces_cdofs_offsets[cface];
+            for (int k=0; k < fdofs; ++k, ++foffset)
+                AE_to_dof.AddConnection(i, foffset);
+            SA_ASSERT(foffset == interp_data_nonconf.celements_cdofs + interp_data_nonconf.cfaces_cdofs_offsets[cface+1]);
+        }
+    }
+    AE_to_dof.ShiftUpI();
+    AE_to_dof.Finalize(); //This shouldn't do anything. Here for consistency, if implementation ever changes.
+
+    agg_part_rels->dof_to_AE = new Table();
+    Transpose(AE_to_dof, *agg_part_rels->dof_to_AE, agg_part_rels->ND);
+
+    agg_build_glob_to_AE_id_map(*agg_part_rels);
+    HypreParMatrix nil;
+    agg_produce_mises(nil, *agg_part_rels, NULL, false);
+
+    return agg_part_rels;
+}
+
+ElementIPMatrix::ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
+                                 const interp_data_t& interp_data_nonconf) :
+    ElementMatrixProvider(agg_part_rels),
+    interp_data_nonconf(interp_data_nonconf)
+{
+    is_geometric = false;
+    SA_ASSERT(interp_data_nonconf.Aii);
+    SA_ASSERT(interp_data_nonconf.Abb);
+    SA_ASSERT(interp_data_nonconf.Aib);
+}
+
+Matrix *ElementIPMatrix::GetMatrix(int elno, bool& free_matr) const
+{
+    SA_ASSERT(false); // Makes no sense, since effectively there is no element matrices,
+                      // but only AE matrices.
+    free_matr = true;
+    return new DenseMatrix;
+}
+
+SparseMatrix *ElementIPMatrix::BuildAEStiff(int elno) const
+{
+    SA_ASSERT(0 <= elno && elno < interp_data_nonconf.nparts);
+    SparseMatrix *Aii = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aii[elno]);
+    SparseMatrix *Abb = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Abb[elno]);
+    SparseMatrix *Aib = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aib[elno]);
+    SA_ASSERT(Aii);
+    SA_ASSERT(Abb);
+    SA_ASSERT(Aib);
+    SA_ASSERT(Aii->Width() == Aii->Height());
+    SA_ASSERT(Aii->Width() == Aib->Height());
+    SA_ASSERT(Abb->Width() == Abb->Height());
+    SA_ASSERT(Aib->Width() == Abb->Height());
+    SparseMatrix *Abi = Transpose(*Aib);
+
+    Array<int> blocks(3);
+    blocks[0] = 0;
+    blocks[1] = Aii->Height();
+    blocks[2] = Aii->Height() + Abb->Height();
+    BlockMatrix AEmat(blocks);
+    AEmat.SetBlock(0, 0, Aii);
+    AEmat.SetBlock(0, 1, Aib);
+    AEmat.SetBlock(1, 0, Abi);
+    AEmat.SetBlock(1, 1, Abb);
+
+    SparseMatrix *ret = AEmat.CreateMonolithic();
+    SA_ASSERT(ret->Height() == ret->Width());
+    SA_ASSERT(ret->Height() == Aii->Height() + Abb->Height());
+
+    delete Abi;
+    return ret;
 }
 
 } // namespace saamge

@@ -105,6 +105,30 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
 void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
                                ElementMatrixProvider *elem_data, double delta);
 
+/*! Once the fine interior penalty discretization is obtained, this routine provides the partitioning
+    relations for calling SAAMGe on the interior penalty matrix where the AEs on the first level are the same AEs as
+    the interior penalty ones.
+
+    The returned structure must be freed by the caller.
+*/
+agg_partitioning_relations_t *
+nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_nonconf,
+                            const interp_data_t& interp_data_nonconf);
+
+/**
+   Returns agglomerated matrices for the interior penalty formulation.
+*/
+class ElementIPMatrix : public ElementMatrixProvider
+{
+public:
+    ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
+                    const interp_data_t& interp_data_nonconf);
+    virtual mfem::Matrix *GetMatrix(int elno, bool& free_matr) const;
+    virtual mfem::SparseMatrix *BuildAEStiff(int elno) const;
+private:
+    const interp_data_t& interp_data_nonconf;
+};
+
 } // namespace saamge
 
 #endif // _NONCONF_HPP

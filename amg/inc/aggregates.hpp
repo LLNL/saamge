@@ -250,6 +250,25 @@ void agg_construct_aggregates(const mfem::SparseMatrix& A,
                               agg_partitioning_relations_t& agg_part_rels,
                               const agg_dof_status_t *bdr_dofs);
 
+/**
+   This is some kind of mix of agg_construct_aggregates()
+   and agg_produce_mises_refaggs() from serial SAAMGE.
+   This is how we replaced aggregates with minimal intersection sets.
+   Added ATB 30 March 2015
+
+   For usual MIS algorithm, we don't use bdr_dofs at all
+   For MIS-aggregate thing on coarsest level, we might want it
+   bdr_dofs is not really the right name, it contains flags
+   for whether DOF crosses processors, which we might use
+   in aggregate arbitration.
+
+   do_aggregates says whether to do aggregates or usual MISes
+*/
+void agg_produce_mises(mfem::HypreParMatrix& Aglobal,
+                       agg_partitioning_relations_t& agg_part_rels,
+                       const agg_dof_status_t *bdr_dofs,
+                       bool do_aggregates);
+
 /*! \brief Assembles the local stiffness matrix for an AE on the finest mesh.
 
     Uses entries in the global stiffness matrix for better performance. Also,

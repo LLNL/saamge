@@ -1088,21 +1088,6 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     return out;
 }
 
-
-/**
-   This is some kind of mix of agg_construct_aggregates()
-   and agg_produce_mises_refaggs() from serial SAAMGE.
-   This is how we replaced aggregates with minimal intersection sets.
-   Added ATB 30 March 2015
-
-   For usual MIS algorithm, we don't use bdr_dofs at all
-   For MIS-aggregate thing on coarsest level, we might want it
-   bdr_dofs is not really the right name, it contains flags
-   for whether DOF crosses processors, which we might use
-   in aggregate arbitration.
-
-   do_aggregates says whether to do aggregates or usual MISes
-*/
 void agg_produce_mises(HypreParMatrix& Aglobal,
                        agg_partitioning_relations_t& agg_part_rels,
                        const agg_dof_status_t *bdr_dofs,
@@ -2143,7 +2128,7 @@ HypreParMatrix *agg_build_cface_cDof_TruecDof(const agg_partitioning_relations_t
 
     // Figure out coarse DoFs, communicate the offsets and counts.
     // Only coarse DoFs associated with coarse faces can be shared and coarse DoFs associated
-    // with coarse elements always belong to the respective CPU. That is, even though course
+    // with coarse elements always belong to the respective CPU. That is, even though coarse
     // DoFs in coarse elements can be supported on shared fine DoFs, the respective coarse DoFs
     // make no sense to be shared.
     int *truedof_offsets = new int[num_cfaces];
