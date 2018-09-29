@@ -28,7 +28,7 @@
 
 #!/bin/bash
 
-SAAMGE_BASE_DIR=${HOME}/opus/projs/saamge/amg
+SAAMGE_BASE_DIR=${HOME}/opus/ing/LLNL/projs/saamge/amg
 SAAMGE_BUILD_DIR=${SAAMGE_BASE_DIR}/build
 SAAMGE_INSTALL_DIR=${SAAMGE_BASE_DIR}/install
 
@@ -44,10 +44,10 @@ rm -rf CMakeFiles
 cmake \
     -DCMAKE_BUILD_TYPE=DEBUG \
     \
-    -DMETIS_DIR=${HOME}/opus/projs/lib/metis-5.1.0/final \
-    -DHYPRE_DIR=${HOME}/opus/projs/lib/hypre-2.11.2/src/hypre \
-    -DMFEM_DIR=${HOME}/opus/projs/lib/mfem-3.3.2 \
-    -DSuiteSparse_DIR=${HOME}/opus/projs/lib/SuiteSparse \
+    -DMETIS_DIR=$SAAMGE_BASE_DIR/../../lib/metis-5.1.0/final \
+    -DHYPRE_DIR=$SAAMGE_BASE_DIR/../../lib/hypre-2.11.2/src/hypre \
+    -DMFEM_DIR=$SAAMGE_BASE_DIR/../../lib/mfem-3.3.2 \
+    -DSuiteSparse_DIR=$SAAMGE_BASE_DIR/../../lib/SuiteSparse \
     \
     -DUSE_ARPACK=OFF \
     -DARPACK_DIR=${HOME}/arpack/arpack-ng-install \
