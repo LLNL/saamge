@@ -28,7 +28,7 @@
 
 #!/bin/bash
 
-SAAMGE_BASE_DIR=${HOME}/opus/ing/LLNL/projs/saamge/amg
+SAAMGE_BASE_DIR=${HOME}/opus/projs/saamge/amg
 SAAMGE_BUILD_DIR=${SAAMGE_BASE_DIR}/build
 SAAMGE_INSTALL_DIR=${SAAMGE_BASE_DIR}/install
 
