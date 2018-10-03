@@ -1821,6 +1821,8 @@ void agg_build_face_relations(agg_partitioning_relations_t *agg_part_rels, Table
     delete TrueDof_Dof;
     delete Dof_TrueDof_Dof;
     delete Dof_to_gcface;
+
+    SA_RPRINTF(0, "cfaces: %d\n", agg_part_rels->num_cfaces);
 }
 
 Table * agg_create_finedof_to_dof(agg_partitioning_relations_t& agg_part_rels,

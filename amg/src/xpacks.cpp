@@ -523,6 +523,8 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
     if (SA_IS_OUTPUT_LEVEL(9))
     {
         SA_PRINTF("array size: %d\n", arr_size);
+        SA_PRINTF("total vectors: %d\n", n);
+        SA_PRINTF("dimension: %d\n", m);
         SA_PRINTF("number of singulars: %d\n", minimal);
     }
 

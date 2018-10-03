@@ -157,7 +157,7 @@ int main(int argc, char *argv[])
     // Parallel mesh and finite elements stuff.
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
     ess_bdr = 0;
-    ess_bdr[3] = 1; // marked as 4 in mltest.mesh, but MFEM subtracts 1
+    ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
     int *proc_partitioning;
@@ -213,11 +213,6 @@ int main(int argc, char *argv[])
 
     ElementMatrixStandardGeometric *emp = new ElementMatrixStandardGeometric(*agg_part_rels, Al, a);
 
-//    const bool avoid_ess_bdr_dofs = true;
-//    tg_data = tg_produce_data(*Ag, *agg_part_rels, 3, 3, emp, theta, false, -1,
-//                              !direct_eigensolver, avoid_ess_bdr_dofs);
-//    tg_fillin_coarse_operator(*Ag, tg_data, false);
-
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, theta, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
@@ -255,6 +250,7 @@ int main(int argc, char *argv[])
     HypreParVector *hx1g = x1.ParallelAverage();
     HypreParVector cbg(*tg_data->interp);
     HypreParVector cx(*tg_data->interp);
+    cx = 0.0;
     tg_data->restr->Mult(*bg, cbg);
     tg_data->coarse_solver->Mult(cbg, cx);
     tg_data->interp->Mult(cx, *hx1g);

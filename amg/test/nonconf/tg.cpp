@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
     // Parallel mesh and finite elements stuff.
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
     ess_bdr = 0;
-    ess_bdr[3] = 1; // marked as 4 in mltest.mesh, but MFEM subtracts 1
+    ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
     int *proc_partitioning;
