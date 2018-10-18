@@ -32,6 +32,8 @@
     Nonconforming SAAMGe as an interior penalty discretization appearing as a "coarse" space.
     It is intended for solver setting, which means that we consider essential BCs that
     can only be zero. By tradition, BCs are messy in this code.
+
+    The idea is to use the usual SAAMGe for the interior penalty problem.
 */
 
 #include <mfem.hpp>
@@ -84,8 +86,8 @@ int main(int argc, char *argv[])
     ParGridFunction x, x1;
     ParLinearForm *b;
     ParBilinearForm *a;
-    agg_partitioning_relations_t *agg_part_rels;
-    tg_data_t *tg_data;
+    agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge;
+    tg_data_t *tg_data, *tg_data_saamge=NULL;
 
     OptionsParser args(argc, argv);
 
@@ -105,17 +107,12 @@ int main(int argc, char *argv[])
     int order = 1;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
-    double theta = 0.1;
+    double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems.");
-    bool full_space = true;
-    args.AddOption(&full_space, "-f", "--full-space",
-                   "-nf", "--no-full-space",
-                   "Build the full space instead of using eigensolvers.");
-    bool schur = false;
-    args.AddOption(&schur, "-s", "--schur",
-                   "-ns", "--no-schur",
-                   "Whether to use the Schur complement on the IP problem.");
+    int nu_relax = 4;
+    args.AddOption(&nu_relax, "-n", "--nu-relax",
+                   "Degree for smoother in the relaxation.");
     double delta = 1e-6;
     args.AddOption(&delta, "-d", "--delta",
                    "The reciprocal of the interface term weight.");
@@ -130,10 +127,10 @@ int main(int argc, char *argv[])
     args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
                    "-nq", "--no-direct-eigensolver",
                    "Use direct eigensolver from LAPACK or ARPACK.");
-    bool saamge = false;
-    args.AddOption(&saamge, "-a", "--saamge",
-                   "-na", "--no-saamge",
-                   "Test SAAMGe on the IP problem.");
+    bool zero_rhs = false;
+    args.AddOption(&zero_rhs, "-z", "--zero-rhs",
+                   "-nz", "--no-zero-rhs",
+                   "Solve CG with zero RHS and random initial guess.");
 
     args.Parse();
     if (!args.Good())
@@ -157,7 +154,7 @@ int main(int argc, char *argv[])
     // Parallel mesh and finite elements stuff.
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
     ess_bdr = 0;
-    ess_bdr[3] = 1; // marked as 4 in mltest.mesh, but MFEM subtracts 1
+    ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
     int *proc_partitioning;
@@ -213,50 +210,62 @@ int main(int argc, char *argv[])
 
     ElementMatrixStandardGeometric *emp = new ElementMatrixStandardGeometric(*agg_part_rels, Al, a);
 
-//    const bool avoid_ess_bdr_dofs = true;
-//    tg_data = tg_produce_data(*Ag, *agg_part_rels, 3, 3, emp, theta, false, -1,
-//                              !direct_eigensolver, avoid_ess_bdr_dofs);
-//    tg_fillin_coarse_operator(*Ag, tg_data, false);
-
-    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, theta, false, 0.0, !direct_eigensolver);
+    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, 1.0, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    if (full_space && !schur)
-        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
-    else
-        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
+    nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
+    tg_print_data(*Ag, tg_data);
+
+    agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
+    ElementIPMatrix *emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
+    tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta, false, -1,
+                                     !direct_eigensolver, false);
+    tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
 
     mfem::Solver *solver;
     mfem::Solver *fsolver;
     if (coarse_direct)
     {
-        solver = new HypreDirect(*tg_data->Ac);
+        solver = new HypreDirect(*tg_data_saamge->Ac);
         fsolver = new HypreDirect(*Ag);
     } else
     {
-        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+        solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1000);
         fsolver = new AMGSolver(*Ag, false);
     }
-    if (schur)
-        tg_data->coarse_solver = new SchurSolver(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
-                                                 *agg_part_rels->cface_TruecDof_cDof, *solver);
+    tg_data_saamge->coarse_solver = solver;
+
+    tg_print_data(*tg_data->Ac, tg_data_saamge);
+
+    if (zero_rhs)
+    {
+        x = 0.0;
+        SA_RPRINTF(0, "%s", "\n");
+        SA_RPRINTF(0, "%s", "\t\t\tRUNNING STATIONARY ITERATION WITH RANDOM INITIAL GUESS AND ZERO R.H.S:\n");
+        SA_RPRINTF(0, "%s", "\n");
+    }
     else
-        tg_data->coarse_solver = solver;
+    {
+        // Obtain the usual solution.
+        fsolver->Mult(*bg, *hxg);
+        x = *hxg;
+        if (visualize)
+            fem_parallel_visualize_gf(pmesh, x);
 
-    tg_print_data(*Ag, tg_data);
-
-    // Obtain the usual solution.
-    fsolver->Mult(*bg, *hxg);
-    x = *hxg;
-    if (visualize)
-        fem_parallel_visualize_gf(pmesh, x);
+        SA_RPRINTF(0, "%s", "\n");
+        SA_RPRINTF(0, "%s", "\t\t\tSOLVING THE PROBLEM USING STATIONARY ITERATION:\n");
+        SA_RPRINTF(0, "%s", "\n");
+    }
 
     // Obtain IP solution.
     HypreParVector *hx1g = x1.ParallelAverage();
     HypreParVector cbg(*tg_data->interp);
     HypreParVector cx(*tg_data->interp);
+    cx = 0.0;
     tg_data->restr->Mult(*bg, cbg);
-    tg_data->coarse_solver->Mult(cbg, cx);
+
+    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, cbg, 1000, 10e-12, 10e-24, 1., tg_data_saamge, zero_rhs, true);
+
     tg_data->interp->Mult(cx, *hx1g);
     x1 = *hx1g;
     if (visualize)
@@ -266,67 +275,24 @@ int main(int argc, char *argv[])
     GridFunctionCoefficient xgf(&x);
     const double l2err = x1.ComputeL2Error(xgf);
     const double maxerr = x1.ComputeMaxError(xgf);
-    x -= x1;
-    if (visualize)
-        fem_parallel_visualize_gf(pmesh, x);
+    if (zero_rhs)
+        x = x1;
+    else
+    {
+        x -= x1;
+        if (visualize)
+            fem_parallel_visualize_gf(pmesh, x);
+    }
     HypreParVector *gx = x.ParallelProject();
     const double energyerr = mbox_energy_norm_parallel(*Ag, *gx);
     SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
 
-//    for (int i=0; i < tg_data->interp_data->num_cfaces; ++i)
-//        SA_PRINTF("cface %d: %dx%d\n", i, tg_data->interp_data->cfaces_bases[i]->Height(), tg_data->interp_data->cfaces_bases[i]->Width());
-//    for (int i=0; i < tg_data->interp_data->nparts; ++i)
-//        SA_PRINTF("celem %d: %dx%d\n", i, tg_data->interp_data->cut_evects_arr[i]->Height(), tg_data->interp_data->cut_evects_arr[i]->Width());
-
-    if (saamge && schur)
-    {
-        agg_partitioning_relations_t *amg_agg_part_rels;
-        tg_data_t *amg_tg_data;
-
-        Table cface_to_AE;
-        Transpose(*agg_part_rels->AE_to_cface, cface_to_AE, agg_part_rels->num_cfaces);
-        Table *elem_to_elem = Mult(*agg_part_rels->AE_to_cface, cface_to_AE);
-
-        Table cface_to_cdof;
-        int *cface_cdofs_J = new int[tg_data->interp_data->cfaces_cdofs_offsets[agg_part_rels->num_cfaces]];
-        for (int i=0; i < tg_data->interp_data->cfaces_cdofs_offsets[agg_part_rels->num_cfaces]; ++i)
-            cface_cdofs_J[i] = i;
-        cface_to_cdof.SetIJ(tg_data->interp_data->cfaces_cdofs_offsets, cface_cdofs_J, agg_part_rels->num_cfaces);
-        Table *elem_to_dof = Mult(*agg_part_rels->AE_to_cface, cface_to_cdof);
-        cface_to_cdof.LoseData();
-        delete [] cface_cdofs_J;
-
-        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[tg_data->interp_data->cfaces_cdofs_offsets[agg_part_rels->num_cfaces]]();
-        nparts = (int)(nparts/10);
-        amg_agg_part_rels = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof, elem_to_elem, NULL, bdr_dofs, &nparts, agg_part_rels->cface_cDof_TruecDof, false);
-        delete [] bdr_dofs;
-
-        Array<DenseMatrix*> elmats(agg_part_rels->nparts);
-        for (int i=0; i < agg_part_rels->nparts; ++i)
-            elmats[i] = tg_data->interp_data->schurs[i];
-        ElementMatrixDenseArray *emp = new ElementMatrixDenseArray(*amg_agg_part_rels, elmats);
-
-        amg_tg_data = tg_produce_data(*tg_data->Ac, *amg_agg_part_rels, 3, 3, emp, theta, false, -1, !direct_eigensolver, true);
-        tg_fillin_coarse_operator(*tg_data->Ac, amg_tg_data, false);
-        if (coarse_direct)
-            amg_tg_data->coarse_solver = new HypreDirect(*amg_tg_data->Ac);
-        else
-            amg_tg_data->coarse_solver = new AMGSolver(*amg_tg_data->Ac, false);
-
-        HypreParVector xg(*tg_data->Ac);
-        xg = 0.0;
-        tg_run(*tg_data->Ac, agg_part_rels, xg, cbg, 1000, 10e-12, 10e-24, 1., amg_tg_data, true, true);
-
-        delete amg_tg_data;
-        delete amg_agg_part_rels;
-    }
-
     delete gx;
     tg_free_data(tg_data);
-    if (schur)
-        delete solver;
+    tg_free_data(tg_data_saamge);
     delete fsolver;
     agg_free_partitioning(agg_part_rels);
+    agg_free_partitioning(agg_part_rels_saamge);
     delete hx1g;
     delete hxg;
     delete bg;
