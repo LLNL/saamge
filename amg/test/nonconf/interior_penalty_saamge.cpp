@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
     cx = 0.0;
     tg_data->restr->Mult(*bg, cbg);
 
-    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, cbg, 1000, 10e-12, 10e-24, 1., tg_data_saamge, zero_rhs, true);
+    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, cbg, 1000, 1e-12, 1e-24, 1., tg_data_saamge, zero_rhs, true);
 
     tg_data->interp->Mult(cx, *hx1g);
     x1 = *hx1g;

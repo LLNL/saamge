@@ -696,7 +696,7 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
             SA_ASSERT(cface_basis_size == ctr);
             cface_offset += cface_basis_size;
         }
-
+        SA_ASSERT(cface_offset == bdr_size);
         delete D;
         interp_data.Aii[i] = interp_data.AEs_stiffm[i];
         interp_data.AEs_stiffm[i] = NULL;

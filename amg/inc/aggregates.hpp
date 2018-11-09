@@ -161,7 +161,7 @@ typedef struct {
     mfem::HypreParMatrix *cface_to_truecface; /*!< Connects local coarse faces to true global coarse faces. */
     mfem::HypreParMatrix *cface_cDof_TruecDof; /*!< Coarse DoF to coarse true DoF but restricted only to coarse faces. */
     mfem::HypreParMatrix *cface_TruecDof_cDof; /*!< Thee transposed of cface_cDof_TruecDof. */
-    int *dof_num_gcfaces; /*!< An array that contains the number of global (across all CPUs) number of coarse faces that contain a DoF. */
+    int *dof_num_gcfaces; /*!< An array that contains the number of global (across all CPUs) coarse faces that contain a DoF. */
 
     mfem::Table *AE_to_dof; /*!< The relation table that relates AEs to DoFs. */
     mfem::Table *dof_to_AE; /*!< The relation table that relates DoFs to AEs. */
@@ -170,7 +170,7 @@ typedef struct {
                            XXX: This array alone does not provide enough
                                 information. It is combined with \b dof_to_AE
                                 to get the final result. */
-    int *dof_num_gAEs; /*!< An array that contains the number of global (across all CPUs) number of AEs that contain a DoF. */
+    int *dof_num_gAEs; /*!< An array that contains the number of global (across all CPUs) AEs that contain a DoF. */
 
 
     // TODO TODO TODO

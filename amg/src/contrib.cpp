@@ -330,7 +330,7 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
             nloc_cbasis += cfaces_bases[i]->Width();
     delete tent_interp_;
     tent_interp_ = new SparseMatrix(rows, nloc_cbasis);
-    SA_ASSERT(NULL == tent_restr_);
+    delete tent_restr_;
     tent_restr_ = new SparseMatrix(nloc_cbasis, rows);
 
     celements_cdofs = 0;
