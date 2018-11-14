@@ -986,7 +986,7 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
     agg_part_rels->elem_to_AE = mbox_copy_table(agg_part_rels_nonconf.elem_to_AE);
 
     // This seems to matter only during local assembly on the finest level but
-    // we never do global assembly here and essential boundary DoFs are eliminated.
+    // we never do assembly here and essential boundary DoFs are eliminated.
     agg_part_rels->agg_flags = new agg_dof_status_t[agg_part_rels->ND];
     memset(agg_part_rels->agg_flags, 0, sizeof(agg_dof_status_t) * agg_part_rels->ND);
 

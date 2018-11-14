@@ -390,6 +390,7 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
                 const int ldof = restriction[dof];
                 SA_ASSERT(agg_part_rels.dof_to_cface->RowSize(ldof) > 0);
                 SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] > 1);
+                SA_ASSERT(agg_part_rels.dof_num_gcfaces[ldof] > 0);
                 const double scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
                 for (int base=0; base < interface_basis->Width(); ++base)
                 {

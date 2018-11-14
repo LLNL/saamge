@@ -497,11 +497,14 @@ int agg_construct_aggregate_mises(
    but we construct several other things (maybe we don't need all of them, could think about saving memory)
 
    Returns local number of mises
+
+   XXX: This costs O(n^2) operations, where n is the number of DoFs known to the processor. This is not good.
 */
 int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
                               HypreParMatrix * Dof_to_gAE)
 {
-    int num_local_ldofs = Dof_to_gAE->GetNumRows();
+    const int num_local_ldofs = Dof_to_gAE->GetNumRows();
+    SA_ASSERT(num_local_ldofs == agg_part_rels.ND);
 
     hypre_ParCSRMatrix * hDof_to_gAE = *Dof_to_gAE;
     hypre_CSRMatrix * diag = hypre_ParCSRMatrixDiag(hDof_to_gAE);
@@ -526,7 +529,11 @@ int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
 
     int * rowsums = new int[num_local_ldofs];
     for (int i=0; i<num_local_ldofs; ++i)
+    {
         rowsums[i] = floor(rowsum_vector(i) + 0.5);
+        SA_ASSERT(Dof_to_gAE_diag_I[i+1] - Dof_to_gAE_diag_I[i] +
+                  Dof_to_gAE_offd_I[i+1] - Dof_to_gAE_offd_I[i] == rowsums[i]);
+    }
 
     // only use sec here to determine ownership of dofs
     SharedEntityCommunication<DenseMatrix> * sec; // maybe non-pointer is safer and better
@@ -541,7 +548,7 @@ int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
     for (int i=0; i<num_local_ldofs; ++i)
     {
         // distributed is only set if we did distribution on this processor
-        if (distributed[i]) 
+        if (distributed[i])
             continue;
 
         // reset count; this may be necessary if we continue at (a), but not sure it is necessary
@@ -570,6 +577,7 @@ int agg_construct_mises_local(agg_partitioning_relations_t& agg_part_rels,
                         count[k]++;
             }
         }
+        SA_ASSERT(rowsums[i] == count[i]);
 
         Array<int>* newrow = new Array<int>;
         bool false_mis = false;
@@ -994,7 +1002,7 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
     {
         agg_part_rels.dof_num_gAEs[i] = Dof_to_gAE_diag_I[i+1] - Dof_to_gAE_diag_I[i] +
                                         Dof_to_gAE_offd_I[i+1] - Dof_to_gAE_offd_I[i];
-        SA_ASSERT(agg_part_rels.dof_num_gAEs[i] >= 0);
+        SA_ASSERT(agg_part_rels.dof_num_gAEs[i] > 0);
     }
 
     // construct local agg_part_rels.mis_to_dof, truemis_to_dof, other stuff; 
