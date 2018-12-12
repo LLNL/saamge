@@ -119,7 +119,7 @@ void xpacks_calc_all_gen_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector
 */
 int xpacks_calc_lower_eigens_dense(const mfem::DenseMatrix& Ain, mfem::Vector& evals,
                                    mfem::DenseMatrix& evects, const mfem::DenseMatrix& Bin,
-                                   double upper, bool atleast_one/*=1*/);
+                                   double upper, bool atleast_one/*=1*/, int fixed_num=-1);
 
 /*! \brief Computes the upper eigenvalues and eigenvectors of dense matrices.
 

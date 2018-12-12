@@ -824,6 +824,12 @@ void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
             }
             int filled_cols_l = filled_cols;
 
+//            if (agg_part_rels.mis_to_AE->RowSize(mis) > 1)
+//            {
+//                mis_tent_interps[mis]->Diag(1.0, dim);
+//                SA_PRINTF("FULL DIM: %d\n", dim);
+//            }
+
             contrib_tent_insert_simple(agg_part_rels,
                                        *mis_tent_interps[mis], 
                                        agg_part_rels.mis_to_dof->GetRow(mis));

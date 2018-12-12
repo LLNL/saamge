@@ -221,17 +221,19 @@ void xpacks_calc_all_gen_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
 int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
                                    DenseMatrix& evects, const DenseMatrix& Bin,
-                                   double upper, bool atleast_one)
+                                   double upper, bool atleast_one, int fixed_num)
 {
     int itype = 1;
     char jobz = 'V';
-    char range = 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with ints il, iu for which eigenvectors to take
+    char range = fixed_num > 0 ? 'I' : 'V'; // could use 'I' here to get a fixed number of eigenvalues, replace NULL, NULL with ints il, iu for which eigenvectors to take
     char uplo = 'U';
     int n = Ain.Height();
     int lda = n;
     int ldb = n;
     double vl = -1.;
     double vu = upper;
+    int il = 1;
+    int iu = fixed_num;
     char cmach = 'S';
     double abstol = 2. * dlamch_(&cmach);
     int m;
@@ -257,14 +259,14 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
     lwork = -1;
     double qwork;
-    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
-            NULL, &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
+    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, &il,
+            &iu, &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
     lwork = (int)qwork + 1;
     double *work = new double[lwork];
 
-    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, NULL,
-            NULL, &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
+    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, &il,
+            &iu, &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
 
     if (atleast_one && 0 >= m)

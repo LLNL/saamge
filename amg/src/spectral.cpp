@@ -95,7 +95,7 @@ void Eigensolver::PrintStatistics()
 bool Eigensolver::Solve(
     const mfem::SparseMatrix& A, mfem::SparseMatrix *& B, 
     int part, int agg_id, int aggregate_size, double& theta,
-    mfem::DenseMatrix& cut_evects)
+    mfem::DenseMatrix& cut_evects, int fixed_num)
 {
     int problem_size = A.Width();
     count_solves++;
@@ -104,7 +104,7 @@ bool Eigensolver::Solve(
         count_direct_solves++;
         return SolveDirect(A, B, part, agg_id, aggregate_size,
                            theta, cut_evects, 
-                           NULL, transf, all_eigens);
+                           NULL, transf, all_eigens, fixed_num);
     }
     else
     {
@@ -116,7 +116,7 @@ bool Eigensolver::Solve(
         count_direct_solves++;
         return SolveDirect(A, B, part, agg_id, aggregate_size,
                            theta, cut_evects, 
-                           NULL, transf, all_eigens);
+                           NULL, transf, all_eigens, fixed_num);
 #endif
     }
 }
@@ -132,7 +132,7 @@ bool Eigensolver::SolveDirect(
     mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
     double& theta, mfem::DenseMatrix& cut_evects,
     const mfem::DenseMatrix *Tt,
-    bool transf, bool all_eigens)
+    bool transf, bool all_eigens, int fixed_num)
 {
     DenseMatrix *cut_ptr, cut_helper;
     DenseMatrix deA, deB;
@@ -202,7 +202,7 @@ bool Eigensolver::SolveDirect(
         // Solve the local eigenvalue problem computing the necessary
         // eigenvalues and eigenvectors
         xpacks_calc_lower_eigens_dense(deA, evals, *cut_ptr, deB, theta * lmax,
-                                       true);
+                                       true, fixed_num);
     }
     if (SA_IS_OUTPUT_LEVEL(9))
     {
