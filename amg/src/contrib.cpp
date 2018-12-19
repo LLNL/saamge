@@ -365,8 +365,12 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
             }
             for (int base=0; base < interior_basis->Width(); ++base)
             {
-                tent_interp_->Set(ldof, filled_cols + base, scale * (*interior_basis)(dof, base));
-                tent_restr_->Set(filled_cols + base, ldof, (*interior_basis)(dof, base));
+                const double a = (*interior_basis)(dof, base);
+                if (a != 0.0)
+                {
+                    tent_interp_->Set(ldof, filled_cols + base, scale * a);
+//                    tent_restr_->Set(filled_cols + base, ldof, a);
+                }
             }
         }
         filled_cols += interior_basis->Width();
@@ -394,8 +398,12 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
                 const double scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
                 for (int base=0; base < interface_basis->Width(); ++base)
                 {
-                    tent_interp_->Set(ldof, filled_cols + base, scale * (*interface_basis)(dof, base));
-                    tent_restr_->Set(filled_cols + base, ldof, (*interface_basis)(dof, base));
+                    const double a = (*interface_basis)(dof, base);
+                    if (a != 0.0)
+                    {
+                        tent_interp_->Set(ldof, filled_cols + base, scale * a);
+//                        tent_restr_->Set(filled_cols + base, ldof, a);
+                    }
                 }
             }
             filled_cols += interface_basis->Width();

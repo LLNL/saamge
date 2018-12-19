@@ -233,7 +233,7 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
     double vl = -1.;
     double vu = upper;
     int il = 1;
-    int iu = fixed_num;
+    int iu = fixed_num < n ? fixed_num : n;
     char cmach = 'S';
     double abstol = 2. * dlamch_(&cmach);
     int m;
@@ -259,14 +259,14 @@ int xpacks_calc_lower_eigens_dense(const DenseMatrix& Ain, Vector& evals,
 
     lwork = -1;
     double qwork;
-    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, &il,
-            &iu, &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
+    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, (fixed_num > 0 ? NULL : &vl), (fixed_num > 0 ? NULL : &vu), (fixed_num > 0 ? &il : NULL),
+            (fixed_num > 0 ? &iu : NULL), &abstol, &m, w, z, &ldz, &qwork, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
     lwork = (int)qwork + 1;
     double *work = new double[lwork];
 
-    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, &vl, &vu, &il,
-            &iu, &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
+    dsygvx_(&itype, &jobz, &range, &uplo, &n, A, &lda, B, &ldb, (fixed_num > 0 ? NULL : &vl), (fixed_num > 0 ? NULL : &vu), (fixed_num > 0 ? &il : NULL),
+            (fixed_num > 0 ? &iu : NULL), &abstol, &m, w, z, &ldz, work, &lwork, iwork, ifail, &info);
     SA_ASSERT(!info);
 
     if (atleast_one && 0 >= m)

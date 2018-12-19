@@ -261,6 +261,36 @@ int main(int argc, char *argv[])
     HypreParVector *hx1g = x1.ParallelAverage();
     HypreParVector cbg(*tg_data->interp);
     HypreParVector cx(*tg_data->interp);
+
+//    *(tg_data->interp) = 1.0;
+//    SparseMatrix *restr = Transpose(*(tg_data_saamge->ltent_interp));
+//    for (int i=0; i < restr->Height(); ++i)
+//    {
+//        cx = 0.0;
+//        for (int j=0; j < restr->RowSize(i); ++j)
+//            cx(restr->GetRowColumns(i)[j]) = 1.0;
+//        tg_data->interp->Mult(cx, *hx1g);
+//        x = *hx1g;
+//        fem_parallel_visualize_gf(pmesh, x);
+//        int foo;
+//        std::cin >> foo;
+//    }
+//    delete restr;
+
+
+//    *(tg_data->interp) = 1.0;
+//    for (int i=0; i < agg_part_rels_saamge->num_mises; ++i)
+//    {
+//        cx = 0.0;
+//        for (int j=0; j < agg_part_rels_saamge->mis_to_dof->RowSize(i); ++j)
+//            cx(agg_part_rels_saamge->mis_to_dof->GetRow(i)[j]) = 1.0;
+//        tg_data->interp->Mult(cx, *hx1g);
+//        x = *hx1g;
+//        fem_parallel_visualize_gf(pmesh, x);
+//        int foo;
+//        std::cin >> foo;
+//    }
+
     cx = 0.0;
     tg_data->restr->Mult(*bg, cbg);
 
