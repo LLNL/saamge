@@ -66,6 +66,7 @@ double rhs_func(Vector& x)
 {
     SA_ASSERT(2 <= x.Size() && x.Size() <= 3);
     return 1.0;
+//    return 2.0 * (x[0]*(1.0-x[0]) + x[1]*(1.0-x[1]));
 }
 
 double bdr_cond(Vector& x)

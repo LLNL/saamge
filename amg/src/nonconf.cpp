@@ -687,7 +687,9 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
             {
                 if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
                     continue;
-                const int ldof = map[agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels)];
+                const int loc = agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels);
+                SA_ASSERT(0 <= loc && loc < ndofs);
+                const int ldof = map[loc];
                 SA_ASSERT(0 <= ldof && ldof < interior_size);
                 SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
                 SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] == diag(ldof));
@@ -713,7 +715,9 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
             {
                 if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
                     continue;
-                const int ldof = map[agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels)];
+                const int loc = agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels);
+                SA_ASSERT(0 <= loc && loc < ndofs);
+                const int ldof = map[loc];
                 SA_ASSERT(0 <= ldof && ldof < interior_size);
                 SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
                 interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] += (1./delta) * diag(ldof);
