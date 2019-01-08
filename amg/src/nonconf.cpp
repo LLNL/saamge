@@ -868,10 +868,13 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
             const int * const row = Abb.GetRowColumns(k);
             const double * const entries = Abb.GetRowEntries(k);
             const int row_size = Abb.RowSize(k);
+//            SA_ASSERT(1 == row_size);
             for (int j=0; j < row_size; ++j)
             {
                 SA_ASSERT(0 <= row[j] && row[j] < nbdrdofs);
                 const int gj = map[row[j]];
+//                SA_ASSERT(row[j] == k);
+//                SA_ASSERT(gj == gk);
                 SA_ASSERT(0 <= gj && interp_data.celements_cdofs <= gj && gj < nloc_cdofs);
                 lmat.Add(gk, gj, entries[j]);
             }
