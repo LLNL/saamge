@@ -948,7 +948,7 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                                ElementMatrixProvider *elem_data, double delta)
 {
     tg_data.elem_data = elem_data;
-    tg_data.doing_spectral = false;
+    tg_data.doing_spectral = true;
 
     // Prepare "identity" basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
     DenseMatrix ** const cut_evects_arr = tg_data.interp_data->cut_evects_arr;

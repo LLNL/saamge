@@ -165,7 +165,9 @@ public:
     // some getters
     mfem::Array<double> * get_local_coarse_one_representation() 
     {
-        return local_coarse_one_representation;
+        mfem::Array<double> * local_coarse_one_representatio_ = local_coarse_one_representation;
+        local_coarse_one_representation = NULL;
+        return local_coarse_one_representatio_;
     }
     int get_coarse_truedof_offset() {return coarse_truedof_offset;}
     int * get_mis_numcoarsedof() {return mis_numcoarsedof;}

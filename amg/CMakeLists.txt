@@ -49,7 +49,7 @@ set(MESH_DIR ${HOME_DIR}/meshes)
 # TODO: no C++11 in SAAMGe
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++11")
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -fstack-protector-all")
 set(CMAKE_CXX_FLAGS_OPTIMIZED "${CMAKE_CXX_FLAGS_OPTIMIZED} -O3")
 
 # TODO: take TPLs from command line to override below locations if desired

@@ -79,6 +79,7 @@ ContribTent::~ContribTent()
     delete [] celements_cdofs_offsets;
     delete [] cfaces_truecdofs_offsets;
     delete [] cfaces_cdofs_offsets;
+    delete local_coarse_one_representation;
 }
 
 SparseMatrix * ContribTent::contrib_tent_finalize()
