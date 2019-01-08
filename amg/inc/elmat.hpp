@@ -77,6 +77,34 @@ protected:
 };
 
 /**
+   Uses an mfem::DomainLFIntegrator to provide a local (on AE) version of an assembled
+   vector that represents the linear form on the finest (geometric) level, but
+   using only a single domain linear form integrator. The vector
+   is represented as a diagonal sparse matrix (to use the standard interface).
+   No boundary conditions are respected currently.
+*/
+class ElementDomainLFVectorStandardGeometric : public ElementMatrixProvider
+{
+public:
+    ElementDomainLFVectorStandardGeometric(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DomainLFIntegrator *dlfi, mfem::FiniteElementSpace *fes) :
+            ElementMatrixProvider(agg_part_rels), dlfi(dlfi), fes(fes) {}
+    virtual mfem::Matrix *GetMatrix(int elno, bool& free_matr) const;
+    virtual mfem::SparseMatrix *BuildAEStiff(int elno) const
+    {
+        return agg_build_AE_stiffm(elno, agg_part_rels, this, false);
+    }
+    virtual ~ElementDomainLFVectorStandardGeometric()
+    {
+        delete dlfi;
+    }
+private:
+    mfem::DomainLFIntegrator *dlfi;
+    mfem::FiniteElementSpace *fes;
+};
+
+/**
    Standard elmat for fine level, basically uses an mfem::ParBilinearForm
    to assemble everything.
 */

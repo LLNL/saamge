@@ -113,10 +113,10 @@ int main(int argc, char *argv[])
     int nu_relax = 4;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation.");
-    double delta = 1e-6;
+    double delta = 0.1;
     args.AddOption(&delta, "-d", "--delta",
                    "The reciprocal of the interface term weight.");
-    int elems_per_agg = 256;
+    int elems_per_agg = 16;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
     bool coarse_direct = false;
@@ -146,14 +146,15 @@ int main(int argc, char *argv[])
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
     // Read the mesh from the given mesh file.
-    mesh = fem_read_mesh(mesh_file);
+//    mesh = fem_read_mesh(mesh_file);
+    mesh = new Mesh(4, 4, Element::TRIANGLE, 1);
     fem_refine_mesh_times(serial_times_refine, *mesh);
     // Serial mesh.
     SA_RPRINTF(0,"NV: %d, NE: %d\n", mesh->GetNV(), mesh->GetNE());
 
     // Parallel mesh and finite elements stuff.
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
-    ess_bdr = 0;
+    ess_bdr = 1;
     ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;

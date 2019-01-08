@@ -1209,6 +1209,22 @@ void mbox_build_schur_from_sparse(const mfem::SparseMatrix& A,
 */
 mfem::SparseMatrix *mbox_create_diag_sparse_for_hypre(mfem::Vector& diag);
 
+
+/*! \brief Creates a diagonal sparse matrix by stealing.
+
+    Calls HYPRE directly.
+
+    This is to be used when we make a HYPRE structure an owner of the matrix
+    data.
+
+    \param diag (IN/OUT) The diagonal as a vector. Gets destroyed in the function.
+
+    \returns The diagonal sparse matrix.
+
+    \warning The returned sparse matrix must be freed by the caller.
+*/
+mfem::SparseMatrix *mbox_create_diag_sparse_steal(mfem::Vector& diag);
+
 /*! \brief Makes a copy of a parallel matrix.
 
     Calls HYPRE directly.

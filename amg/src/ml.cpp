@@ -113,7 +113,6 @@ void ml_produce_hierarchy_from_level(
     const MultilevelParameters &mlp)
 {
     SA_ASSERT(coarsenings >= 0);
-    SA_ASSERT(&ml_data);
 
     agg_partitioning_relations_t *agg_part_rels;
     tg_data_t *tg_data;

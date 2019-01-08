@@ -783,8 +783,8 @@ SparseMatrix *mbox_snd_diagA_sparse_from_sparse(const SparseMatrix& A)
     for (int i=0; i < n; ++i)
     {
         J[i] = I[i] = i;
-        SA_ASSERT(A(i,i) > 0.);
         Data[i] = A(i,i);
+        SA_ASSERT(Data[i] > 0.);
     }
     I[n] = n;
 
@@ -1475,7 +1475,6 @@ void mbox_set_zero_diag_outside_set_sparse(SparseMatrix& D,
 
 SparseMatrix *mbox_filter_zeros_sparse(const SparseMatrix& A)
 {
-    SA_ASSERT(&A);
     SA_ASSERT(const_cast<SparseMatrix&>(A).Finalized());
     const int * const in_I = A.GetI();
     const double * const in_Data = A.GetData();
@@ -1578,6 +1577,24 @@ SparseMatrix *mbox_create_diag_sparse_for_hypre(Vector& diag)
         I[i] = i;
         J[i] = i;
         Data[i] = diag(i);
+    }
+    I[n] = n;
+
+    return new SparseMatrix(I, J, Data, n, n);
+}
+
+SparseMatrix *mbox_create_diag_sparse_steal(Vector& diag)
+{
+    const int n = diag.Size();
+    int *I = new int[n + 1];
+    int *J = new int[n];
+    double *Data;
+    diag.StealData(&Data);
+
+    for (int i=0; i < n; ++i)
+    {
+        I[i] = i;
+        J[i] = i;
     }
     I[n] = n;
 

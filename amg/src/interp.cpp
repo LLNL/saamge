@@ -537,6 +537,13 @@ void interp_compute_vectors(
                 *AE_stiffm, rhs_matrices_arr[i], i, i,
                 agg_size,
                 theta_local, *(cut_evects_arr[i]));
+
+//            std::ofstream myfile;
+//            std::string name = "evec_" + std::to_string(i) + ".out";
+//            myfile.open(name);
+//            Vector vec(cut_evects_arr[i]->GetData(), cut_evects_arr[i]->Height());
+//            vec.Print(myfile);
+//            myfile.close();
         }
 
         // test routine for mltest, put an extra eigenvector on AE 0 [on processor 0]

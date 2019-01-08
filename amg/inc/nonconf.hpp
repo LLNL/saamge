@@ -98,6 +98,13 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
                                ElementMatrixProvider *elem_data, double theta, double delta,
                                bool schur=true, bool full_space=false);
 
+/*! Builds the right-hand side for the "fine" interior penalty formulation.
+    The returned vector must be freed by the caller.
+*/
+mfem::HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
+                                              const agg_partitioning_relations_t& agg_part_rels,
+                                              ElementMatrixProvider *elem_data);
+
 /*! Builds a "fine" interior penalty formulation and the respective space using (or abusing) the TG structure.
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
     tg_data should already have some basic initializations via tg_init_data().

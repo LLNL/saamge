@@ -87,6 +87,39 @@ Matrix * ElementMatrixStandardGeometric::GetMatrix(
     return elmat;
 }
 
+Matrix *ElementDomainLFVectorStandardGeometric::GetMatrix(int elno, bool& free_matr) const
+{
+    SA_ASSERT(dlfi);
+    SA_ASSERT(fes);
+    SA_ASSERT(!agg_part_rels.elem_to_dof ||
+              agg_part_rels.elem_to_dof->Size() == fes->GetNE());
+    SA_ASSERT(0 <= elno && elno < fes->GetNE());
+    SA_ASSERT(!agg_part_rels.elem_to_dof ||
+              agg_part_rels.elem_to_dof->RowSize(elno) ==
+              fes->GetFE(elno)->GetDof() * fes->GetVDim());
+
+    Vector elvect;
+    ElementTransformation *eltrans;
+
+    eltrans = fes->GetElementTransformation(elno);
+    dlfi->AssembleRHSElementVect(*fes->GetFE(elno), *eltrans, elvect);
+    SA_ASSERT(elvect.Size() == fes->GetFE(elno)->GetDof() * fes->GetVDim());
+
+#ifdef SA_ASSERTS
+    if (agg_part_rels.elem_to_dof)
+    {
+        Array<int> vdofs;
+        fes->GetElementVDofs(elno, vdofs);
+        SA_ASSERT(vdofs.Size() == agg_part_rels.elem_to_dof->RowSize(elno));
+        for (int i=0; i < vdofs.Size(); ++i)
+            SA_ASSERT(vdofs[i] == agg_part_rels.elem_to_dof->GetRow(elno)[i]);
+    }
+#endif
+
+    free_matr = true;
+    return mbox_create_diag_sparse_steal(elvect);
+}
+
 ElementMatrixParallelCoarse::ElementMatrixParallelCoarse(
     const agg_partitioning_relations_t& agg_part_rels,
     levels_level_t *level) 

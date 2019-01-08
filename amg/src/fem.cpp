@@ -767,6 +767,7 @@ void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, ParFi
     Mesh *mesh = fes.GetMesh();
     SA_ASSERT(2 <= mesh->Dimension() && mesh->Dimension() <= 4);
     const int num_faces = (3 <= mesh->Dimension() ? mesh->GetNFaces() : mesh->GetNEdges());
+    SA_RPRINTF(0, "pFaces: %d\n", num_faces);
 
     // Element to facet relation obtained from MFEM.
     Table *elem_to_face = mbox_copy_table(3 <= mesh->Dimension() ?

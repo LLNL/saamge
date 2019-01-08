@@ -93,8 +93,6 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
                   smpr_ft post_smoother, Vector& x, Solver& coarse_solver,
                   void *data)
 {
-    SA_ASSERT(&A);
-    SA_ASSERT(&Ac);
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
     SA_ASSERT(Ac.GetGlobalNumRows() == Ac.GetGlobalNumCols());
     SA_ASSERT(interp.GetGlobalNumRows() == A.GetGlobalNumRows());

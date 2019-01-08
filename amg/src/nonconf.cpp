@@ -221,7 +221,6 @@ HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp
     {
         int bcol = 0;
         const DenseMatrix &elem_matr = *interp_data.schurs[i];
-        SA_ASSERT(&elem_matr);
         const int ncfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         for (int j=0; j < ncfaces; ++j)
@@ -289,9 +288,6 @@ HypreParMatrix *nonconf_ip_dense_assemble_coarse_matrix(const interp_data_t& int
         const DenseMatrix &Aii = *dynamic_cast<DenseMatrix *>(interp_data.Aii[i]);
         const DenseMatrix &Abb = *dynamic_cast<DenseMatrix *>(interp_data.Abb[i]);
         const DenseMatrix &Aib = *dynamic_cast<DenseMatrix *>(interp_data.Aib[i]);
-        SA_ASSERT(&Aii);
-        SA_ASSERT(&Abb);
-        SA_ASSERT(&Aib);
         SA_ASSERT(Aii.Width() == Aii.Height());
         SA_ASSERT(Aii.Width() == Aib.Height());
         SA_ASSERT(Abb.Width() == Abb.Height());
@@ -634,12 +630,23 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
     {
         SA_ASSERT(NULL != interp_data.cut_evects_arr[i]);
         interp_data.AEs_stiffm[i]->MoveDiagonalFirst();
+//        if (i == 2)
+//        {
+//            std::ofstream myfile;
+//            myfile.open("AEm.out");
+//            interp_data.AEs_stiffm[i]->Print(myfile);
+//            myfile.close();
+//        }
         SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
         SA_ASSERT(D->Height() == D->Width());
         const int ndofs = agg_part_rels.AE_to_dof->RowSize(i);
         const int num_cfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         const int interior_size = interp_data.cut_evects_arr[i]->Width();
+        SA_ASSERT(interp_data.celements_cdofs_offsets[i+1] - interp_data.celements_cdofs_offsets[i]
+                  == interior_size);
+        SA_ASSERT(D->Height() == interior_size);
+        SA_ASSERT(interp_data.cut_evects_arr[i]->Height() == ndofs);
         int bdr_size = 0;
         for (int j=0; j < num_cfaces; ++j)
         {
@@ -661,19 +668,41 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
             SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
             if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
             {
-                SA_ASSERT(intdofs_ctr < D->Height());
+                SA_ASSERT(intdofs_ctr < interior_size);
                 map[j] = intdofs_ctr;
                 ++intdofs_ctr;
             } else
                 map[j] = -1;
         }
-        SA_ASSERT(intdofs_ctr == D->Height());
+        SA_ASSERT(intdofs_ctr == interior_size);
+
+#ifdef SA_ASSERTS
+        for (int j=0; j < num_cfaces; ++j)
+        {
+            const int cface = cfaces[j];
+            SA_ASSERT(0 <= cface && cface < agg_part_rels.num_cfaces);
+            const int num_dofs = agg_part_rels.cface_to_dof->RowSize(cface);
+            const int * const dofs = agg_part_rels.cface_to_dof->GetRow(cface);
+            for (int k=0; k < num_dofs; ++k)
+            {
+                if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                    continue;
+                const int ldof = map[agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels)];
+                SA_ASSERT(0 <= ldof && ldof < interior_size);
+                SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
+                SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] == diag(ldof));
+            }
+        }
+#endif
+
         int cface_offset = 0;
         for (int j=0; j < num_cfaces; ++j)
         {
             const int cface = cfaces[j];
             SA_ASSERT(0 <= cface && cface < agg_part_rels.num_cfaces);
             const int cface_basis_size = cfaces_bases[cface]->Width();
+            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface]
+                      == cface_basis_size);
             SA_ASSERT(cface_offset + cface_basis_size <= bdr_size);
             SA_ASSERT(cfaces_bases[cface]->Height() == agg_part_rels.cfaces_dof_size[cface]);
             SA_ASSERT(agg_part_rels.cface_to_dof->RowSize(cface) == agg_part_rels.cfaces_dof_size[cface]);
@@ -685,11 +714,13 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
                 if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
                     continue;
                 const int ldof = map[agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels)];
-                SA_ASSERT(0 <= ldof && ldof < D->Height());
+                SA_ASSERT(0 <= ldof && ldof < interior_size);
                 SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
                 interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] += (1./delta) * diag(ldof);
                 SA_ASSERT(ctr < cface_basis_size && cface_offset + ctr < bdr_size);
+                SA_ASSERT(0.0 == Abb->SearchRow(cface_offset + ctr, cface_offset + ctr));
                 Abb->Set(cface_offset + ctr, cface_offset + ctr, (1./delta) * diag(ldof));
+                SA_ASSERT(0.0 == Aib->SearchRow(ldof, cface_offset + ctr));
                 Aib->Set(ldof, cface_offset + ctr, -(1./delta) * diag(ldof));
                 ++ctr;
             }
@@ -704,6 +735,19 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
         Aib->Finalize();
         interp_data.Abb[i] = Abb;
         interp_data.Aib[i] = Aib;
+//        if (i == 2)
+//        {
+//            std::ofstream myfile;
+//            myfile.open("Abb.out");
+//            Abb->Print(myfile);
+//            myfile.close();
+//            myfile.open("Aii.out");
+//            interp_data.Aii[i]->Print(myfile);
+//            myfile.close();
+//            myfile.open("Aib.out");
+//            interp_data.Aib[i]->Print(myfile);
+//            myfile.close();
+//        }
     }
 }
 
@@ -726,20 +770,20 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
     const int nloc_cdofs = interp_data.celements_cdofs + interp_data.cfaces_cdofs_offsets[interp_data.num_cfaces];
     SparseMatrix lmat(nloc_cdofs, nloc_cdofs);
     SA_ASSERT(nloc_cdofs == cDof_TruecDof.GetNumRows());
+    SA_ASSERT(interp_data.celements_cdofs == interp_data.celements_cdofs_offsets[interp_data.nparts]);
 
     for (int i=0; i < interp_data.nparts; ++i)
     {
         const SparseMatrix &Aii = *dynamic_cast<SparseMatrix *>(interp_data.Aii[i]);
         const SparseMatrix &Abb = *dynamic_cast<SparseMatrix *>(interp_data.Abb[i]);
         const SparseMatrix &Aib = *dynamic_cast<SparseMatrix *>(interp_data.Aib[i]);
-        SA_ASSERT(&Aii);
-        SA_ASSERT(&Abb);
-        SA_ASSERT(&Aib);
         SA_ASSERT(Aii.Width() == Aii.Height());
         SA_ASSERT(Aii.Width() == Aib.Height());
         SA_ASSERT(Abb.Width() == Abb.Height());
         SA_ASSERT(Aib.Width() == Abb.Height());
         SA_ASSERT(Aii.Width() == interp_data.cut_evects_arr[i]->Width());
+        SA_ASSERT(Aii.Width() == interp_data.celements_cdofs_offsets[i+1]
+                                 - interp_data.celements_cdofs_offsets[i]);
 
         const int ncintdofs = Aii.Height();
         const int nbdrdofs = Abb.Height();
@@ -752,11 +796,15 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
         {
             const int cface = cfaces[j];
             SA_ASSERT(0 <= cface && cface < interp_data.num_cfaces);
-            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface] == interp_data.cfaces_bases[cface]->Width());
+            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface]
+                      == interp_data.cfaces_bases[cface]->Width());
             int offset = interp_data.celements_cdofs + interp_data.cfaces_cdofs_offsets[cface];
             SA_ASSERT(offset + interp_data.cfaces_bases[cface]->Width() <= nloc_cdofs);
             const int num_dofs = agg_part_rels.cface_to_dof->RowSize(cface);
             const int * const dofs = agg_part_rels.cface_to_dof->GetRow(cface);
+#ifdef SA_ASSERTS
+            const int save_ctr = ctr;
+#endif
             for (int k=0; k < num_dofs; ++k)
             {
                 if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
@@ -765,21 +813,25 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
                 map[ctr++] = offset++;
             }
             SA_ASSERT(interp_data.celements_cdofs + interp_data.cfaces_cdofs_offsets[cface+1] == offset);
+            SA_ASSERT(ctr - save_ctr == interp_data.cfaces_bases[cface]->Width());
         }
         SA_ASSERT(nbdrdofs == ctr);
 
         for (int k=0; k < ncintdofs; ++k)
         {
             const int gk = interp_data.celements_cdofs_offsets[i] + k;
-            SA_ASSERT(0 <= gk && gk < nloc_cdofs);
+            SA_ASSERT(0 <= gk && gk < nloc_cdofs && gk < interp_data.celements_cdofs &&
+                      gk < interp_data.celements_cdofs_offsets[i+1]);
         {
             const int * const row = Aii.GetRowColumns(k);
             const double * const entries = Aii.GetRowEntries(k);
             const int row_size = Aii.RowSize(k);
             for (int j=0; j < row_size; ++j)
             {
+                SA_ASSERT(0 <= row[j] && row[j] < ncintdofs);
                 const int gj = interp_data.celements_cdofs_offsets[i] + row[j];
-                SA_ASSERT(0 <= gj && gj < nloc_cdofs);
+                SA_ASSERT(0 <= gj && gj < nloc_cdofs && gj < interp_data.celements_cdofs &&
+                          gj < interp_data.celements_cdofs_offsets[i+1]);
                 double &rkj = lmat.SearchRow(gk, gj);
                 SA_ASSERT(0.0 == rkj);
                 rkj += entries[j];
@@ -792,8 +844,9 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
             const int row_size = Aib.RowSize(k);
             for (int j=0; j < row_size; ++j)
             {
+                SA_ASSERT(0 <= row[j] && row[j] < nbdrdofs);
                 const int gj = map[row[j]];
-                SA_ASSERT(0 <= gj && gj < nloc_cdofs);
+                SA_ASSERT(0 <= gj && interp_data.celements_cdofs <= gj && gj < nloc_cdofs);
                 SA_ASSERT(gj != gk);
                 double &rkj = lmat.SearchRow(gk, gj);
                 SA_ASSERT(0.0 == rkj);
@@ -806,18 +859,20 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
             }
         }
         }
+        SA_ASSERT(interp_data.celements_cdofs_offsets[i] + ncintdofs == interp_data.celements_cdofs_offsets[i+1]);
 
         for (int k=0; k < nbdrdofs; ++k)
         {
             const int gk = map[k];
-            SA_ASSERT(0 <= gk && gk < nloc_cdofs);
+            SA_ASSERT(0 <= gk && interp_data.celements_cdofs <= gk && gk < nloc_cdofs);
             const int * const row = Abb.GetRowColumns(k);
             const double * const entries = Abb.GetRowEntries(k);
             const int row_size = Abb.RowSize(k);
             for (int j=0; j < row_size; ++j)
             {
+                SA_ASSERT(0 <= row[j] && row[j] < nbdrdofs);
                 const int gj = map[row[j]];
-                SA_ASSERT(0 <= gj && gj < nloc_cdofs);
+                SA_ASSERT(0 <= gj && interp_data.celements_cdofs <= gj && gj < nloc_cdofs);
                 lmat.Add(gk, gj, entries[j]);
             }
         }
@@ -829,8 +884,64 @@ HypreParMatrix *nonconf_ip_discretization_assemble(const interp_data_t& interp_d
                              cDof_TruecDof.GetRowStarts(), cDof_TruecDof.GetRowStarts(), &lmat);
     HypreParMatrix *gmat = RAP(&tent_gmat, &cDof_TruecDof);
     mbox_make_owner_rowstarts_colstarts(*gmat);
+//    gmat->Print("gmat.out");
 
     return gmat;
+}
+
+HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
+                                              const agg_partitioning_relations_t& agg_part_rels,
+                                              ElementMatrixProvider *elem_data)
+{
+    SA_ASSERT(agg_part_rels.cface_TruecDof_cDof);
+    SA_ASSERT(agg_part_rels.AE_to_dof);
+
+    const int nparts = agg_part_rels.nparts;
+    SparseMatrix *AE_rhs;
+    HypreParVector lrhs(agg_part_rels.cface_TruecDof_cDof->GetComm(),
+                        agg_part_rels.cface_TruecDof_cDof->GetGlobalNumCols(),
+                        agg_part_rels.cface_TruecDof_cDof->GetColStarts());
+    lrhs = 0.0;
+    SA_ASSERT(lrhs.Size() == interp_data.celements_cdofs +
+                             interp_data.cfaces_cdofs_offsets[interp_data.num_cfaces]);
+
+    for (int i=0; i < nparts; ++i)
+    {
+        AE_rhs = elem_data->BuildAEStiff(i);
+        SA_ASSERT(AE_rhs);
+        SA_ASSERT(AE_rhs->Finalized());
+        SA_ASSERT(AE_rhs->Width() == AE_rhs->Height());
+        SA_ASSERT(AE_rhs->Height() == agg_part_rels.AE_to_dof->RowSize(i));
+        SA_ASSERT(AE_rhs->Height() == AE_rhs->NumNonZeroElems());
+        const int ndofs = AE_rhs->Height();
+        const double * const data = AE_rhs->GetData();
+
+        int intdofs_ctr = 0;
+        for (int j=0; j < ndofs; ++j)
+        {
+            const int gj = agg_num_col_to_glob(*agg_part_rels.AE_to_dof, i, j);
+            SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+            if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+            {
+                const int idx = interp_data.celements_cdofs_offsets[i] + intdofs_ctr++;
+                SA_ASSERT(0 <= idx && idx < interp_data.celements_cdofs &&
+                          idx < interp_data.celements_cdofs_offsets[i+1]);
+                SA_ASSERT(0.0 == lrhs(idx));
+                lrhs(idx) = data[j];
+            }
+        }
+        SA_ASSERT(intdofs_ctr == interp_data.celements_cdofs_offsets[i+1] - interp_data.celements_cdofs_offsets[i]);
+        SA_ASSERT(NULL == interp_data.cut_evects_arr || NULL == interp_data.cut_evects_arr[i] ||
+                  interp_data.cut_evects_arr[i]->Width() == intdofs_ctr);
+
+        delete AE_rhs;
+    }
+
+    HypreParVector *rhs = new HypreParVector(*agg_part_rels.cface_TruecDof_cDof, 1);
+    agg_part_rels.cface_TruecDof_cDof->Mult(lrhs, *rhs);
+    mbox_make_owner_partitioning(*rhs);
+
+    return rhs;
 }
 
 void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
@@ -851,7 +962,9 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
     {
         AE_stiffm = elem_data->BuildAEStiff(i);
         SA_ASSERT(AE_stiffm);
+        SA_ASSERT(AE_stiffm->Finalized());
         SA_ASSERT(AE_stiffm->Width() == AE_stiffm->Height());
+        SA_ASSERT(AE_stiffm->Height() == agg_part_rels.AE_to_dof->RowSize(i));
         const int ndofs = AE_stiffm->Height();
         int nintdofs = 0;
         int total_nnz = 0;
@@ -871,6 +984,7 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
         SA_ASSERT(!cut_evects_arr[i]);
         cut_evects_arr[i] = new DenseMatrix(ndofs, nintdofs);
         SA_ASSERT(cut_evects_arr[i]);
+        SA_ASSERT(0 == ndofs*nintdofs || cut_evects_arr[i]->GetData());
         Array<int> map(ndofs);
         int intdofs_ctr = 0;
         for (int j=0; j < ndofs; ++j)
@@ -884,7 +998,10 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                 map[j] = intdofs_ctr;
                 ++intdofs_ctr;
             } else
+            {
                 map[j] = -1;
+                SA_ASSERT(AE_stiffm->RowSize(j) == 1);
+            }
         }
         SA_ASSERT(intdofs_ctr == nintdofs);
         new_AE_stiffm = new SparseMatrix(nintdofs);
@@ -900,14 +1017,15 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                 Vector srow;
                 AE_stiffm->GetRow(j, cols, srow);
                 SA_ASSERT(cols.Size() == srow.Size() && srow.Size() == AE_stiffm->RowSize(j));
+                Array<int> ncols(cols.Size());
                 for (int k = 0; k < cols.Size(); ++k)
                 {
                     SA_ASSERT(0 <= cols[k] && cols[k] < ndofs);
-                    cols[k] = map[cols[k]];
-                    SA_ASSERT(0 <= cols[k] && cols[k] < nintdofs);
+                    ncols[k] = map[cols[k]];
+                    SA_ASSERT(0 <= ncols[k] && ncols[k] < nintdofs);
                 }
                 SA_ASSERT(map[j] == intdofs_ctr);
-                new_AE_stiffm->SetRow(intdofs_ctr, cols, srow);
+                new_AE_stiffm->SetRow(intdofs_ctr, ncols, srow);
                 ++intdofs_ctr;
             }
         }

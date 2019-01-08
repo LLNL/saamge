@@ -70,7 +70,6 @@ double agg_assemble_value(int di, int dj, int part,
                           const agg_partitioning_relations_t& agg_part_rels,
                           const ElementMatrixProvider *data)
 {
-    SA_ASSERT(&agg_part_rels);
     SA_ASSERT(agg_part_rels.partitioning);
     SA_ASSERT(agg_part_rels.dof_to_elem);
     SA_ASSERT(agg_part_rels.elem_to_dof);
@@ -1226,7 +1225,7 @@ bool check_diagonal(const SparseMatrix &mat)
 
 SparseMatrix *agg_build_AE_stiffm(
     int part, const agg_partitioning_relations_t& agg_part_rels,
-    const ElementMatrixProvider *data)
+    const ElementMatrixProvider *data, bool skip_zeros)
 {
     bool free_matr;
     const int * const AEelems = agg_part_rels.AE_to_elem->GetRow(part);
@@ -1274,7 +1273,7 @@ SparseMatrix *agg_build_AE_stiffm(
                     SA_ASSERT(0 <= elemdofs[J[j]] &&
                               elemdofs[J[j]] < agg_part_rels.ND);
                     el = Data[j];
-                    if (0. != el)
+                    if (0. != el || !skip_zeros)
                     {
                         const int local_j =
                             agg_map_id_glob_to_AE(elemdofs[J[j]], part,
@@ -1323,7 +1322,7 @@ SparseMatrix *agg_build_AE_stiffm(
                     SA_ASSERT(0 <= elemdofs[j] &&
                               elemdofs[j] < agg_part_rels.ND);
                     el = (*elem_dmatr)(k, j);
-                    if (0. != el)
+                    if (0. != el || !skip_zeros)
                     {
                         const int local_j =
                             agg_map_id_glob_to_AE(elemdofs[j], part,
@@ -1349,7 +1348,7 @@ SparseMatrix *agg_build_AE_stiffm(
         }
     }
 
-    AE_stiffm->Finalize();
+    AE_stiffm->Finalize(skip_zeros);
     return AE_stiffm;
 }
 
@@ -1879,8 +1878,6 @@ void agg_create_rels_except_elem_coarse(
     // SA_RPRINTF(0,"%s","--- begin agg_create_rels_except_elem_coarse() ---\n");
 
     SA_ASSERT(interp);
-    SA_ASSERT(&agg_part_rels);
-    SA_ASSERT(&agg_part_rels_fine);
     SA_ASSERT(!agg_part_rels.elem_to_dof);
     SA_ASSERT(!agg_part_rels.dof_to_dof);
     SA_ASSERT(!agg_part_rels.dof_to_elem);
@@ -2227,7 +2224,6 @@ agg_create_partitioning_coarse(
     bool do_aggregates)
 {
     SA_ASSERT(interp);
-    SA_ASSERT(&agg_part_rels_fine);
     agg_partitioning_relations_t *agg_part_rels =
         new agg_partitioning_relations_t;
     memset(agg_part_rels, 0, sizeof(*agg_part_rels));

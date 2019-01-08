@@ -338,7 +338,7 @@ mfem::SparseMatrix *agg_build_AE_stiffm_with_global(
 */
 mfem::SparseMatrix *agg_build_AE_stiffm(
     int part, const agg_partitioning_relations_t& agg_part_rels,
-    const ElementMatrixProvider *data);
+    const ElementMatrixProvider *data, bool skip_zeros=true);
 
 /*! \brief Restricts a group of vectors to an aggregate.
 

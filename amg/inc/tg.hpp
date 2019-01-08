@@ -771,8 +771,6 @@ void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
 static inline
 void tg_free_coarse_operator(tg_data_t& tg_data)
 {
-    SA_ASSERT(&tg_data);
-
     if (!tg_data.Ac)
         return;
 
