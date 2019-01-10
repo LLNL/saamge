@@ -68,6 +68,13 @@ double rhs_func(Vector& x)
 {
     SA_ASSERT(2 <= x.Size() && x.Size() <= 3);
     return 1.0;
+//    return 2.0 * (x[0]*(1.0-x[0]) + x[1]*(1.0-x[1]));
+}
+
+double ex_func(Vector& x)
+{
+    SA_ASSERT(2 <= x.Size() && x.Size() <= 2);
+    return x[0]*(1.0-x[0])*x[1]*(1.0-x[1]);
 }
 
 double bdr_cond(Vector& x)
@@ -206,7 +213,7 @@ int main(int argc, char *argv[])
 //    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false, false);
 //    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts, false);
 
-    int nparts_x = 1 << (serial_times_refine + times_refine);
+    int nparts_x = 1 << (serial_times_refine + times_refine + 1);
     int nparts_y = nparts_x;
     int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
     agg_part_rels = agg_create_partitioning_fine(
@@ -259,6 +266,8 @@ int main(int argc, char *argv[])
         // Obtain the usual solution.
         fsolver->Mult(*bg, *hxg);
         x = *hxg;
+//        FunctionCoefficient uex(ex_func);
+//        x.ProjectCoefficient(uex);
         if (visualize)
             fem_parallel_visualize_gf(pmesh, x);
 
