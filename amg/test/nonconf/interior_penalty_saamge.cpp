@@ -113,10 +113,10 @@ int main(int argc, char *argv[])
     int nu_relax = 4;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation.");
-    double delta = 0.1;
+    double delta = 1.0;
     args.AddOption(&delta, "-d", "--delta",
                    "The reciprocal of the interface term weight.");
-    int elems_per_agg = 16;
+    int elems_per_agg = 8;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
     bool coarse_direct = false;
@@ -203,7 +203,16 @@ int main(int argc, char *argv[])
     nparts = pmesh.GetNE() / elems_per_agg;
     if (nparts == 0)
         nparts = 1;
-    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false);
+//    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false, false);
+//    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts, false);
+
+    int nparts_x = 1 << (serial_times_refine + times_refine);
+    int nparts_y = nparts_x;
+    int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
+    agg_part_rels = agg_create_partitioning_fine(
+        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
+        fes.Dof_TrueDof_Matrix(), false, false, false);
+
     delete [] bdr_dofs;
     fem_build_face_relations(agg_part_rels, fes);
     if (visualize)
@@ -260,7 +269,7 @@ int main(int argc, char *argv[])
 
     // Obtain IP solution.
     HypreParVector *hx1g = x1.ParallelAverage();
-    HypreParVector cbg(*tg_data->interp);
+    HypreParVector *cbg;
     HypreParVector cx(*tg_data->interp);
 
 //    *(tg_data->interp) = 1.0;
@@ -278,7 +287,6 @@ int main(int argc, char *argv[])
 //    }
 //    delete restr;
 
-
 //    *(tg_data->interp) = 1.0;
 //    for (int i=0; i < agg_part_rels_saamge->num_mises; ++i)
 //    {
@@ -293,9 +301,12 @@ int main(int argc, char *argv[])
 //    }
 
     cx = 0.0;
-    tg_data->restr->Mult(*bg, cbg);
+//        cbg = new HypreParVector(*tg_data->interp);
+//        tg_data->restr->Mult(*bg, *cbg);
+    ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
+    cbg = nonconf_ip_discretization_rhs(*tg_data->interp_data, *agg_part_rels, &rhsp);
 
-    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, cbg, 1000, 1e-12, 1e-24, 1., tg_data_saamge, zero_rhs, true);
+    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, 1e-12, 1e-24, 1.0, tg_data_saamge, zero_rhs, true);
 
     tg_data->interp->Mult(cx, *hx1g);
     x1 = *hx1g;
@@ -319,6 +330,7 @@ int main(int argc, char *argv[])
     SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
 
     delete gx;
+    delete cbg;
     tg_free_data(tg_data);
     tg_free_data(tg_data_saamge);
     delete fsolver;

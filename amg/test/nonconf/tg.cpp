@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
     int times_refine = 0;
     args.AddOption(&times_refine, "-r", "--refine", 
                    "How many times to refine the mesh (in parallel).");
-    int nu_relax = 3;
+    int nu_relax = 4;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation.");
     int order = 1;
@@ -109,18 +109,18 @@ int main(int argc, char *argv[])
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems.");
-    bool full_space = false;
+    bool full_space = true;
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
                    "Build the full space instead of using eigensolvers.");
-    bool schur = true;
+    bool schur = false;
     args.AddOption(&schur, "-s", "--schur",
                    "-ns", "--no-schur",
                    "Whether to use the Schur complement on the IP problem.");
-    double delta = 1e-6;
+    double delta = 1.0;
     args.AddOption(&delta, "-d", "--delta",
                    "The reciprocal of the interface term weight.");
-    int elems_per_agg = 256;
+    int elems_per_agg = 8;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
     bool zero_rhs = false;
@@ -150,14 +150,15 @@ int main(int argc, char *argv[])
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
     // Read the mesh from the given mesh file.
-    mesh = fem_read_mesh(mesh_file);
+//    mesh = fem_read_mesh(mesh_file);
+    mesh = new Mesh(4, 4, Element::TRIANGLE, 1);
     fem_refine_mesh_times(serial_times_refine, *mesh);
     // Serial mesh.
     SA_RPRINTF(0,"NV: %d, NE: %d\n", mesh->GetNV(), mesh->GetNE());
 
     // Parallel mesh and finite elements stuff.
     Array<int> ess_bdr(mesh->bdr_attributes.Max());
-    ess_bdr = 0;
+    ess_bdr = 1;
     ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
@@ -206,7 +207,16 @@ int main(int argc, char *argv[])
     nparts = pmesh.GetNE() / elems_per_agg;
     if (nparts == 0)
         nparts = 1;
-    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false);
+//    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false, false);
+//    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts, false);
+
+    int nparts_x = 1 << (serial_times_refine + times_refine);
+    int nparts_y = nparts_x;
+    int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
+    agg_part_rels = agg_create_partitioning_fine(
+        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
+        fes.Dof_TrueDof_Matrix(), false, false, false);
+
     delete [] bdr_dofs;
     fem_build_face_relations(agg_part_rels, fes);
     if (visualize)
@@ -224,13 +234,16 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax, theta, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
+    if (full_space && !schur)
+        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
+    else
+        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
 
     mfem::Solver *solver;
     if (coarse_direct)
         solver = new HypreDirect(*tg_data->Ac);
     else
-        solver = new AMGSolver(*tg_data->Ac, false);
+        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
     if (schur)
         tg_data->coarse_solver = new SchurSolver(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
                                                  *agg_part_rels->cface_TruecDof_cDof, *solver);
@@ -252,7 +265,7 @@ int main(int argc, char *argv[])
         SA_RPRINTF(0, "%s", "\n");
     }
 
-    tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, 10e-12, 10e-24, 1., tg_data, zero_rhs, true);
+    tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, 1e-12, 1e-24, 1.0, tg_data, zero_rhs, true);
 
     x = *hxg;
     if (visualize)
@@ -294,16 +307,6 @@ int main(int argc, char *argv[])
         SA_RPRINTF(0, "Outer PCG failed to converge after %d iterations!\n", iterations);
 
     x = *pxg;
-
-//    std::cout << "cfaces: " << agg_part_rels->num_cfaces << std::endl;
-//    for (int i=0; i < agg_part_rels->num_cfaces; ++i)
-//    {
-//        x = 0.0;
-//        for (int j=0; j < agg_part_rels->cface_to_dof->RowSize(i); ++j)
-//            x(agg_part_rels->cface_to_dof->GetRow(i)[j]) = 1.0;
-//        fem_parallel_visualize_gf(pmesh, x);
-//    }
-
     if (visualize)
         fem_parallel_visualize_gf(pmesh, x);
 

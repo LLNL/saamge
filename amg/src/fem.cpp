@@ -647,7 +647,7 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
 
 agg_partitioning_relations_t *
 fem_create_partitioning_identity(HypreParMatrix& A, ParFiniteElementSpace& fes,
-                                 const agg_dof_status_t *bdr_dofs, int *nparts)
+                                 const agg_dof_status_t *bdr_dofs, int *nparts, bool do_mises)
 {
     Table *elem_to_dof, *elem_to_elem;
     Mesh *mesh = fes.GetMesh();
@@ -678,7 +678,7 @@ fem_create_partitioning_identity(HypreParMatrix& A, ParFiniteElementSpace& fes,
     const bool do_aggregates = false;
     agg_partitioning_relations_t *agg_part_rels = agg_create_partitioning_fine(
         A, fes.GetNE(), elem_to_dof, elem_to_elem, partitioning, bdr_dofs, nparts,
-        fes.Dof_TrueDof_Matrix(), do_aggregates);
+        fes.Dof_TrueDof_Matrix(), do_aggregates, false, do_mises);
 
     SA_ASSERT(agg_part_rels);
     return agg_part_rels;
@@ -687,7 +687,7 @@ fem_create_partitioning_identity(HypreParMatrix& A, ParFiniteElementSpace& fes,
 agg_partitioning_relations_t *
 fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
                         const agg_dof_status_t *bdr_dofs, int *nparts,
-                        bool do_aggregates)
+                        bool do_aggregates, bool do_mises)
 {
     Table *elem_to_dof, *elem_to_elem;
     Mesh *mesh = fes.GetMesh();
@@ -711,7 +711,7 @@ fem_create_partitioning(HypreParMatrix& A, ParFiniteElementSpace& fes,
     // does not actually affect partitioning
     agg_partitioning_relations_t *agg_part_rels = agg_create_partitioning_fine(
         A, fes.GetNE(), elem_to_dof, elem_to_elem, NULL, bdr_dofs, nparts,
-        fes.Dof_TrueDof_Matrix(), do_aggregates);
+        fes.Dof_TrueDof_Matrix(), do_aggregates, false, do_mises);
 
     SA_ASSERT(agg_part_rels);
     return agg_part_rels;

@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
     int order = 1;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
-    double theta = 0.1;
+    double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems.");
     bool full_space = true;
@@ -117,10 +117,10 @@ int main(int argc, char *argv[])
     args.AddOption(&schur, "-s", "--schur",
                    "-ns", "--no-schur",
                    "Whether to use the Schur complement on the IP problem.");
-    double delta = 0.1;
+    double delta = 1.0;
     args.AddOption(&delta, "-d", "--delta",
                    "The reciprocal of the interface term weight.");
-    int elems_per_agg = 16;
+    int elems_per_agg = 8;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
     bool coarse_direct = false;
@@ -242,15 +242,15 @@ int main(int argc, char *argv[])
     nparts = pmesh.GetNE() / elems_per_agg;
     if (nparts == 0)
         nparts = 1;
-//    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false);
-    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts);
+//    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false, false);
+//    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts, false);
 
-//    int nparts_x = 1 << (serial_times_refine + times_refine);
-//    int nparts_y = nparts_x;
-//    int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
-//    agg_part_rels = agg_create_partitioning_fine(
-//        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
-//        fes.Dof_TrueDof_Matrix(), false);
+    int nparts_x = 1 << (serial_times_refine + times_refine);
+    int nparts_y = nparts_x;
+    int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
+    agg_part_rels = agg_create_partitioning_fine(
+        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
+        fes.Dof_TrueDof_Matrix(), false, false, false);
 
     delete [] bdr_dofs;
     fem_build_face_relations(agg_part_rels, fes);

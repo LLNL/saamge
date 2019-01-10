@@ -388,7 +388,7 @@ int *fem_partition_dual_simple_2D(mfem::Mesh& mesh, int *nparts, int *nparts_x,
 agg_partitioning_relations_t *
 fem_create_partitioning_identity(
     mfem::HypreParMatrix& A, mfem::ParFiniteElementSpace& fes,
-    const agg_dof_status_t *bdr_dofs, int *nparts);
+    const agg_dof_status_t *bdr_dofs, int *nparts, bool do_mises=true);
 
 /*! \brief Creates all relations on the finest (geometric) mesh.
 
@@ -415,7 +415,7 @@ fem_create_partitioning_identity(
 agg_partitioning_relations_t *
 fem_create_partitioning(mfem::HypreParMatrix& A, mfem::ParFiniteElementSpace& fes,
                         const agg_dof_status_t *bdr_dofs, int *nparts,
-                        bool do_aggregates);
+                        bool do_aggregates, bool do_mises=true);
 
 agg_partitioning_relations_t *
 fem_create_partitioning_from_matrix(const mfem::SparseMatrix& A,

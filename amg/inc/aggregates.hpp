@@ -267,7 +267,7 @@ void agg_construct_aggregates(const mfem::SparseMatrix& A,
 void agg_produce_mises(mfem::HypreParMatrix& Aglobal,
                        agg_partitioning_relations_t& agg_part_rels,
                        const agg_dof_status_t *bdr_dofs,
-                       bool do_aggregates);
+                       bool do_aggregates, bool do_mises=true);
 
 /*! \brief Assembles the local stiffness matrix for an AE on the finest mesh.
 
@@ -443,7 +443,7 @@ agg_create_partitioning_fine(mfem::HypreParMatrix& A, int NE, mfem::Table *elem_
                              mfem::Table *elem_to_elem, int *partitioning,
                              const agg_dof_status_t *bdr_dofs, int *nparts,
                              mfem::HypreParMatrix *dof_truedof,
-                             bool do_aggregates, bool testmesh=false);
+                             bool do_aggregates, bool testmesh=false, bool do_mises=true);
 
 /*! \brief like agg_create_partitioning_fine,
 
@@ -467,7 +467,7 @@ void agg_create_partitioning_tables(
     mfem::HypreParMatrix& Alocal, int NE, mfem::Table *elem_to_dof,
     mfem::Table *elem_to_elem, int *partitioning,
     const agg_dof_status_t *bdr_dofs, int *nparts,
-    mfem::HypreParMatrix *dof_truedof, bool do_aggregates);
+    mfem::HypreParMatrix *dof_truedof, bool do_aggregates, bool do_mises=true);
 
 /*! \brief Constructs only the face relations.
 

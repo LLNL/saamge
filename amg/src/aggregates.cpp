@@ -975,7 +975,7 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
                                  Table& l_AE_to_dof, Table& l_dof_to_AE,
                                  int *& mises, int *& mises_size,
                                  const agg_dof_status_t *previous_flags,
-                                 bool do_aggregates)
+                                 bool do_aggregates, bool do_mises=true)
 {
     HypreParMatrix * Dof_TrueDof = agg_part_rels.Dof_TrueDof; // pure pointer
     HypreParMatrix * TrueDof_Dof = Dof_TrueDof->Transpose();
@@ -1002,6 +1002,15 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
         agg_part_rels.dof_num_gAEs[i] = Dof_to_gAE_diag_I[i+1] - Dof_to_gAE_diag_I[i] +
                                         Dof_to_gAE_offd_I[i+1] - Dof_to_gAE_offd_I[i];
         SA_ASSERT(agg_part_rels.dof_num_gAEs[i] > 0);
+    }
+
+    if (!do_mises)
+    {
+        delete TrueDof_Dof;
+        delete Dof_TrueDof_Dof;
+        delete Dof_to_gAE;
+
+        return 0;
     }
 
     // construct local agg_part_rels.mis_to_dof, truemis_to_dof, other stuff; 
@@ -1098,7 +1107,7 @@ int agg_construct_mises_parallel(HypreParMatrix &Aglobal,
 void agg_produce_mises(HypreParMatrix& Aglobal,
                        agg_partitioning_relations_t& agg_part_rels,
                        const agg_dof_status_t *bdr_dofs,
-                       bool do_aggregates)
+                       bool do_aggregates, bool do_mises)
 {
     SA_ASSERT(agg_part_rels.AE_to_dof);
     SA_ASSERT(agg_part_rels.dof_to_AE);
@@ -1113,10 +1122,11 @@ void agg_produce_mises(HypreParMatrix& Aglobal,
         Aglobal, agg_part_rels, *(agg_part_rels.AE_to_dof),
         *(agg_part_rels.dof_to_AE), 
         agg_part_rels.mises, agg_part_rels.mises_size,
-        bdr_dofs, do_aggregates);
+        bdr_dofs, do_aggregates, do_mises);
 
-    SA_RPRINTF_L(0, 5, "Total number of MISes = %d\n",
-                 agg_part_rels.mis_truemis->GetGlobalNumRows());
+    if (do_mises)
+        SA_RPRINTF_L(0, 5, "Total number of MISes = %d\n",
+                     agg_part_rels.mis_truemis->GetGlobalNumRows());
 }
 
 SparseMatrix *agg_build_AE_stiffm_with_global(
@@ -1610,7 +1620,7 @@ agg_partitioning_relations_t *
 agg_create_partitioning_fine(
     HypreParMatrix& A, int NE, Table *elem_to_dof, Table *elem_to_elem,
     int *partitioning, const agg_dof_status_t *bdr_dofs, int *nparts,
-    HypreParMatrix *dof_truedof, bool do_aggregates, bool testmesh)
+    HypreParMatrix *dof_truedof, bool do_aggregates, bool testmesh, bool do_mises)
 {
     agg_partitioning_relations_t *agg_part_rels =
         new agg_partitioning_relations_t;
@@ -1643,7 +1653,7 @@ agg_create_partitioning_fine(
 
     agg_create_partitioning_tables(agg_part_rels, A, NE, elem_to_dof,
                                    elem_to_elem, partitioning, bdr_dofs, nparts,
-                                   dof_truedof, do_aggregates);
+                                   dof_truedof, do_aggregates, do_mises);
     return agg_part_rels;
 }
 
@@ -1653,7 +1663,7 @@ void agg_create_partitioning_tables(
     Table *elem_to_elem, int *partitioning,
     const agg_dof_status_t *bdr_dofs, int *nparts,
     HypreParMatrix *dof_truedof,
-    bool do_aggregates)
+    bool do_aggregates, bool do_mises)
 {
     SA_ASSERT(elem_to_dof);
     agg_part_rels->elem_to_dof = elem_to_dof;
@@ -1707,7 +1717,7 @@ void agg_create_partitioning_tables(
             out3 << agg_part_rels->dof_id_inAE[j] << std::endl;
     }
 
-    agg_produce_mises(Aglobal, *agg_part_rels, bdr_dofs, do_aggregates);
+    agg_produce_mises(Aglobal, *agg_part_rels, bdr_dofs, do_aggregates, do_mises);
     if (agg_part_rels->testmesh)
     {
         std::stringstream filename;
