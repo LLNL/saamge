@@ -101,15 +101,15 @@ int main(int argc, char *argv[])
     int times_refine = 0;
     args.AddOption(&times_refine, "-r", "--refine", 
                    "How many times to refine the mesh (in parallel).");
-    int nu_relax = 4;
-    args.AddOption(&nu_relax, "-n", "--nu-relax",
-                   "Degree for smoother in the relaxation.");
     int order = 1;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems.");
+    int nu_relax = 4;
+    args.AddOption(&nu_relax, "-n", "--nu-relax",
+                   "Degree for smoother in the relaxation.");
     bool full_space = true;
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
@@ -124,10 +124,6 @@ int main(int argc, char *argv[])
     int elems_per_agg = 8;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
-    bool zero_rhs = false;
-    args.AddOption(&zero_rhs, "-z", "--zero-rhs",
-                   "-nz", "--no-zero-rhs",
-                   "Solve CG with zero RHS and random initial guess.");
     bool coarse_direct = false;
     args.AddOption(&coarse_direct, "--coarse-direct", "--coarse-direct",
                    "--coarse-amg", "--coarse-amg",
@@ -136,6 +132,10 @@ int main(int argc, char *argv[])
     args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
                    "-nq", "--no-direct-eigensolver",
                    "Use direct eigensolver from LAPACK or ARPACK.");
+    bool zero_rhs = false;
+    args.AddOption(&zero_rhs, "-z", "--zero-rhs",
+                   "-nz", "--no-zero-rhs",
+                   "Solve with zero RHS and random initial guess.");
 
     args.Parse();
     if (!args.Good())
@@ -239,6 +239,7 @@ int main(int argc, char *argv[])
         nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
     else
         nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
+    tg_print_data(*Ag, tg_data);
 
     mfem::Solver *solver;
     if (coarse_direct)
@@ -250,8 +251,6 @@ int main(int argc, char *argv[])
                                                  *agg_part_rels->cface_TruecDof_cDof, *solver);
     else
         tg_data->coarse_solver = solver;
-
-    tg_print_data(*Ag, tg_data);
 
     if (zero_rhs)
     {

@@ -147,6 +147,13 @@ int main(int argc, char *argv[])
     int nl = 2;
     args.AddOption(&nl, "-nl", "--num-levels",
                    "Number of levels.");
+    bool aux = false;
+    args.AddOption(&aux, "-au", "--auxiliary",
+                   "-nau", "--no-auxiliary",
+                   "Auxiliary solver.");
+    int nu_relax_aux = 2;
+    args.AddOption(&nu_relax_aux, "-na", "--nu-relax-aux",
+                   "Degree for smoother in the relaxation for the auxiliary solver.");
 
     args.Parse();
     if (!args.Good())
@@ -239,7 +246,7 @@ int main(int argc, char *argv[])
 
     ElementMatrixStandardGeometric *emp = new ElementMatrixStandardGeometric(*agg_part_rels, Al, a);
 
-    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, 1.0, false, 0.0, !direct_eigensolver);
+    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax_aux, 1.0, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
     nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
@@ -342,12 +349,22 @@ int main(int argc, char *argv[])
     ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
     cbg = nonconf_ip_discretization_rhs(*tg_data->interp_data, *agg_part_rels, &rhsp);
 
-    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, 1e-12, 1e-24, 1.0,
-           (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
-                 tg_data_saamge), zero_rhs, true);
-
-    tg_data->interp->Mult(cx, *hx1g);
-    x1 = *hx1g;
+    if (aux)
+    {
+//        tg_data->coarse_solver = new HypreDirect(*tg_data->Ac);
+        tg_data->coarse_solver = new VCycleSolver((ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+                                                        tg_data_saamge), false);
+        tg_data->coarse_solver->SetOperator(*tg_data->Ac);
+        tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, 1e-12, 1e-24, 1.0, tg_data, zero_rhs, true);
+        x1 = *hxg;
+    } else
+    {
+        tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, 1e-12, 1e-24, 1.0,
+               (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+                     tg_data_saamge), zero_rhs, true);
+        tg_data->interp->Mult(cx, *hx1g);
+        x1 = *hx1g;
+    }
     if (visualize)
         fem_parallel_visualize_gf(pmesh, x1);
 
