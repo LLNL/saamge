@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
 
     // Read the mesh from the given mesh file.
 //    mesh = fem_read_mesh(mesh_file);
-    mesh = new Mesh(4, 4, Element::TRIANGLE, 1);
+    mesh = new Mesh(elems_per_agg >> 1, elems_per_agg >> 1, Element::TRIANGLE, 1);
     fem_refine_mesh_times(serial_times_refine, *mesh);
     // Serial mesh.
     SA_RPRINTF(0,"NV: %d, NE: %d\n", mesh->GetNV(), mesh->GetNE());
@@ -215,7 +215,7 @@ int main(int argc, char *argv[])
     int nparts_y = nparts_x;
     int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
     agg_part_rels = agg_create_partitioning_fine(
-        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
+        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(pmesh.ElementToElementTable())), partitioning, bdr_dofs, &nparts,
         fes.Dof_TrueDof_Matrix(), false, false, false);
 
     delete [] bdr_dofs;

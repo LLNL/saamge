@@ -558,10 +558,26 @@ void fem_get_element_max_vertex(const Mesh& mesh, int elno, Vector& maxv)
     }
 }
 
+void fem_get_element_min_vertex(const Mesh& mesh, int elno, Vector& minv)
+{
+    DenseMatrix Pts;
+
+    mesh.GetPointMatrix(elno, Pts);
+    Pts.GetColumn(0, minv);
+    for (int i = 1; i < Pts.Width(); ++i)
+    {
+        for (int j = 0; j < mesh.Dimension(); ++j)
+        {
+            if (minv(j) > Pts(j, i))
+                minv(j) = Pts(j, i);
+        }
+    }
+}
+
 int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
                                   int *nparts_y)
 {
-    SA_ASSERT(PROC_NUM == 1);
+//    SA_ASSERT(PROC_NUM == 1);
 
     SA_ASSERT(nparts);
     SA_ASSERT(nparts_x);
@@ -611,6 +627,19 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
     SA_ASSERT(sx > 0.);
     SA_ASSERT(sy > 0.);
 
+    double lx=sx, ly=sy;
+    Vector minimal_point; // bottom left vertex
+    for (int i=0; i < NE; ++i)
+    {
+        fem_get_element_min_vertex(mesh, i, minimal_point);
+        if (lx > minimal_point(0))
+            lx = minimal_point(0);
+        if (ly > minimal_point(1))
+            ly = minimal_point(1);
+    }
+    SA_ASSERT(sx > lx);
+    SA_ASSERT(sy > ly);
+
     for (int i=0; i < NE; ++i)
     {
         int x, y;
@@ -624,8 +653,8 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
         xmax = maximal_point(0);
         ymax = maximal_point(1);
 
-        y = (int)(ymax * (double)*nparts_y / sy);
-        x = (int)(xmax * (double)*nparts_x / sx);
+        y = (int)((ymax - ly) * (double)*nparts_y / (sy - ly));
+        x = (int)((xmax - lx) * (double)*nparts_x / (sx - lx));
         if (x == *nparts_x) --x;
         if (y == *nparts_y) --y;
         SA_ASSERT(0 <= x && x < *nparts_x);

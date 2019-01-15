@@ -978,4 +978,42 @@ double tg_compute_OC(HypreParMatrix& A, tg_data_t& tg_data)
     return 1.0 + tg_data.Ac->NNZ() / ((double) A.NNZ());
 }
 
+void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
+                               bool perform_solve_init, bool coarse_direct)
+{
+    SA_ASSERT(tg_data);
+    SA_ASSERT(tg_data->interp);
+    SA_ASSERT(tg_data->restr);
+
+    tg_free_coarse_operator(*tg_data);
+    delete tg_data->coarse_solver;
+
+    tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
+    if (perform_solve_init)
+    {
+        if (coarse_direct)
+        {
+            if (PROC_NUM == 1)
+            {
+                SA_RPRINTF_L(0, 5, "%s",
+                             "Setting coarse solver as direct UMFPACK solver.\n");
+                tg_data->coarse_solver = new HypreDirect(*tg_data->Ac);
+            } else
+            {
+                SA_RPRINTF_L(0, 5, "%s", "Setting coarse solver as a CG preconditioned "
+                                         "with BoomerAMG.\n");
+                tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+            }
+        }
+        else
+        {
+            SA_RPRINTF_L(0, 5, "%s",
+                       "Setting coarse solver as a single BoomerAMG v-cycle.\n");
+            mfem::HypreBoomerAMG * hbamg = new mfem::HypreBoomerAMG(*tg_data->Ac);
+            hbamg->SetPrintLevel(0);
+            tg_data->coarse_solver = hbamg;
+        }
+    }
+}
+
 } // namespace saamge

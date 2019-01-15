@@ -2285,12 +2285,45 @@ agg_create_partitioning_coarse(
     {
         const int num_elem = agg_part_rels_fine.nparts;
         SA_ASSERT(agg_part_rels_fine.AE_to_dof->Size() == num_elem);
+        SA_ASSERT(agg_part_rels->elem_to_elem->Size() == num_elem);
+        SA_ASSERT(agg_part_rels->elem_to_elem->Width() == num_elem);
+#if 0
+        const int side_felems = (int) round(sqrt(num_elem));
+        SA_ASSERT(side_felems*side_felems == num_elem);
+        SA_ASSERT(side_felems % 2 == 0);
+        const int side_celems = side_felems / 2;
+        const int num_celems = side_celems * side_celems;
+        agg_part_rels->partitioning = new int[num_elem];
+        memset(agg_part_rels->partitioning, -1, sizeof(*(agg_part_rels->partitioning)) * num_elem);
+        for (int i=0; i < side_celems; ++i)
+        {
+            for (int j=0; j < side_celems; ++j)
+            {
+                const int current = side_celems * i + j;
+                SA_ASSERT(current < num_celems);
+                SA_ASSERT(side_felems * 2*i + 2*j + side_felems + 1 < num_elem);
+                SA_ASSERT(-1 == agg_part_rels->partitioning[side_felems * 2*i + 2*j]);
+                agg_part_rels->partitioning[side_felems * 2*i + 2*j] = current;
+                SA_ASSERT(-1 == agg_part_rels->partitioning[side_felems * 2*i + 2*j + 1]);
+                agg_part_rels->partitioning[side_felems * 2*i + 2*j + 1] = current;
+                SA_ASSERT(-1 == agg_part_rels->partitioning[side_felems * 2*i + 2*j + side_felems]);
+                agg_part_rels->partitioning[side_felems * 2*i + 2*j + side_felems] = current;
+                SA_ASSERT(-1 == agg_part_rels->partitioning[side_felems * 2*i + 2*j + side_felems + 1]);
+                agg_part_rels->partitioning[side_felems * 2*i + 2*j + side_felems + 1] = current;
+            }
+        }
+        for (int i=0; i < num_elem; ++i)
+            SA_ASSERT(agg_part_rels->partitioning[i] >= 0);
+        Array<int> p_array(agg_part_rels->partitioning, num_elem);
+        connectedComponents(p_array, *(agg_part_rels->elem_to_elem));
+#else
         int * weights = new int[num_elem];
         for (int i=0; i<num_elem; ++i)
             weights[i] = agg_part_rels_fine.AE_to_dof->RowSize(i);
         agg_part_rels->partitioning =
             part_generate_partitioning(*(agg_part_rels->elem_to_elem), weights, nparts);
         delete [] weights;
+#endif
     }
     agg_part_rels->nparts = *nparts;
     agg_construct_tables_from_arr(agg_part_rels->partitioning,

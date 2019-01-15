@@ -1166,6 +1166,15 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
     HypreParMatrix nil;
     agg_produce_mises(nil, *agg_part_rels, NULL, false);
 
+#if (SA_IS_DEBUG_LEVEL(3))
+    for (int i=0; i < agg_part_rels->ND; ++i)
+        SA_ASSERT(agg_part_rels->dof_to_AE->RowSize(i) > 0);
+    agg_part_rels->dof_to_dof = new Table();
+    SA_ASSERT(agg_part_rels->dof_to_dof);
+    Mult(*(agg_part_rels->dof_to_AE), *(agg_part_rels->AE_to_dof),
+         *(agg_part_rels->dof_to_dof));
+#endif
+
     return agg_part_rels;
 }
 

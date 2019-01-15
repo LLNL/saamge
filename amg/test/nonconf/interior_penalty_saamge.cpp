@@ -95,6 +95,8 @@ int main(int argc, char *argv[])
     ParBilinearForm *a;
     agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge;
     tg_data_t *tg_data, *tg_data_saamge=NULL;
+    ml_data_t *ml_data_saamge;
+    int *nparts_arr;
 
     OptionsParser args(argc, argv);
 
@@ -137,7 +139,14 @@ int main(int argc, char *argv[])
     bool zero_rhs = false;
     args.AddOption(&zero_rhs, "-z", "--zero-rhs",
                    "-nz", "--no-zero-rhs",
-                   "Solve CG with zero RHS and random initial guess.");
+                   "Solve with zero RHS and random initial guess.");
+    bool ml = false;
+    args.AddOption(&ml, "-ml", "--multilevel",
+                   "-nml", "--no-multilevel",
+                   "Multilevel instead of two-level.");
+    int nl = 2;
+    args.AddOption(&nl, "-nl", "--num-levels",
+                   "Number of levels.");
 
     args.Parse();
     if (!args.Good())
@@ -154,7 +163,7 @@ int main(int argc, char *argv[])
 
     // Read the mesh from the given mesh file.
 //    mesh = fem_read_mesh(mesh_file);
-    mesh = new Mesh(4, 4, Element::TRIANGLE, 1);
+    mesh = new Mesh(elems_per_agg >> 1, elems_per_agg >> 1, Element::TRIANGLE, 1);
     fem_refine_mesh_times(serial_times_refine, *mesh);
     // Serial mesh.
     SA_RPRINTF(0,"NV: %d, NE: %d\n", mesh->GetNV(), mesh->GetNE());
@@ -167,6 +176,9 @@ int main(int argc, char *argv[])
     int nprocs = PROC_NUM;
     int *proc_partitioning;
     proc_partitioning = fem_partition_mesh(*mesh, &nprocs);
+//    int nprocs_x = 2;
+//    int nprocs_y = nprocs_x;
+//    proc_partitioning = fem_partition_dual_simple_2D(*mesh, &nprocs, &nprocs_x, &nprocs_y);
     SA_ASSERT(PROC_NUM == nprocs);
     if (0 == PROC_RANK && visualize)
         fem_serial_visualize_partitioning(*mesh, proc_partitioning);
@@ -217,7 +229,7 @@ int main(int argc, char *argv[])
     int nparts_y = nparts_x;
     int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
     agg_part_rels = agg_create_partitioning_fine(
-        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(mesh->ElementToElementTable())), partitioning, bdr_dofs, &nparts,
+        *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(pmesh.ElementToElementTable())), partitioning, bdr_dofs, &nparts,
         fes.Dof_TrueDof_Matrix(), false, false, false);
 
     delete [] bdr_dofs;
@@ -235,24 +247,39 @@ int main(int argc, char *argv[])
 
     agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
     ElementIPMatrix *emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
-    tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta, false, -1,
-                                     !direct_eigensolver, false);
-    tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
-
-    mfem::Solver *solver;
-    mfem::Solver *fsolver;
-    if (coarse_direct)
+    if (ml)
     {
-        solver = new HypreDirect(*tg_data_saamge->Ac);
-        fsolver = new HypreDirect(*Ag);
+        nparts_arr = new int[nl-1];
+        nparts_arr[0] = nparts;
+        for (int i=1; i < nl-1; ++i)
+        {
+            nparts_arr[i] = (int) round((double) nparts_arr[i-1] / (double) (elems_per_agg >> 1));
+            if (nparts_arr[i] < 1) nparts_arr[i] = 1;
+        }
+        MultilevelParameters mlp(nl-1, nparts_arr, 0, 0, nu_relax, theta,
+                                 theta, -1, false, !direct_eigensolver, false);
+        if (coarse_direct)
+            mlp.set_coarse_direct(true);
+        ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_ip, mlp);
     } else
     {
-        solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1000);
-        fsolver = new AMGSolver(*Ag, false);
-    }
-    tg_data_saamge->coarse_solver = solver;
+        tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta, false, -1,
+                                         !direct_eigensolver, false);
+        tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
 
-    tg_print_data(*tg_data->Ac, tg_data_saamge);
+        mfem::Solver *solver;
+        if (coarse_direct)
+            solver = new HypreDirect(*tg_data_saamge->Ac);
+        else
+            solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1000);
+        tg_data_saamge->coarse_solver = solver;
+        tg_print_data(*tg_data->Ac, tg_data_saamge);
+    }
+    mfem::Solver *fsolver;
+    if (coarse_direct)
+        fsolver = new HypreDirect(*Ag);
+    else
+        fsolver = new AMGSolver(*Ag, false);
 
     if (zero_rhs)
     {
@@ -315,7 +342,9 @@ int main(int argc, char *argv[])
     ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
     cbg = nonconf_ip_discretization_rhs(*tg_data->interp_data, *agg_part_rels, &rhsp);
 
-    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, 1e-12, 1e-24, 1.0, tg_data_saamge, zero_rhs, true);
+    tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, 1e-12, 1e-24, 1.0,
+           (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+                 tg_data_saamge), zero_rhs, true);
 
     tg_data->interp->Mult(cx, *hx1g);
     x1 = *hx1g;
@@ -341,7 +370,12 @@ int main(int argc, char *argv[])
     delete gx;
     delete cbg;
     tg_free_data(tg_data);
-    tg_free_data(tg_data_saamge);
+    if (ml)
+    {
+        ml_free_data(ml_data_saamge);
+        delete [] nparts_arr;
+    } else
+        tg_free_data(tg_data_saamge);
     delete fsolver;
     agg_free_partitioning(agg_part_rels);
     agg_free_partitioning(agg_part_rels_saamge);

@@ -592,6 +592,25 @@ tg_data_t *tg_copy_data(const tg_data_t *src);
 
 double tg_compute_OC(mfem::HypreParMatrix& A, tg_data_t& tg_data);
 
+/*! \brief \em Ac is updated (recomputed).
+
+    The previous one is freed and a new one is computed. Also, the "coarse
+    solver" is initialized in case \a perform_solve_init is \em true and
+    \a tg_data->coarse_solver.solve_init is not \em NULL.
+
+    \param A (IN) The fine-grid operator.
+    \param tg_data (IN) The TG data.
+    \param perform_solve_init (IN) Whether to initialize the "coarse solver".
+                                   Unless specially needed, this is usually
+                                   \em true.
+    \param coarse_direct (IN) Use a direct solver on the coarse level.
+
+    \warning \em Ac must be freed using \b tg_free_coarse_operator.
+*/
+void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
+                               bool perform_solve_init,
+                               bool coarse_direct);
+
 /* Inline Functions */
 /*! \brief Smooths the tentative interpolant to produce the final one.
 
@@ -636,26 +655,6 @@ mfem::HypreParMatrix *tg_coarse_matr(mfem::HypreParMatrix& A, mfem::HypreParMatr
 static inline
 void tg_fillin_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
                                bool perform_solve_init/*=true*/);
-
-/*! \brief \em Ac is updated (recomputed).
-
-    The previous one is freed and a new one is computed. Also, the "coarse
-    solver" is initialized in case \a perform_solve_init is \em true and
-    \a tg_data->coarse_solver.solve_init is not \em NULL.
-
-    \param A (IN) The fine-grid operator.
-    \param tg_data (IN) The TG data.
-    \param perform_solve_init (IN) Whether to initialize the "coarse solver".
-                                   Unless specially needed, this is usually
-                                   \em true.
-    \param coarse_direct (IN) Use a direct solver on the coarse level.
-
-    \warning \em Ac must be freed using \b tg_free_coarse_operator.
-*/
-static inline
-void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
-                               bool perform_solve_init,
-                               bool coarse_direct);
 
 /*! \brief \em Ac is freed.
 
@@ -726,42 +725,6 @@ void tg_fillin_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
                          "Setting coarse solver as a single BoomerAMG v-cycle.\n");
             mfem::HypreBoomerAMG * hbamg =
                 new mfem::HypreBoomerAMG(*tg_data->Ac);
-            hbamg->SetPrintLevel(0);
-            tg_data->coarse_solver = hbamg;
-        }
-    }
-}
-
-static inline
-void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
-                               bool perform_solve_init, bool coarse_direct)
-{
-    SA_ASSERT(tg_data);
-    SA_ASSERT(tg_data->interp);
-    SA_ASSERT(tg_data->restr);
-
-    tg_free_coarse_operator(*tg_data);
-    delete tg_data->coarse_solver;
-
-    tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
-    if (perform_solve_init)
-    {
-        /*
-        SA_RPRINTF(0,"%s","Setting coarse solver as a CG preconditioned "
-                   "with BoomerAMG.\n");
-        tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false);
-        */
-        if (coarse_direct)
-        {
-            SA_RPRINTF_L(0, 5, "%s",
-                         "Setting coarse solver as direct UMFPACK solver.\n");
-            tg_data->coarse_solver = new HypreDirect(*tg_data->Ac);
-        }
-        else
-        {
-            SA_RPRINTF_L(0, 5, "%s",
-                       "Setting coarse solver as a single BoomerAMG v-cycle.\n");
-            mfem::HypreBoomerAMG * hbamg = new mfem::HypreBoomerAMG(*tg_data->Ac);
             hbamg->SetPrintLevel(0);
             tg_data->coarse_solver = hbamg;
         }
