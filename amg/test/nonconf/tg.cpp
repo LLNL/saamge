@@ -165,6 +165,9 @@ int main(int argc, char *argv[])
     int nprocs = PROC_NUM;
     int *proc_partitioning;
     proc_partitioning = fem_partition_mesh(*mesh, &nprocs);
+//    int nprocs_x = 2;
+//    int nprocs_y = nprocs_x;
+//    proc_partitioning = fem_partition_dual_simple_2D(*mesh, &nprocs, &nprocs_x, &nprocs_y);
     SA_ASSERT(PROC_NUM == nprocs);
     if (0 == PROC_RANK && visualize)
         fem_serial_visualize_partitioning(*mesh, proc_partitioning);
