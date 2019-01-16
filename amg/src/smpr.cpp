@@ -281,6 +281,11 @@ double *smpr_sa_poly_roots(int& nu, int *degree)
 
 double *smpr_sas_poly_roots(int& nu, int *degree)
 {
+    if (0 == nu)
+    {
+        *degree = 0;
+        return NULL;
+    }
     SA_ASSERT(nu > 0);
     const int twonu = 2*nu;
     const double denom = (double)(2*nu + 1);
@@ -360,7 +365,7 @@ smpr_poly_data_t *smpr_init_poly_data(HypreParMatrix& A, int nu, double param)
 {
     smpr_poly_data_t *poly_data = new smpr_poly_data_t;
     SA_ASSERT(poly_data);
-    SA_ASSERT(nu > 0);
+    SA_ASSERT(nu >= 0);
     memset(poly_data, 0, sizeof(*poly_data));
 
     poly_data->nu = nu;
