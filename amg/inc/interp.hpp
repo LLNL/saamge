@@ -40,7 +40,6 @@
 #include "mbox.hpp"
 #include "aggregates.hpp"
 #include "spectral.hpp"
-#include "smpr.hpp"
 
 namespace saamge
 {

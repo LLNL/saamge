@@ -448,6 +448,12 @@ smpr_poly_data_t *smpr_copy_poly_data(const smpr_poly_data_t *src)
     dst->degree2 = src->degree2;
     dst->roots2 = helpers_copy_dbl_arr(src->roots2, src->degree2);
     dst->param = src->param;
+    dst->S = src->S;
+    dst->cDof_TruecDof = src->cDof_TruecDof;
+    dst->TruecDof_cDof = src->TruecDof_cDof;
+    dst->interp_data = src->interp_data;
+    dst->agg_part_rels = src->agg_part_rels;
+    dst->schur_smoother = src->schur_smoother;
     return dst;
 }
 

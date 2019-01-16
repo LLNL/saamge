@@ -452,7 +452,7 @@ HypreParVector *nonconf_assemble_coarse_schur_rhs(const interp_data_t& interp_da
 static inline
 void nonconf_coarse_schur_update_interior(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels, const HypreParMatrix& cface_cDof_TruecDof,
-                    const Vector& rhs, const HypreParVector& facev, Vector& x)
+                    const Vector& rhs, const Vector& facev, Vector& x)
 {
     SA_ASSERT(interp_data.invAii);
     SA_ASSERT(interp_data.invAiiAib);
@@ -531,6 +531,24 @@ void SchurSolver::Mult(const mfem::Vector &x, mfem::Vector &y) const
 
     // Backward substitution
     nonconf_coarse_schur_update_interior(interp_data, agg_part_rels, cface_cDof_TruecDof, x, eb, y);
+}
+
+void nonconf_schur_smoother(HypreParMatrix& A, const Vector& b, Vector& x, void *data)
+{
+    SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
+    smpr_poly_data_t *poly_data = (smpr_poly_data_t *)data;
+    Vector res(b.Size());
+    A.Mult(x, res);
+    subtract(b, res, res);
+    HypreParVector *schur_res = nonconf_assemble_coarse_schur_rhs(*poly_data->interp_data, *poly_data->agg_part_rels,
+                                                                  *poly_data->TruecDof_cDof, res);
+    Vector schur_x(schur_res->Size());
+    schur_x = 0.0;
+    poly_data->schur_smoother(*poly_data->S, *schur_res, schur_x, poly_data);
+    delete schur_res;
+    Vector update_x(x.Size());
+    nonconf_coarse_schur_update_interior(*poly_data->interp_data, *poly_data->agg_part_rels, *poly_data->cDof_TruecDof, res, schur_x, update_x);
+    x += update_x;
 }
 
 void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
@@ -613,7 +631,7 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
 */
 static inline
 void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
-                  const agg_partitioning_relations_t& agg_part_rels, double delta)
+                  const agg_partitioning_relations_t& agg_part_rels, double delta, bool schur=false)
 {
     SA_ASSERT(NULL != interp_data.cfaces_bases);
     const DenseMatrix * const * const cfaces_bases = interp_data.cfaces_bases;
@@ -625,6 +643,13 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
     interp_data.Aii = (Matrix **)new SparseMatrix*[agg_part_rels.nparts];
     interp_data.Abb = (Matrix **)new SparseMatrix*[agg_part_rels.nparts];
     interp_data.Aib = (Matrix **)new SparseMatrix*[agg_part_rels.nparts];
+    if (schur)
+    {
+        interp_data.invAii = new DenseMatrix*[agg_part_rels.nparts];
+        interp_data.invAiiAib = new DenseMatrix*[agg_part_rels.nparts];
+        interp_data.AbiinvAii = new DenseMatrix*[agg_part_rels.nparts];
+        interp_data.schurs = new DenseMatrix*[agg_part_rels.nparts];
+    }
 
     for (int i=0; i < agg_part_rels.nparts; ++i)
     {
@@ -734,11 +759,34 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
         SA_ASSERT(cface_offset == bdr_size);
         delete D;
         interp_data.Aii[i] = interp_data.AEs_stiffm[i];
-        interp_data.AEs_stiffm[i] = NULL;
         Abb->Finalize();
         Aib->Finalize();
         interp_data.Abb[i] = Abb;
         interp_data.Aib[i] = Aib;
+        if (schur)
+        {
+            DenseMatrix dAii, dAib, *dAbb = new DenseMatrix;
+            mbox_convert_sparse_to_dense(*interp_data.AEs_stiffm[i], dAii);
+            mbox_convert_sparse_to_dense(*Aib, dAib);
+            mbox_convert_sparse_to_dense(*Abb, *dAbb);
+
+            DenseMatrix *invAii = new DenseMatrix;
+            xpacks_calc_spd_inverse_dense(dAii, *invAii);
+            DenseMatrix *invAiiAib = new DenseMatrix;
+            invAiiAib->SetSize(invAii->Height(), dAib.Width());
+            Mult(*invAii, dAib, *invAiiAib);
+            DenseMatrix AbiinvAiiAib;
+            AbiinvAiiAib.SetSize(dAib.Width(), invAiiAib->Width());
+            MultAtB(dAib, *invAiiAib, AbiinvAiiAib);
+            *dAbb -= AbiinvAiiAib;
+            interp_data.schurs[i] = dAbb;
+            interp_data.invAii[i] = invAii;
+            interp_data.invAiiAib[i] = invAiiAib;
+            interp_data.AbiinvAii[i] = new DenseMatrix;
+            interp_data.AbiinvAii[i]->SetSize(dAib.Width(), invAii->Width());
+            MultAtB(dAib, *invAii, *(interp_data.AbiinvAii[i]));
+        }
+        interp_data.AEs_stiffm[i] = NULL;
 //        if (i == 2)
 //        {
 //            std::ofstream myfile;
@@ -951,8 +999,8 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
     return rhs;
 }
 
-void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double delta)
+HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                          ElementMatrixProvider *elem_data, double delta, bool schur)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true;
@@ -1076,15 +1124,31 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
     tg_data.restr = tg_data.interp->Transpose();
 
     // Obtain the remaining necessary relations.
+    if (schur)
+    {
+        agg_create_cface_cDof_TruecDof_relations(agg_part_rels, tg_data.interp_data->coarse_truedof_offset,
+                                                 tg_data.interp_data->cfaces_bases, tg_data.interp_data->celements_cdofs, false);
+        agg_part_rels.cface_only_cDof_TruecDof = agg_part_rels.cface_cDof_TruecDof;
+        agg_part_rels.cface_only_TruecDof_cDof = agg_part_rels.cface_TruecDof_cDof;
+        agg_part_rels.cface_cDof_TruecDof = agg_part_rels.cface_TruecDof_cDof = NULL;
+    }
     agg_create_cface_cDof_TruecDof_relations(agg_part_rels, tg_data.interp_data->coarse_truedof_offset,
                                              tg_data.interp_data->cfaces_bases, tg_data.interp_data->celements_cdofs, true);
 
-    nonconf_ip_discretization_matrices(*tg_data.interp_data, agg_part_rels, delta);
+    nonconf_ip_discretization_matrices(*tg_data.interp_data, agg_part_rels, delta, schur);
 
     // Construct the operator as though it is a "coarse" matrix.
     delete tg_data.Ac;
     tg_data.Ac = nonconf_ip_discretization_assemble(*tg_data.interp_data, agg_part_rels,
                     *agg_part_rels.cface_cDof_TruecDof);
+
+    if (schur)
+    {
+        return nonconf_assemble_coarse_schur_matrix(*tg_data.interp_data, agg_part_rels,
+                                                    *agg_part_rels.cface_only_cDof_TruecDof);
+    }
+
+    return NULL;
 }
 
 agg_partitioning_relations_t *

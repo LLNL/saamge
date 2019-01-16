@@ -37,6 +37,7 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include "mbox.hpp"
+#include "interp.hpp"
 
 namespace saamge
 {
@@ -105,6 +106,12 @@ typedef struct {
                                needed) */
     double param; /*!< A real (double) parameter (polynomial smoother
                        specific) */
+    mfem::HypreParMatrix *S; /*!< A Schur complement. Not owned by this structure. */
+    mfem::HypreParMatrix *cDof_TruecDof; /*!< Relations associated with the Schur complement. Not owned by this structure. */
+    mfem::HypreParMatrix *TruecDof_cDof; /*!< Relations associated with the Schur complement. Not owned by this structure. */
+    interp_data_t *interp_data; /*!< Associated with the Schur complement. Not owned by this structure. */
+    agg_partitioning_relations_t *agg_part_rels; /*!< Associated with the Schur complement. Not owned by this structure. */
+    smpr_ft schur_smoother; /*!< Smoother for the Schur complement. */
 } smpr_poly_data_t;
 
 /* Functions */

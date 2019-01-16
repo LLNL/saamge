@@ -90,6 +90,9 @@ private:
     const mfem::Solver& solver;
 };
 
+/*! A Schur complement smoother matching the bulky SAAMGe C-type abstraction.
+*/
+void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
 
 /*! Builds a "coarse" interior penalty formulation and the respective space. tg_data should already
     have some basic initializations via tg_init_data().
@@ -109,8 +112,8 @@ mfem::HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
     tg_data should already have some basic initializations via tg_init_data().
 */
-void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double delta);
+mfem::HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                          ElementMatrixProvider *elem_data, double delta, bool schur=false);
 
 /*! Once the fine interior penalty discretization is obtained, this routine provides the partitioning
     relations for calling SAAMGe on the interior penalty matrix where the AEs on the first level are the same AEs as
