@@ -29,7 +29,7 @@
 */
 
 /**
-   @file This file and the respective .cpp file implement a nonconforming AMGe
+   @file This file and the respective .cpp file implement a nonconforming interior penalty AMGe
    approach. It basically "breaks" the space with the first coarsening and reduces the problem to
    faces similar to static condensation. It is thus natural and easy to recursively extend to multiple levels and
    is suitable for high-order discretizations when a matrix-free approach is utilized.
@@ -90,6 +90,17 @@ private:
     const mfem::Solver& solver;
 };
 
+/**
+    Once all coarse element Schur complement matrices (on cfaces) are obtained,
+    the global Schur complement matrix is assembled by a standard procedure in this
+    routine. The procedure is standard but adapted for the particular data structures and organization.
+
+    The returned global Schur complement matrix must be freed by the caller.
+*/
+mfem::HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp_data,
+                    const agg_partitioning_relations_t& agg_part_rels,
+                    const mfem::HypreParMatrix& cface_cDof_TruecDof);
+
 /*! A Schur complement smoother matching the bulky SAAMGe C-type abstraction.
 */
 void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
@@ -107,6 +118,11 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
 mfem::HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
                                               const agg_partitioning_relations_t& agg_part_rels,
                                               ElementMatrixProvider *elem_data);
+
+/*! Prepare "identity" element basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
+*/
+void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, agg_partitioning_relations_t& agg_part_rels,
+                                                    ElementMatrixProvider *elem_data);
 
 /*! Builds a "fine" interior penalty formulation and the respective space using (or abusing) the TG structure.
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.

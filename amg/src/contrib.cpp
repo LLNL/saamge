@@ -321,7 +321,7 @@ void ContribTent::contrib_tent_insert_from_local(
 }
 
 void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, const DenseMatrix * const *cut_evects_arr,
-                                                  const DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels)
+                                                  const DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels, bool face_avg)
 {
     int nloc_cbasis = 0;
     for (int i=0; i < nparts; ++i)
@@ -362,7 +362,7 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
             {
                 SA_ASSERT(agg_part_rels.dof_to_cface->RowSize(ldof) > 0);
                 SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] > 1);
-                scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
+                scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + (face_avg ? agg_part_rels.dof_num_gcfaces[ldof] : 0));
             }
             for (int base=0; base < interior_basis->Width(); ++base)
             {
@@ -396,14 +396,17 @@ void ContribTent::insert_from_cfaces_celems_bases(int nparts, int num_cfaces, co
                 SA_ASSERT(agg_part_rels.dof_to_cface->RowSize(ldof) > 0);
                 SA_ASSERT(agg_part_rels.dof_num_gAEs[ldof] > 1);
                 SA_ASSERT(agg_part_rels.dof_num_gcfaces[ldof] > 0);
-                const double scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
-                for (int base=0; base < interface_basis->Width(); ++base)
+                if (face_avg)
                 {
-                    const double a = (*interface_basis)(dof, base);
-                    if (a != 0.0)
+                    const double scale = 1.0 / (double)(agg_part_rels.dof_num_gAEs[ldof] + agg_part_rels.dof_num_gcfaces[ldof]);
+                    for (int base=0; base < interface_basis->Width(); ++base)
                     {
-                        tent_interp_->Set(ldof, filled_cols + base, scale * a);
-//                        tent_restr_->Set(filled_cols + base, ldof, a);
+                        const double a = (*interface_basis)(dof, base);
+                        if (a != 0.0)
+                        {
+                            tent_interp_->Set(ldof, filled_cols + base, scale * a);
+//                            tent_restr_->Set(filled_cols + base, ldof, a);
+                        }
                     }
                 }
             }
@@ -1025,6 +1028,86 @@ DenseMatrix **ContribTent::contrib_cfaces_full(const agg_partitioning_relations_
             }
         }
         SA_ASSERT(intdofs_ctr == nintdofs);
+        if (agg_part_rels.cface_master[i] == PROC_RANK)
+            num_coarse_dofs += cfaces_bases[i]->Width();
+    }
+
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs,&coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n",coarse_truedof_offset);
+
+    return cfaces_bases;
+}
+
+DenseMatrix **ContribTent::contrib_cfaces_const(const agg_partitioning_relations_t& agg_part_rels)
+{
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
+    int num_coarse_dofs = 0;
+    for (int i=0; i < num_cfaces; ++i)
+    {
+        const int ndofs = agg_part_rels.cface_to_dof->RowSize(i);
+        int nintdofs = 0;
+        for (int j=0; j < ndofs; ++j)
+        {
+            const int gj = agg_num_col_to_glob(*agg_part_rels.cface_to_dof, i, j);
+            SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+            if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                ++nintdofs;
+        }
+        SA_ASSERT(ndofs >= nintdofs);
+        cfaces_bases[i] = new DenseMatrix(ndofs, nintdofs > 0 ? 1 : nintdofs);
+        SA_ASSERT(cfaces_bases[i]);
+        for (int j=0; j < ndofs; ++j)
+        {
+            const int gj = agg_num_col_to_glob(*agg_part_rels.cface_to_dof, i, j);
+            SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+            if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+            {
+                SA_ASSERT(cfaces_bases[i]->Width() > 0);
+                cfaces_bases[i]->Elem(j, 0) = 1.0;
+            }
+        }
+        if (agg_part_rels.cface_master[i] == PROC_RANK)
+            num_coarse_dofs += cfaces_bases[i]->Width();
+    }
+
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs,&coarse_truedof_offset,1,MPI_INT,MPI_SUM,PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n",coarse_truedof_offset);
+
+    return cfaces_bases;
+}
+
+DenseMatrix **ContribTent::contrib_ffaces_const(const agg_partitioning_relations_t& agg_part_rels)
+{
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
+    int num_coarse_dofs = 0;
+    for (int i=0; i < num_cfaces; ++i)
+    {
+        const int ndofs = agg_part_rels.cface_to_dof->RowSize(i);
+        const int nintdofs = agg_part_rels.cface_to_face->RowSize(i);
+        const int * const ffaces = agg_part_rels.cface_to_face->GetRow(i);
+        SA_ASSERT(ndofs >= nintdofs);
+        cfaces_bases[i] = new DenseMatrix(ndofs, nintdofs);
+        SA_ASSERT(cfaces_bases[i]);
+        for (int k=0; k < nintdofs; ++k)
+        {
+            const int fface = ffaces[k];
+            for (int j=0; j < ndofs; ++j)
+            {
+                const int gj = agg_num_col_to_glob(*agg_part_rels.cface_to_dof, i, j);
+                SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+                if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG) &&
+                    (*agg_part_rels.face_to_dof)(fface, gj) >= 0)
+                {
+                    cfaces_bases[i]->Elem(j, k) = 1.0;
+                }
+            }
+        }
         if (agg_part_rels.cface_master[i] == PROC_RANK)
             num_coarse_dofs += cfaces_bases[i]->Width();
     }

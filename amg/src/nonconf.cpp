@@ -64,7 +64,6 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
     SA_ASSERT(NULL == interp_data.Aib);
     SA_ASSERT(NULL == interp_data.invAii);
     SA_ASSERT(NULL == interp_data.invAiiAib);
-    SA_ASSERT(NULL == interp_data.AbiinvAii);
     SA_ASSERT(NULL == interp_data.schurs);
     if (onlytheblocks)
     {
@@ -75,7 +74,6 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
     {
         interp_data.invAii = new DenseMatrix*[agg_part_rels.nparts];
         interp_data.invAiiAib = new DenseMatrix*[agg_part_rels.nparts];
-        interp_data.AbiinvAii = new DenseMatrix*[agg_part_rels.nparts];
         interp_data.schurs = new DenseMatrix*[agg_part_rels.nparts];
     }
     for (int i=0; i < agg_part_rels.nparts; ++i)
@@ -188,9 +186,6 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
             interp_data.schurs[i] = Abb;
             interp_data.invAii[i] = invAii;
             interp_data.invAiiAib[i] = invAiiAib;
-            interp_data.AbiinvAii[i] = new DenseMatrix;
-            interp_data.AbiinvAii[i]->SetSize(Aib->Width(), invAii->Width());
-            MultAtB(*Aib, *invAii, *(interp_data.AbiinvAii[i]));
             delete Aib;
             delete Aii;
         }
@@ -204,7 +199,6 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
 
     The returned global Schur complement matrix must be freed by the caller.
 */
-static inline
 HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels,
                     const HypreParMatrix& cface_cDof_TruecDof)
@@ -227,8 +221,7 @@ HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp
         {
             const int cfacej = cfaces[j];
             SA_ASSERT(0 <= cfacej && cfacej < interp_data.num_cfaces);
-            const int ndofsj = interp_data.cfaces_bases[cfacej]->Width();
-            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cfacej+1] - interp_data.cfaces_cdofs_offsets[cfacej] == ndofsj);
+            const int ndofsj = interp_data.cfaces_cdofs_offsets[cfacej+1] - interp_data.cfaces_cdofs_offsets[cfacej];
             const int offsetj = interp_data.cfaces_cdofs_offsets[cfacej];
             SA_ASSERT(offsetj + ndofsj <= nloc_cfacecdofs);
             SA_ASSERT(bcol + ndofsj <= elem_matr.Width());
@@ -239,8 +232,7 @@ HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp
                 {
                     const int cfacem = cfaces[m];
                     SA_ASSERT(0 <= cfacem && cfacem < interp_data.num_cfaces);
-                    const int ndofsm = interp_data.cfaces_bases[cfacem]->Width();
-                    SA_ASSERT(interp_data.cfaces_cdofs_offsets[cfacem+1] - interp_data.cfaces_cdofs_offsets[cfacem] == ndofsm);
+                    const int ndofsm = interp_data.cfaces_cdofs_offsets[cfacem+1] - interp_data.cfaces_cdofs_offsets[cfacem];
                     const int offsetm = interp_data.cfaces_cdofs_offsets[cfacem];
                     SA_ASSERT(offsetm + ndofsm <= nloc_cfacecdofs);
                     SA_ASSERT(brow + ndofsm <= elem_matr.Height());
@@ -392,10 +384,9 @@ HypreParVector *nonconf_assemble_coarse_schur_rhs(const interp_data_t& interp_da
                     const agg_partitioning_relations_t& agg_part_rels,
                     const HypreParMatrix& cface_TruecDof_cDof, const Vector& rhs)
 {
-    SA_ASSERT(interp_data.AbiinvAii);
+    SA_ASSERT(interp_data.invAiiAib);
     SA_ASSERT(interp_data.celements_cdofs_offsets);
     SA_ASSERT(interp_data.cfaces_cdofs_offsets);
-    SA_ASSERT(interp_data.cfaces_bases);
     SA_ASSERT(rhs.Size() == interp_data.celements_cdofs + cface_TruecDof_cDof.Height());
 
     // Assemble the local (on processor) portion of (a component of) the rhs.
@@ -405,16 +396,16 @@ HypreParVector *nonconf_assemble_coarse_schur_rhs(const interp_data_t& interp_da
     Vector bdr;
     for (int i=0; i < interp_data.nparts; ++i)
     {
-        SA_ASSERT(interp_data.AbiinvAii[i]);
+        SA_ASSERT(interp_data.invAiiAib[i]);
         SA_ASSERT(interp_data.celements_cdofs_offsets[i] < interp_data.celements_cdofs);
         SA_ASSERT(interp_data.celements_cdofs_offsets[i+1] <= interp_data.celements_cdofs);
         const int interior_size = interp_data.celements_cdofs_offsets[i+1] - interp_data.celements_cdofs_offsets[i];
         SA_ASSERT(interp_data.cut_evects_arr[i]->Width() == interior_size);
-        SA_ASSERT(interp_data.AbiinvAii[i]->Width() == interior_size);
+        SA_ASSERT(interp_data.invAiiAib[i]->Height() == interior_size);
         const Vector interior(rhs.GetData() + interp_data.celements_cdofs_offsets[i], interior_size);
 
-        bdr.SetSize(interp_data.AbiinvAii[i]->Height());
-        interp_data.AbiinvAii[i]->Mult(interior, bdr);
+        bdr.SetSize(interp_data.invAiiAib[i]->Width());
+        interp_data.invAiiAib[i]->MultTranspose(interior, bdr);
         const int ncfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         int brow = 0;
@@ -422,8 +413,7 @@ HypreParVector *nonconf_assemble_coarse_schur_rhs(const interp_data_t& interp_da
         {
             const int cface = cfaces[j];
             SA_ASSERT(0 <= cface && cface < interp_data.num_cfaces);
-            const int ndofs = interp_data.cfaces_bases[cface]->Width();
-            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface] == ndofs);
+            const int ndofs = interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface];
             const int offset = interp_data.cfaces_cdofs_offsets[cface];
             SA_ASSERT(offset + ndofs <= lrhs.Size());
             for (int k=0; k < ndofs; ++k, ++brow)
@@ -458,7 +448,6 @@ void nonconf_coarse_schur_update_interior(const interp_data_t& interp_data,
     SA_ASSERT(interp_data.invAiiAib);
     SA_ASSERT(interp_data.celements_cdofs_offsets);
     SA_ASSERT(interp_data.cfaces_cdofs_offsets);
-    SA_ASSERT(interp_data.cfaces_bases);
     SA_ASSERT(rhs.Size() == interp_data.celements_cdofs + cface_cDof_TruecDof.Width());
     SA_ASSERT(facev.Size() == cface_cDof_TruecDof.Width());
 
@@ -503,8 +492,7 @@ void nonconf_coarse_schur_update_interior(const interp_data_t& interp_data,
         {
             const int cface = cfaces[j];
             SA_ASSERT(0 <= cface && cface < interp_data.num_cfaces);
-            const int ndofs = interp_data.cfaces_bases[cface]->Width();
-            SA_ASSERT(interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface] == ndofs);
+            const int ndofs = interp_data.cfaces_cdofs_offsets[cface+1] - interp_data.cfaces_cdofs_offsets[cface];
             const int offset = interp_data.cfaces_cdofs_offsets[cface];
             SA_ASSERT(offset + ndofs <= lfacev.Size());
             SA_ASSERT(brow + ndofs <= bdr.Size());
@@ -591,9 +579,11 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
     delete tg_data.ltent_interp;
     delete tg_data.ltent_restr;
     delete tg_data.tent_interp;
+    tg_data.tent_interp = NULL;
     delete tg_data.interp;
     delete tg_data.restr;
     tg_data.ltent_interp = cfaces_bases_contrib.contrib_tent_finalize();
+    tg_data.ltent_restr = NULL;
 //    tg_data.ltent_restr = cfaces_bases_contrib.contrib_restr_finalize();
     tg_data.interp_data->celements_cdofs = cfaces_bases_contrib.get_celements_cdofs();
     tg_data.interp_data->celements_cdofs_offsets = cfaces_bases_contrib.get_celements_cdofs_offsets();
@@ -647,7 +637,6 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
     {
         interp_data.invAii = new DenseMatrix*[agg_part_rels.nparts];
         interp_data.invAiiAib = new DenseMatrix*[agg_part_rels.nparts];
-        interp_data.AbiinvAii = new DenseMatrix*[agg_part_rels.nparts];
         interp_data.schurs = new DenseMatrix*[agg_part_rels.nparts];
     }
 
@@ -671,6 +660,7 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
         SA_ASSERT(interp_data.celements_cdofs_offsets[i+1] - interp_data.celements_cdofs_offsets[i]
                   == interior_size);
         SA_ASSERT(D->Height() == interior_size);
+        SA_ASSERT(D->NumNonZeroElems() == interior_size);
         SA_ASSERT(interp_data.cut_evects_arr[i]->Height() == ndofs);
         int bdr_size = 0;
         for (int j=0; j < num_cfaces; ++j)
@@ -782,9 +772,6 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
             interp_data.schurs[i] = dAbb;
             interp_data.invAii[i] = invAii;
             interp_data.invAiiAib[i] = invAiiAib;
-            interp_data.AbiinvAii[i] = new DenseMatrix;
-            interp_data.AbiinvAii[i]->SetSize(dAib.Width(), invAii->Width());
-            MultAtB(dAib, *invAii, *(interp_data.AbiinvAii[i]));
         }
         interp_data.AEs_stiffm[i] = NULL;
 //        if (i == 2)
@@ -801,6 +788,8 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
 //            myfile.close();
 //        }
     }
+    delete [] interp_data.AEs_stiffm;
+    interp_data.AEs_stiffm = NULL;
 }
 
 /**
@@ -950,6 +939,7 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
 {
     SA_ASSERT(agg_part_rels.cface_TruecDof_cDof);
     SA_ASSERT(agg_part_rels.AE_to_dof);
+    SA_ASSERT(elem_data);
 
     const int nparts = agg_part_rels.nparts;
     SparseMatrix *AE_rhs;
@@ -999,20 +989,16 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
     return rhs;
 }
 
-HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                                          ElementMatrixProvider *elem_data, double delta, bool schur)
+void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, agg_partitioning_relations_t& agg_part_rels,
+                                                    ElementMatrixProvider *elem_data)
 {
-    tg_data.elem_data = elem_data;
-    tg_data.doing_spectral = true;
-
-    // Prepare "identity" basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
-    DenseMatrix ** const cut_evects_arr = tg_data.interp_data->cut_evects_arr;
+    DenseMatrix ** const cut_evects_arr = interp_data.cut_evects_arr;
     SA_ASSERT(cut_evects_arr);
     const int nparts = agg_part_rels.nparts;
     SA_ASSERT(0 < nparts);
     SparseMatrix *AE_stiffm;
     SparseMatrix *new_AE_stiffm;
-    SA_ASSERT(tg_data.interp_data->AEs_stiffm);
+    SA_ASSERT(interp_data.AEs_stiffm);
     for (int i=0; i < nparts; ++i)
     {
         AE_stiffm = elem_data->BuildAEStiff(i);
@@ -1088,9 +1074,19 @@ HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_r
         delete AE_stiffm;
         new_AE_stiffm->Finalize();
         SA_ASSERT(new_AE_stiffm->NumNonZeroElems() == total_nnz);
-        SA_ASSERT(NULL == tg_data.interp_data->AEs_stiffm[i]);
-        tg_data.interp_data->AEs_stiffm[i] = new_AE_stiffm;
+        SA_ASSERT(NULL == interp_data.AEs_stiffm[i]);
+        interp_data.AEs_stiffm[i] = new_AE_stiffm;
     }
+}
+
+HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                          ElementMatrixProvider *elem_data, double delta, bool schur)
+{
+    tg_data.elem_data = elem_data;
+    tg_data.doing_spectral = true;
+
+    // Prepare "identity" element basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
+    nonconf_eliminate_boundary_full_element_basis(*tg_data.interp_data, agg_part_rels, elem_data);
 
     // Obtain coarse/agglomerated face basis.
     ContribTent cfaces_bases_contrib(agg_part_rels.ND);
@@ -1106,9 +1102,11 @@ HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_r
     delete tg_data.ltent_interp;
     delete tg_data.ltent_restr;
     delete tg_data.tent_interp;
+    tg_data.tent_interp = NULL;
     delete tg_data.interp;
     delete tg_data.restr;
     tg_data.ltent_interp = cfaces_bases_contrib.contrib_tent_finalize();
+    tg_data.ltent_restr = NULL;
 //    tg_data.ltent_restr = cfaces_bases_contrib.contrib_restr_finalize();
     tg_data.interp_data->celements_cdofs = cfaces_bases_contrib.get_celements_cdofs();
     tg_data.interp_data->celements_cdofs_offsets = cfaces_bases_contrib.get_celements_cdofs_offsets();

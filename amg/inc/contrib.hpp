@@ -144,6 +144,25 @@ public:
     */
     mfem::DenseMatrix **contrib_cfaces_full(const agg_partitioning_relations_t& agg_part_rels);
 
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face constant basis functions.
+
+      \param agg_part_rels (IN) The partitioning relations.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_cfaces_const(const agg_partitioning_relations_t& agg_part_rels);
+
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the constant basis functions that are constant on a fine face.
+
+      XXX: The implementation is not great.
+
+      \param agg_part_rels (IN) The partitioning relations.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_ffaces_const(const agg_partitioning_relations_t& agg_part_rels);
 
     /*! \brief Inserts (embeds) the bases for the nonconforming method.
 
@@ -152,7 +171,7 @@ public:
         coarse (agglomerated) elements.
     */
     void insert_from_cfaces_celems_bases(int nparts, int num_cfaces, const mfem::DenseMatrix * const *cut_evects_arr,
-                                         const mfem::DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels);
+                                         const mfem::DenseMatrix * const *cfaces_bases, const agg_partitioning_relations_t& agg_part_rels, bool face_avg=true);
 
     /**
        Do both spectral and linears.

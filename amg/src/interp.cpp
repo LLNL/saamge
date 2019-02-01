@@ -309,9 +309,10 @@ void interp_free_data(interp_data_t *interp_data,
     mbox_free_matr_arr((Matrix **)interp_data->Aib, interp_data->nparts);
     mbox_free_matr_arr((Matrix **)interp_data->invAii, interp_data->nparts);
     mbox_free_matr_arr((Matrix **)interp_data->invAiiAib, interp_data->nparts);
-    mbox_free_matr_arr((Matrix **)interp_data->AbiinvAii, interp_data->nparts);
     mbox_free_matr_arr((Matrix **)interp_data->schurs, interp_data->nparts);
     mbox_free_matr_arr((Matrix **)interp_data->cfaces_bases, interp_data->num_cfaces);
+    mbox_free_matr_arr((Matrix **)interp_data->pre_rhs, interp_data->nparts);
+    mbox_free_matr_arr((Matrix **)interp_data->rhs, interp_data->nparts);
 
     delete [] interp_data->celements_cdofs_offsets;
     delete [] interp_data->cfaces_truecdofs_offsets;
@@ -349,9 +350,10 @@ interp_data_t *interp_copy_data(const interp_data_t *src)
     dst->Aib = mbox_copy_matr_arr(src->Aib, src->nparts);
     dst->invAii = mbox_copy_dense_matr_arr(src->invAii, src->nparts);
     dst->invAiiAib = mbox_copy_dense_matr_arr(src->invAiiAib, src->nparts);
-    dst->AbiinvAii = mbox_copy_dense_matr_arr(src->AbiinvAii, src->nparts);
     dst->schurs = mbox_copy_dense_matr_arr(src->schurs, src->nparts);
     dst->cfaces_bases = mbox_copy_dense_matr_arr(src->cfaces_bases, src->num_cfaces);
+    dst->pre_rhs = mbox_copy_dense_matr_arr(src->pre_rhs, src->nparts);
+    dst->rhs = mbox_copy_dense_matr_arr(src->rhs, src->nparts);
     dst->num_cfaces = src->num_cfaces;
 
     dst->celements_cdofs = src->celements_cdofs;

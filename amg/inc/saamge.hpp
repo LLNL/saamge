@@ -56,5 +56,6 @@
 #include <xpacks.hpp>
 #include <DoubleCycle.hpp>
 #include <nonconf.hpp>
+#include <mortar.hpp>
 
 #endif // _SAAMGE_HPP

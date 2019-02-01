@@ -69,9 +69,10 @@ typedef struct {
     mfem::Matrix **Aib;
     mfem::DenseMatrix **invAii;
     mfem::DenseMatrix **invAiiAib;
-    mfem::DenseMatrix **AbiinvAii;
     mfem::DenseMatrix **schurs;
     mfem::DenseMatrix **cfaces_bases;
+    mfem::DenseMatrix **pre_rhs;
+    mfem::DenseMatrix **rhs;
     int num_cfaces;
 
     /** Some information to map the coarse DoFs for the first refinement on a processor in the nonconforming method.
