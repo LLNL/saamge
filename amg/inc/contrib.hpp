@@ -135,6 +135,16 @@ public:
     mfem::DenseMatrix **contrib_cfaces(const agg_partitioning_relations_t& agg_part_rels,
                                        mfem::DenseMatrix * const *cut_evects_arr, bool full_space=false);
 
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions.
+
+      Uses provided global targets.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_cfaces_targets(const agg_partitioning_relations_t& agg_part_rels,
+                                               const mfem::Array<mfem::Vector *>& face_targets);
+
     /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions for the "full" space.
 
       \param agg_part_rels (IN) The partitioning relations.
@@ -318,6 +328,23 @@ private:
     */
     mfem::DenseMatrix **CFacesSVD(const agg_partitioning_relations_t& agg_part_rels,
                                   mfem::DenseMatrix **received_mats, int *row_sizes, bool full_space=false);
+
+    /**
+       Take span_mats, do SVDs on coarse faces, and then destroy span_mats.
+
+       Returns the obtained coarse face bases on known coarse faces. Needs to be freed by the caller.
+
+       span_mats is an array of singleton dense matrices (one matrix on each entry).
+
+       No communication is performed, so it is applicable in the cases where known
+       global targets are used.
+
+       Does not deal with essential boundary conditions, only basic linear dependence filtering.
+
+       Note well that span_mats is totally deleted by this routine.
+    */
+    mfem::DenseMatrix **CFacesSVDnocomm(const agg_partitioning_relations_t& agg_part_rels,
+                                        mfem::DenseMatrix **span_mats);
 
     /*! building coarse_one_representation on the fly (we are going to just
       copy this pointer to interp_data) */

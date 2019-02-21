@@ -889,7 +889,6 @@ DenseMatrix **ContribTent::CFacesSVD(const agg_partitioning_relations_t& agg_par
     const int num_cfaces = agg_part_rels.num_cfaces;
     DenseMatrix lsvects;
     DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
-    std::memset(cfaces_bases, 0, sizeof(DenseMatrix*) * num_cfaces);
     Vector svals;
     int num_coarse_dofs = 0;
     for (int cface=0; cface < num_cfaces; ++cface)
@@ -935,6 +934,57 @@ DenseMatrix **ContribTent::CFacesSVD(const agg_partitioning_relations_t& agg_par
         }
     }
     delete [] received_mats;
+
+    coarse_truedof_offset = 0;
+    MPI_Scan(&num_coarse_dofs, &coarse_truedof_offset, 1, MPI_INT, MPI_SUM, PROC_COMM);
+    coarse_truedof_offset -= num_coarse_dofs;
+    SA_RPRINTF_L(PROC_NUM-1, 8, "coarse_truedof_offset = %d\n", coarse_truedof_offset);
+
+    return cfaces_bases;
+}
+
+DenseMatrix **ContribTent::CFacesSVDnocomm(const agg_partitioning_relations_t& agg_part_rels,
+                                           DenseMatrix **span_mats)
+{
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    DenseMatrix lsvects;
+    DenseMatrix **cfaces_bases = new DenseMatrix*[num_cfaces];
+    Vector svals;
+    int num_coarse_dofs = 0;
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        cfaces_bases[cface] = new DenseMatrix;
+        SA_ASSERT(span_mats[cface] != NULL);
+
+        // Check to see if all of this cface's DOFs are on essential boundary (this should not happen with coarse faces
+        // since we consider only interior coarse faces).
+        {
+            const int dim = span_mats[cface]->Height();
+            SA_ASSERT(agg_part_rels.cfaces_dof_size[cface] == dim);
+            SA_ASSERT(dim > 1); // Maybe not good for some nonconforming spaces.
+            bool interior_dofs = false;
+            for (int j=0; j < dim; ++j)
+            {
+                const int row = agg_part_rels.cface_to_dof->GetRow(cface)[j];
+                SA_ASSERT(rows > row);
+                if (!agg_is_dof_on_essential_border(agg_part_rels, row))
+                {
+                    interior_dofs = true;
+                    break;
+                }
+            }
+            SA_ASSERT(interior_dofs);
+        }
+
+        xpack_svd_dense_arr(span_mats[cface], 1, lsvects, svals);
+        SA_ASSERT(svals.Size() > 0);
+        xpack_orth_set(lsvects, svals, *cfaces_bases[cface], svd_eps);
+        delete span_mats[cface];
+        SA_ASSERT(cfaces_bases[cface]->Width() > 0);
+        if (agg_part_rels.cface_master[cface] == PROC_RANK)
+            num_coarse_dofs += cfaces_bases[cface]->Width();
+    }
+    delete [] span_mats;
 
     coarse_truedof_offset = 0;
     MPI_Scan(&num_coarse_dofs, &coarse_truedof_offset, 1, MPI_INT, MPI_SUM, PROC_COMM);
@@ -992,6 +1042,40 @@ DenseMatrix **ContribTent::contrib_cfaces(const agg_partitioning_relations_t& ag
     // Second stage of communication. The masters redistribute the obtained orthogonalized (via SVD)
     // coarse face basis to the respective slaves.
     sec.Broadcast(cfaces_bases);
+
+    return cfaces_bases;
+}
+
+DenseMatrix **ContribTent::contrib_cfaces_targets(const agg_partitioning_relations_t& agg_part_rels,
+                                                  const Array<Vector *>& face_targets)
+{
+    // All parties restrict the targets on each known coarse face.
+
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    const int num_targets = face_targets.Size();
+    DenseMatrix **span_mats = new DenseMatrix*[num_cfaces];
+    for (int i=0; i < num_cfaces; ++i)
+    {
+        const int ndofs = agg_part_rels.cface_to_dof->RowSize(i);
+        const int * const dofs = agg_part_rels.cface_to_dof->GetRow(i);
+        DenseMatrix * const span_mat = span_mats[i] = new DenseMatrix(ndofs, num_targets);
+        for (int t=0; t < num_targets; ++t)
+        {
+            const Vector * const target = face_targets[t];
+            SA_ASSERT(target);
+            SA_ASSERT(agg_part_rels.ND == target->Size());
+            for (int d=0; d < ndofs; ++d)
+            {
+                SA_ASSERT(0 <= dofs[d] && dofs[d] < target->Size());
+                (*span_mat)(d, t) = SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[d]], AGG_ON_ESS_DOMAIN_BORDER_FLAG) ?
+                                    0.0 : (*target)(dofs[d]);
+            }
+        }
+    }
+
+    // Do SVDs on all coarse faces (i.e., performed by everyone) and obtain the coarse
+    // face bases on them. This counts on all processors obtaining the same result on shared coarse faces.
+    DenseMatrix **cfaces_bases = CFacesSVDnocomm(agg_part_rels, span_mats);
 
     return cfaces_bases;
 }

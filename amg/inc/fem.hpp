@@ -36,6 +36,7 @@
 
 #include "common.hpp"
 #include <mfem.hpp>
+#include <cmath>
 #include "mfem_addons.hpp"
 #include "aggregates.hpp"
 #include "elmat.hpp"
@@ -46,6 +47,40 @@ namespace saamge
 /* Options */
 
 const int GLVIS_PORT = 19916;
+
+/* Classes */
+
+/*! \brief A convenience for computing a basic monomial
+
+    Taken from ParElag.
+*/
+class MonomialCoefficient : public mfem::Coefficient
+{
+public:
+    MonomialCoefficient(int orderx, int ordery, int orderz = 0):
+        order_x(orderx),
+        order_y(ordery),
+        order_z(orderz)
+    {}
+
+    virtual double Eval(mfem::ElementTransformation &T,
+                        const mfem::IntegrationPoint &ip)
+    {
+        using std::pow;
+        double x[3];
+        mfem::Vector transip(x, 3);
+
+        T.Transform(ip, transip);
+
+        return pow(x[0],order_x)*pow(x[1],order_y)*pow(x[2],order_z);
+    }
+    virtual void Read(std::istream &in){ in >> order_x >> order_y >> order_z;}
+
+private:
+    int order_x;
+    int order_y;
+    int order_z;
+};
 
 /* Functions */
 /*! \brief Refines mesh to a certain upper bound for the number of elements.
@@ -348,6 +383,20 @@ void fem_build_discrete_problem(mfem::ParFiniteElementSpace *fespace,
                                 mfem::ParLinearForm*& b, mfem::ParBilinearForm*& a,
                                 mfem::Array<int> *ess_bdr);
 
+/*! \brief Constructs only the face relations.
+
+  This function counts on already built relation tables (like AEs) and only
+  fills in the face and coarse face relations by constructing the coarse faces.
+  It essentially obtains from MFEM the arguments on the finest level for agg_build_face_relations.
+*/
+void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, mfem::ParFiniteElementSpace& fes);
+
+
+/*! \brief Obtains all targets up to certain order.
+    Borrows heavily from ParElag.
+*/
+void fem_polynomial_targets(mfem::FiniteElementSpace *fespace, mfem::Array<mfem::Vector *>& targets, int order);
+
 /* Inline Functions */
 /*! \brief Partitions the unweighted dual graph of the mesh.
 
@@ -423,13 +472,18 @@ fem_create_partitioning_from_matrix(const mfem::SparseMatrix& A,
                                     mfem::HypreParMatrix *dof_truedof,
                                     mfem::Array<int>& isolated_cells);
 
-/*! \brief Constructs only the face relations.
-
-  This function counts on already built relation tables (like AEs) and only
-  fills in the face and coarse face relations by constructing the coarse faces.
-  It essentially obtains from MFEM the arguments on the finest level for agg_build_face_relations.
+/*!
+    Obtains the interpolant of a monomial.
 */
-void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, mfem::ParFiniteElementSpace& fes);
+static inline
+void fem_monomial_target(mfem::FiniteElementSpace *fespace, mfem::Vector& target,
+                         int orderx, int ordery, int orderz=0);
+
+/*!
+    Frees targets.
+*/
+static inline
+void fem_free_targets(mfem::Array<mfem::Vector *>& targets);
 
 /* Function Templates Definitions */
 template <class T>
@@ -497,6 +551,26 @@ int *fem_partition_mesh(mfem::Mesh& mesh, int *nparts)
 {
     //XXX: This will stay allocated in MESH till the end.
     return part_generate_partitioning_unweighted(mesh.ElementToElementTable(), nparts);
+}
+
+static inline
+void fem_monomial_target(mfem::FiniteElementSpace *fespace, mfem::Vector& target,
+                         int orderx, int ordery, int orderz)
+{
+    SA_ASSERT(orderx >= 0 && ordery >= 0 && orderz >= 0);
+    MonomialCoefficient mc(orderx, ordery, orderz);
+    target.SetSize(fespace->GetVSize());
+    mfem::GridFunction gf;
+    gf.MakeRef(fespace, target, 0);
+    gf.ProjectCoefficient(mc);
+}
+
+static inline
+void fem_free_targets(mfem::Array<mfem::Vector *>& targets)
+{
+    for (int i=0; i < targets.Size(); ++i)
+        delete targets[i];
+    targets.DeleteAll();
 }
 
 } // namespace saamge

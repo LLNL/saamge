@@ -843,4 +843,54 @@ void fem_build_face_relations(agg_partitioning_relations_t *agg_part_rels, ParFi
     agg_build_face_relations(agg_part_rels, elem_to_face, face_to_dof, face_to_trueface);
 }
 
+void fem_polynomial_targets(FiniteElementSpace *fespace, Array<Vector *>& targets, int order)
+{
+    SA_ASSERT(order >= 0);
+    const int dim = fespace->GetMesh()->Dimension();
+    int size = 0;
+    int ctr = 0;
+    int order_x, order_y, order_z;
+
+    switch(dim)
+    {
+    case 2:
+
+        size = (order+1)*(order+2)/2;
+        targets.SetSize(size);
+        for(int order_max = 0; order_max <= order; ++order_max)
+            for(order_x = 0; order_x <= order_max; ++order_x)
+            {
+                SA_ASSERT(ctr < size);
+                targets[ctr] = new Vector;
+                order_y = order_max - order_x;
+                fem_monomial_target(fespace, *targets[ctr++], order_x, order_y);
+            }
+        SA_ASSERT(ctr == size);
+
+    break;
+    case 3:
+
+        for(int order_max = 0; order_max <= order; ++order_max)
+            for(order_x = 0; order_x <= order_max; ++order_x)
+                for(order_y = 0; order_y <= order_max-order_x; ++order_y)
+                    ++size;
+        targets.SetSize(size);
+        for(int order_max = 0; order_max <= order; ++order_max)
+            for(order_x = 0; order_x <= order_max; ++order_x)
+                for(order_y = 0; order_y <= order_max-order_x; ++order_y)
+                {
+                    SA_ASSERT(ctr < size);
+                    targets[ctr] = new Vector;
+                    order_z = order_max - order_x - order_y;
+                    fem_monomial_target(fespace, *targets[ctr++], order_x, order_y, order_z);
+                }
+        SA_ASSERT(ctr == size);
+
+    break;
+    default:
+
+        SA_ASSERT(false);
+    }
+}
+
 } // namespace saamge

@@ -77,7 +77,7 @@ mfem::HypreParVector *mortar_assemble_condensed_rhs(interp_data_t& interp_data,
     tg_data should already have some basic initializations via tg_init_data().
 */
 void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                           ElementMatrixProvider *elem_data);
+                           ElementMatrixProvider *elem_data, const mfem::Array<mfem::Vector *> *face_targets=NULL);
 
 /*! Returns an H^1 vector (expressed in true dofs) from a face mortar vector (also expressed in true dofs).
     The returned vector must be freed by the caller

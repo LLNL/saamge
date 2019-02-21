@@ -109,9 +109,12 @@ int main(int argc, char *argv[])
     int times_refine = 0;
     args.AddOption(&times_refine, "-r", "--refine", 
                    "How many times to refine the mesh (in parallel).");
-    int order = 1;
+    int order = 2;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
+    int faceorder = 1;
+    args.AddOption(&faceorder, "-fo", "--face-order",
+                   "Polynomial order of face space.");
     int elems_per_agg = 8;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of elements per agglomerated element.");
@@ -219,8 +222,13 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, 1.0, false, 0.0, false);
     tg_data->polynomial_coarse_space = -1;
 
-    mortar_discretization(*tg_data, *agg_part_rels, emp);
+    Array<Vector *> targets;
+    fem_polynomial_targets(&fes, targets, faceorder);
+
+    mortar_discretization(*tg_data, *agg_part_rels, emp, &targets);
     tg_print_data(*Ag, tg_data);
+
+    fem_free_targets(targets);
 
     mfem::Solver *solver;
     mfem::Solver *fsolver;

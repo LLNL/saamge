@@ -270,7 +270,7 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
                 {
                     if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[k]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
                     {
-                        SA_ASSERT(0.0 == cface_base(k));
+//                        SA_ASSERT(0.0 == cface_base(k));
                         continue;
                     }
                     const int loc = agg_map_id_glob_to_AE(dofs[k], i, agg_part_rels);
@@ -292,8 +292,8 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
                     {
                         if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[dofs[m]], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
                         {
-                            SA_ASSERT(0.0 == cface_base(m));
-                            SA_ASSERT(0.0 == cface_base1(m));
+//                            SA_ASSERT(0.0 == cface_base(m));
+//                            SA_ASSERT(0.0 == cface_base1(m));
                             continue;
                         }
                         const int loc = agg_map_id_glob_to_AE(dofs[m], i, agg_part_rels);
@@ -438,7 +438,7 @@ HypreParVector *mortar_assemble_condensed_rhs(interp_data_t& interp_data,
 }
 
 void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                           ElementMatrixProvider *elem_data)
+                           ElementMatrixProvider *elem_data, const Array<Vector *> *face_targets)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true;
@@ -449,7 +449,10 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
     // Obtain coarse/agglomerated face basis.
     ContribTent cfaces_bases_contrib(agg_part_rels.ND);
     SA_ASSERT(NULL == tg_data.interp_data->cfaces_bases);
-    tg_data.interp_data->cfaces_bases = cfaces_bases_contrib.contrib_cfaces_const(agg_part_rels);
+    if (NULL == face_targets)
+        tg_data.interp_data->cfaces_bases = cfaces_bases_contrib.contrib_cfaces_const(agg_part_rels);
+    else
+        tg_data.interp_data->cfaces_bases = cfaces_bases_contrib.contrib_cfaces_targets(agg_part_rels, *face_targets);
     tg_data.interp_data->num_cfaces = agg_part_rels.num_cfaces;
     tg_data.interp_data->coarse_truedof_offset = cfaces_bases_contrib.get_coarse_truedof_offset();
 
