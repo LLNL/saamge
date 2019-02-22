@@ -69,12 +69,6 @@ double rhs_func(Vector& x)
 //    return 2.0 * (x[0]*(1.0-x[0]) + x[1]*(1.0-x[1]));
 }
 
-double ex_func(Vector& x)
-{
-    SA_ASSERT(2 <= x.Size() && x.Size() <= 2);
-    return x[0]*(1.0-x[0])*x[1]*(1.0-x[1]);
-}
-
 double bdr_cond(Vector& x)
 {
     SA_ASSERT(2 <= x.Size() && x.Size() <= 3);
