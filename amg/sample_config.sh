@@ -53,6 +53,9 @@ cmake \
     -DARPACK_DIR=${HOME}/arpack/arpack-ng-install \
     -DARPACKPP_DIR=${HOME}/arpack/arpackpp \
     \
+    -DUSE_PHYAGG=OFF \
+    -DPHYAGG_DIR=$SAAMGE_BASE_DIR/../../phyagg \
+    \
     -DLINK_NETCDF=OFF \
     -DNETCDF_DIR=${HOME}/packages/netcdf \
     \

@@ -156,6 +156,24 @@ else()
   set(${PROJECT_NAME}_USE_ARPACK 0)
 endif()
 
+# PHYAGG - optional
+option(USE_PHYAGG "Should PHYAGG be enabled?" OFF)
+if (USE_PHYAGG)
+  find_path(PHYAGG_INCLUDE_PATH phyagg.hpp
+    HINTS ${PHYAGG_DIR}/src $ENV{PHYAGG_DIR}/src)
+  set(PHYAGG_LIB_NAME libphyagg.a)
+  find_path(PHYAGG_LIBRARY_PATH ${PHYAGG_LIB_NAME}
+    HINTS ${PHYAGG_DIR}/build/src $ENV{PHYAGG_DIR}/build/src)
+  include_directories(${PHYAGG_INCLUDE_PATH})
+  add_library(PHYAGG_LIB STATIC IMPORTED)
+  set_property(TARGET PHYAGG_LIB PROPERTY IMPORTED_LOCATION
+    ${PHYAGG_LIBRARY_PATH}/${PHYAGG_LIB_NAME})
+  list(APPEND TPL_LIBRARIES ${PHYAGG_LIBRARY_PATH}/${PHYAGG_LIB_NAME})
+  set(${PROJECT_NAME}_USE_PHYAGG 1)
+else()
+  set(${PROJECT_NAME}_USE_PHYAGG 0)
+endif()
+
 list(REMOVE_DUPLICATES TPL_LIBRARIES)
 
 ###

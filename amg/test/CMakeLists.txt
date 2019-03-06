@@ -36,7 +36,9 @@ list(APPEND EXE_SRCS  leastsquaretest/leastsquaretest.cpp
                       leastsquarealgebraictest/leastsquarealgebraictest.cpp
                       secondorderpdealgebraictest/secondorderpdealgebraictest.cpp
                      )
-
+if(USE_PHYAGG)
+  list(APPEND EXE_SRCS  phyagg/phyagg.cpp)
+endif()
 
 # Add one executable per cpp file
 foreach(SRC_FILE IN LISTS EXE_SRCS)
