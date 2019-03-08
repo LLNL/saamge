@@ -117,7 +117,8 @@ int connectedComponents(Array<int>& partitioning, const Table& conn)
     return offset_comp.Last();
 }
 
-int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
+int *part_generate_partitioning(const Table& graph, int *weights, int *parts,
+                                int *endge_weights)
 {
     SA_ASSERT(graph.Size() == graph.Width() || *parts == 1);
 #ifndef MFEM_USE_METIS_5
@@ -148,7 +149,7 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
                             const_cast<Table&>(graph).GetI(),
                             const_cast<Table&>(graph).GetJ(),
                             (idxtype *) weights,
-                            (idxtype *) NULL,
+                            (idxtype *) endge_weights,
                             &wgtflag,
                             &numflag,
                             parts,
@@ -173,7 +174,7 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
                                    const_cast<Table&>(graph).GetJ(),
                                    weights,
                                    NULL,
-                                   NULL,
+                                   endge_weights,
                                    parts,
                                    NULL,
                                    NULL,
@@ -183,7 +184,7 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
         SA_ASSERT(METIS_OK == stat);
 #endif
         SA_ASSERT(target_parts == *parts);
-    } 
+    }
     else
     {
         memset(partitioning, 0, sizeof(*partitioning) * nodes_number);
@@ -206,11 +207,11 @@ int *part_generate_partitioning(const Table& graph, int *weights, int *parts)
 int *part_generate_partitioning_unweighted(const Table& graph, int *parts)
 {
     SA_ASSERT(graph.Size() == graph.Width() || *parts == 1);
-    int * weights = new int[graph.Size()];
-    for (int i=0; i<graph.Size(); ++i)
-        weights[i] = 1.0;
-    int * out = part_generate_partitioning(graph, weights, parts);
-    delete [] weights;
+//    int * weights = new int[graph.Size()];
+//    for (int i=0; i<graph.Size(); ++i)
+//        weights[i] = 1.0;
+    int * out = part_generate_partitioning(graph, NULL, parts);
+//    delete [] weights;
     return out;
 }
 

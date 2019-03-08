@@ -472,6 +472,14 @@ fem_create_partitioning_from_matrix(const mfem::SparseMatrix& A,
                                     mfem::HypreParMatrix *dof_truedof,
                                     mfem::Array<int>& isolated_cells);
 
+/*! \brief Computes the center of an element
+
+    \param mesh (IN) A mesh.
+    \param elno (IN) The number of the element.
+    \param center (OUT) The center of the element.
+*/
+void fem_get_element_center(const mfem::Mesh& mesh, int elno, mfem::Vector& center);
+
 /*!
     Obtains the interpolant of a monomial.
 */

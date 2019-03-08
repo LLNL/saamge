@@ -56,18 +56,21 @@ int connectedComponents(mfem::Array<int>& partitioning, const mfem::Table& conn)
     Calls METIS.
 
     \param graph (IN) The unweighted graph as a relation table.
-    \param weights (IN) the weights on the vertices of the graph (for us this 
-                        means the number of DOF per element)
+    \param weights (IN) the weights on the vertices of the graph (for us this
+                        means the number of DOF per element).
     \param parts (IN/OUT) The desired number of partitions in the partitioning,
                           as input. As output: the number of non-empty
                           partitions, which is the number of actually generated
                           partitions.
+    \param endge_weights (IN) the weights on the edges of the graph (can be used
+                              for shaping the partitions in accordance to the problem).
 
     \returns The partitioning of the graph.
 
     \warning The returned array must be freed by the caller.
 */
-int *part_generate_partitioning(const mfem::Table& graph, int *weights, int *parts);
+int *part_generate_partitioning(const mfem::Table& graph, int *weights, int *parts,
+                                int *endge_weights=NULL);
 
 /*! \brief Partitions an unweighted graph.
 
