@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
     ConstantCoefficient one(1.0);
 
     const double alpha = 0.0;
-    const double coeff_eps = 1e-2;
+    const double coeff_eps = 1e-6;
 
     MatrixArrayCoefficient coeff(2);
     coeff.Set(0, 0, new ConstantCoefficient(coeff_eps +
