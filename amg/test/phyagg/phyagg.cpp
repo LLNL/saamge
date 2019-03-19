@@ -67,15 +67,32 @@ int main(int argc, char *argv[])
     std::shared_ptr<const ParBilinearForm> bform(a);
     MFEMElementData eldata(bform);
 
+    DenseMatrix nullspace(A->Width(), 1);
+    nullspace = 1.0;
+    {
+    Vector vect;
+    nullspace.GetColumnReference(0, vect);
+    vect /= vect.Norml2();
+    }
+
     HypreSmoother GS_(*A, HypreSmoother::GS, 1);
-    Vector ff(A->Height()), ww(A->Height());
-    ff = 0.0;
-    ww.Randomize();
-    SLI(*A, GS_, ff, ww, 1, 200, 0.0, 0.0);
+    Vector ww(A->Width());
+//    Vector ff(A->Height());
+//    ff = 0.0;
+//    ww.Randomize();
+//    SLI(*A, GS_, ff, ww, 1, 200, 0.0, 0.0);
+    Smoother S_(*A, GS_, nullspace);
+    S_.Smooth(ww, 200);
+    {
+    Vector r(A->Height());
+    A->Mult(ww, r);
+    std::cout << "A smoothness: " << r.Norml2() << std::endl;
+    }
     x = ww;
     fem_parallel_visualize_gf(pmesh, x);
 
-    auto X = ConnStrengthMatrix(eldata);
+    SparseMatrix LDT;
+    auto X = ConnStrengthMatrix(eldata, LDT, nullspace);
     SA_ASSERT(X->Height() == X->Width());
     std::cout << "X symmetry: " << X->IsSymmetric() << std::endl;
 
@@ -85,13 +102,23 @@ int main(int argc, char *argv[])
     HypreParMatrix Xp(MPI_COMM_WORLD, X->Height(), row_starts.GetData(), const_cast<SparseMatrix *>(X.get()));
     SA_ASSERT(Xp.Height() == Xp.Width());
     HypreSmoother GS(Xp, HypreSmoother::GS, 1);
-    Vector f(Xp.Height()), w(Xp.Height());
-    f = 0.0;
-    w.Randomize();
-    SLI(Xp, GS, f, w, 1, 200, 0.0, 0.0);
+    Vector w(Xp.Width());
+//    Vector f(Xp.Height());
+//    f = 0.0;
+//    w.Randomize();
+//    SLI(Xp, GS, f, w, 1, 200, 0.0, 0.0);
+    Smoother S(Xp, GS, nullspace);
+//    S.Smooth(w, 200);
+    LDT.Mult(ww, w);
+    w /= w.Norml2();
+    {
+    Vector r(Xp.Height());
+    Xp.Mult(w, r);
+    std::cout << "X smoothness: " << r.Norml2() << std::endl;
+    }
 //    w.Print();
 
-    auto graph = ConnStrengthGraph(eldata, *X, w);
+    auto graph = NormalizedConnStrengthGraph(eldata, *X, w);
     SA_ASSERT(graph->Height() == graph->Width());
     std::cout << "Graph symmetry: " << graph->IsSymmetric() << std::endl;
 //    graph->Print();
