@@ -19,10 +19,10 @@ int main(int argc, char *argv[])
 
     OptionsParser args(argc, argv);
 
-    int intervals = 100;
+    int intervals = 50;
     args.AddOption(&intervals, "-i", "--intervals", 
                    "How many intervals in one direction for the mesh.");
-    int order = 1;
+    int order = 2;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
     int parts = 8;
@@ -102,18 +102,20 @@ int main(int argc, char *argv[])
     HypreParMatrix Xp(MPI_COMM_WORLD, X->Height(), row_starts.GetData(), const_cast<SparseMatrix *>(X.get()));
     SA_ASSERT(Xp.Height() == Xp.Width());
     HypreSmoother GS(Xp, HypreSmoother::GS, 1);
-    Vector w(Xp.Width());
-//    Vector f(Xp.Height());
+    Vector w(X->Width());
+//    Vector f(X->Height());
 //    f = 0.0;
 //    w.Randomize();
 //    SLI(Xp, GS, f, w, 1, 200, 0.0, 0.0);
     Smoother S(Xp, GS, nullspace);
+
 //    S.Smooth(w, 200);
     LDT.Mult(ww, w);
     w /= w.Norml2();
+
     {
-    Vector r(Xp.Height());
-    Xp.Mult(w, r);
+    Vector r(X->Height());
+    X->Mult(w, r);
     std::cout << "X smoothness: " << r.Norml2() << std::endl;
     }
 //    w.Print();
