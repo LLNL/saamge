@@ -146,12 +146,9 @@ int adapt_approx_xbad(HypreParMatrix& A,
 
         err_prev = err_;
 
-        /*
-        tg_cycle(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), b,
-                 tg_data->pre_smoother, tg_data->post_smoother, xbad,
-                 tg_data->coarse_solver, tg_data->poly_data);
-        */
-        SA_ASSERT(false);
+        tg_cycle_atb(A, *(tg_data->Ac), *(tg_data->interp), *(tg_data->restr), b,
+                     tg_data->pre_smoother, tg_data->post_smoother, xbad,
+                     *(tg_data->coarse_solver), tg_data->poly_data);
 
         err_ = mbox_energy_norm_parallel(A, xbad);
         cf_ = err_/err_prev;
@@ -169,6 +166,54 @@ int adapt_approx_xbad(HypreParMatrix& A,
             exit_flag = 1;
         }
     }
+}
+
+void adapt_update_operators(HypreParMatrix& A, tg_data_t &tg_data, bool resmooth_interp)
+{
+    SA_ASSERT(tg_data.poly_data);
+    SA_ASSERT(smpr_get_Dinv_neg(tg_data.poly_data));
+    SA_ASSERT(tg_data.interp);
+    SA_ASSERT(tg_data.restr);
+    SA_ASSERT(tg_data.interp_data);
+
+    smpr_update_Dinv_neg(A, tg_data.poly_data);
+
+    if (resmooth_interp && tg_data.smooth_interp &&
+        tg_data.interp_data->interp_smoother_degree > 0 &&
+        tg_data.interp_data->times_apply_smoother > 0)
+        tg_smooth_interp(A, tg_data);
+
+    tg_free_coarse_operator(tg_data);
+}
+
+void adapt_update_operators(HypreParMatrix& A, ml_data_t &ml_data,
+                            const MultilevelParameters &mlp, bool resmooth_interp)
+{
+    SA_ASSERT(ml_data.levels_list.num_levels > 0);
+    SA_ASSERT(ml_data.levels_list.finest);
+    SA_ASSERT(ml_data.levels_list.finest->tg_data);
+
+    adapt_update_operators(A, *ml_data.levels_list.finest->tg_data, resmooth_interp);
+
+    tg_update_coarse_operator(A, ml_data.levels_list.finest->tg_data,
+                              NULL == ml_data.levels_list.finest->coarser, mlp.get_coarse_direct());
+    HypreParMatrix *Af = ml_data.levels_list.finest->tg_data->Ac;
+    levels_level_t *level;
+    for(level = ml_data.levels_list.finest->coarser; level; level = level->coarser)
+    {
+        SA_ASSERT(Af);
+        SA_ASSERT(level->tg_data);
+        SA_ASSERT(level->tg_data->poly_data);
+        smpr_update_Dinv_neg(*Af, level->tg_data->poly_data);
+        if (resmooth_interp && level->tg_data->smooth_interp &&
+            level->tg_data->interp_data->interp_smoother_degree > 0 &&
+            level->tg_data->interp_data->times_apply_smoother > 0)
+            tg_smooth_interp(*Af, *level->tg_data);
+        tg_update_coarse_operator(*Af, level->tg_data, NULL == level->coarser, mlp.get_coarse_direct());
+        Af = level->tg_data->Ac;
+    }
+    SA_ASSERT(Af);
+    ml_impose_cycle(ml_data, false);
 }
 
 } // namespace saamge
