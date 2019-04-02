@@ -49,7 +49,7 @@ set(MESH_DIR ${HOME_DIR}/meshes)
 # TODO: no C++11 in SAAMGe
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++11")
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -fstack-protector-all")
 set(CMAKE_CXX_FLAGS_OPTIMIZED "${CMAKE_CXX_FLAGS_OPTIMIZED} -O3")
 
 # TODO: take TPLs from command line to override below locations if desired
@@ -96,7 +96,7 @@ list(APPEND TPL_LIBRARIES ${MFEM_LIBRARY_PATH}/${MFEM_LIB_NAME})
 
 # Metis
 find_path(METIS_INCLUDE_PATH metis.h
-  HINTS ${METIS_DIR} ${METIS_DIR}/Lib $ENV{METIS_DIR}/include)
+  HINTS ${METIS_DIR} ${METIS_DIR}/Lib ${METIS_DIR}/include $ENV{METIS_DIR}/include)
 set(METIS_LIB_NAME libmetis.a)
 find_path(METIS_LIBRARY_PATH ${METIS_LIB_NAME}
   HINTS ${METIS_DIR}/lib ${METIS_DIR} $ENV{METIS_DIR}/lib)
@@ -107,15 +107,14 @@ list(APPEND TPL_LIBRARIES ${METIS_LIBRARY_PATH}/${METIS_LIB_NAME})
 
 # Hypre
 find_path(HYPRE_INCLUDE_PATH HYPRE.h
-          HINTS
-            ${HYPRE_DIR}/include
-            $ENV{HYPRE_DIR}/include)
+          HINTS ${HYPRE_DIR}/include $ENV{HYPRE_DIR}/include)
 include_directories(${HYPRE_INCLUDE_PATH})
 set(HYPRE_LIB_NAME libHYPRE.a)
-find_library(HYPRE_LIB HYPRE
-  ${HYPRE_DIR}/lib
-  $ENV{HYPRE_DIR}/lib)
-list(APPEND TPL_LIBRARIES ${HYPRE_LIB})
+find_path(HYPRE_LIBRARY_PATH ${HYPRE_LIB_NAME}
+          HINTS  ${HYPRE_DIR}/lib $ENV{HYPRE_DIR}/lib)
+add_library(HYPRE_LIB STATIC IMPORTED)
+set_property(TARGET HYPRE_LIB PROPERTY IMPORTED_LOCATION ${HYPRE_LIBRARY_PATH}/${HYPRE_LIB_NAME})
+list(APPEND TPL_LIBRARIES ${HYPRE_LIBRARY_PATH}/${HYPRE_LIB_NAME})
 
 # NETCDF - we do not actually use, but might link for MFEM
 option(LINK_NETCDF "Should we link to NETCDF?" OFF)
