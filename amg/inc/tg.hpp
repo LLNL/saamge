@@ -738,6 +738,7 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
         return;
 
     delete tg_data.coarse_solver;
+    tg_data.coarse_solver = NULL;
 
     delete tg_data.Ac;
     tg_data.Ac = NULL;

@@ -986,7 +986,6 @@ void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
     SA_ASSERT(tg_data->restr);
 
     tg_free_coarse_operator(*tg_data);
-    delete tg_data->coarse_solver;
 
     tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
     if (perform_solve_init)
