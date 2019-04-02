@@ -104,7 +104,7 @@ private:
 class AMGSolver : public mfem::Solver
 {
 public:
-    AMGSolver(mfem::HypreParMatrix& A, bool iterative_mode);
+    AMGSolver(mfem::HypreParMatrix& A, bool iterative_mode, double rel_tol=1e-12, int iters_coeff=10);
     ~AMGSolver();
     virtual void SetOperator(const mfem::Operator &op) {};
     virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
@@ -115,7 +115,7 @@ private:
     double rel_tol;
     mutable int cumulative_iterations; 
     int ref_cntr; /*!< Reference counter. @todo remove */
-    double iters_coeff; /*!< multiply by matrix size for max iterations */
+    int iters_coeff; /*!< multiply by matrix size for max iterations */
 };
 
 /**
