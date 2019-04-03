@@ -37,6 +37,7 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include "tg.hpp"
+#include "ml.hpp"
 
 /* Defines */
 /*! \def ADAPT_XBAD_MAX_ITER_FLAG
@@ -126,6 +127,34 @@ int adapt_approx_xbad(
     tg_data_t *tg_data, mfem::HypreParVector& xbad, double *cf, double *acf,
     double *err, double *err0, int *executed_iters, double rtol/*=10e-12*/, double atol/*=10e-24*/,
     bool normalize/*=1*/, bool output=true);
+
+/*! \brief Recomputes hierarchy while assuming spectral information is the same.
+
+    1. It updates the weighted l1-smoother in accordance to the new matrix \a A.
+    This effectively results in adapted smoothers in the TG cycle.
+    2. Deletes the coarse operator, so it can be updated, when needed, with a fresh
+    RAP.
+
+    If \a resmooth_interp is \em true, then the oridinal tentative
+    interpolant will be maintained but resmoothed with the updated smoother.
+    This changes the final interpolant. Otherwise, the original interpolant remains
+    untouched.
+*/
+void adapt_update_operators(mfem::HypreParMatrix& A, tg_data_t &tg_data, bool resmooth_interp);
+
+/*! \brief Recomputes hierarchy while assuming spectral information is the same.
+
+    1. It updates the weghted l1-smoothers in accordance to the new matrix \a A.
+    This effectively results in adapted smoothers in the ML cycle.
+    2. It also updates the hierarchy of operators by performing fresh RAPs.
+
+    If \a resmooth_interp is \em true, then the original tentative
+    interpolants will be maintained but resmoothed with the updated smoothers.
+    This changes the final interpolants. Otherwise, the original interpolants remain
+    untouched.
+*/
+void adapt_update_operators(mfem::HypreParMatrix& A, ml_data_t &ml_data,
+                            const MultilevelParameters &mlp, bool resmooth_interp);
 
 }
 

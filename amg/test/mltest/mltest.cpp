@@ -414,6 +414,10 @@ int main(int argc, char *argv[])
     args.AddOption(&identity_partition, "-ip", "--identity-partition",
                    "-nip", "--no-identity-partition",
                    "No agglomeration, one element per agglomerate.");
+    bool adapt = false;
+    args.AddOption(&adapt, "-ad", "--adapt",
+                   "-nad", "--no-adapt",
+                   "Perturbs the matrix and reuses the spaces.");
 
     args.Parse();
     if (!args.Good())
@@ -728,62 +732,74 @@ int main(int argc, char *argv[])
     SA_RPRINTF(0,"TIMING: multilevel spectral SA-AMGe setup %f seconds.\n",
                chrono.RealTime());
 
-    if (zero_rhs)
+    bool finished=false;
+    while (!finished)
     {
-        SA_RPRINTF(0, "%s", "\n");
-        SA_RPRINTF(0, "%s", "\t\t\tRUNNING PCG WITH RANDOM INITIAL GUESS AND ZERO"
-                   " R.H.S:\n");
-        SA_RPRINTF(0, "%s", "\n");
-    }
-    else
-    {
-        SA_RPRINTF(0, "%s", "\n");
-        SA_RPRINTF(0, "%s", "\t\t\tSOLVING THE PROBLEM USING PCG:\n");
-        SA_RPRINTF(0, "%s", "\n");      
-    }
+        if (zero_rhs)
+        {
+            SA_RPRINTF(0, "%s", "\n");
+            SA_RPRINTF(0, "%s", "\t\t\tRUNNING PCG WITH RANDOM INITIAL GUESS AND ZERO"
+                                " R.H.S:\n");
+            SA_RPRINTF(0, "%s", "\n");
+        }
+        else
+        {
+            SA_RPRINTF(0, "%s", "\n");
+            SA_RPRINTF(0, "%s", "\t\t\tSOLVING THE PROBLEM USING PCG:\n");
+            SA_RPRINTF(0, "%s", "\n");
+        }
 
-    chrono.Clear();
-    chrono.Start();
-    if (zero_rhs)
-    {
-        // helpers_random_vect(*agg_part_rels, *pxg);
-        pxg->Randomize(0);
-        *bg = 0.0;
+        chrono.Clear();
+        chrono.Start();
+        if (zero_rhs)
+        {
+            // helpers_random_vect(*agg_part_rels, *pxg);
+            pxg->Randomize(0);
+            *bg = 0.0;
+        }
+        int iterations = -1;
+        int converged = -1;
+        Solver * Bprec;
+        if (double_cycle) 
+        {
+            Bprec = new DoubleCycle(*Ag, *ml_data);
+        }
+        else
+        {
+            levels_level_t * level = levels_list_get_level(ml_data->levels_list, 0);
+            Bprec = new VCycleSolver(level->tg_data, false);
+            Bprec->SetOperator(*Ag);
+        }
+        CGSolver hpcg(MPI_COMM_WORLD);
+        hpcg.SetOperator(*Ag);
+        hpcg.SetRelTol(1e-6); // for some reason MFEM squares this...
+        hpcg.SetMaxIter(1000);
+        hpcg.SetPrintLevel(1);
+        hpcg.SetPreconditioner(*Bprec);
+        hpcg.Mult(*bg,*pxg);
+        iterations = hpcg.GetNumIterations();
+        converged = hpcg.GetConverged();
+        delete Bprec;
+        if (converged)
+            SA_RPRINTF(0, "Outer PCG converged in %d iterations.\n", iterations);
+        else
+            SA_RPRINTF(0, "Outer PCG failed to converge after %d iterations!\n",
+                       iterations);
+        x = *pxg;
+        if (false)
+            fem_parallel_visualize_gf(*pmesh, x);
+        chrono.Stop();
+        SA_RPRINTF(0,"TIMING: solve with SA-AMGe preconditioned CG %f seconds.\n",
+                   chrono.RealTime());
+        finished = true;
+        if (adapt)
+        {
+            adapt = false;
+            finished = false;
+            mbox_add_diag_parallel_matrix(*Ag, 1.0);
+            adapt_update_operators(*Ag, *ml_data, mlp, true);
+        }
     }
-    int iterations = -1;
-    int converged = -1;
-    Solver * Bprec;
-    if (double_cycle) 
-    {
-        Bprec = new DoubleCycle(*Ag, *ml_data);
-    }
-    else
-    {
-        levels_level_t * level = levels_list_get_level(ml_data->levels_list, 0);
-        Bprec = new VCycleSolver(level->tg_data, false);
-        Bprec->SetOperator(*Ag);
-    }
-    CGSolver hpcg(MPI_COMM_WORLD);
-    hpcg.SetOperator(*Ag);
-    hpcg.SetRelTol(1e-6); // for some reason MFEM squares this...
-    hpcg.SetMaxIter(1000);
-    hpcg.SetPrintLevel(1);
-    hpcg.SetPreconditioner(*Bprec);
-    hpcg.Mult(*bg,*pxg);
-    iterations = hpcg.GetNumIterations();
-    converged = hpcg.GetConverged();
-    delete Bprec;
-    if (converged)
-        SA_RPRINTF(0, "Outer PCG converged in %d iterations.\n", iterations);
-    else
-        SA_RPRINTF(0, "Outer PCG failed to converge after %d iterations!\n",
-                   iterations);
-    x = *pxg;
-    if (false)
-        fem_parallel_visualize_gf(*pmesh, x);
-    chrono.Stop();
-    SA_RPRINTF(0,"TIMING: solve with SA-AMGe preconditioned CG %f seconds.\n",
-               chrono.RealTime());
 
     ml_free_data(ml_data);
     agg_free_partitioning(agg_part_rels);

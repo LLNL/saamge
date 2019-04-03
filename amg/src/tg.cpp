@@ -93,8 +93,6 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
                   smpr_ft post_smoother, Vector& x, Solver& coarse_solver,
                   void *data)
 {
-    SA_ASSERT(&A);
-    SA_ASSERT(&Ac);
     SA_ASSERT(A.GetGlobalNumRows() == A.GetGlobalNumCols());
     SA_ASSERT(Ac.GetGlobalNumRows() == Ac.GetGlobalNumCols());
     SA_ASSERT(interp.GetGlobalNumRows() == A.GetGlobalNumRows());
@@ -108,8 +106,8 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
     SA_ASSERT(post_smoother);
     // SA_ASSERT(coarse_solver.solver);
 
-    Vector res(b.Size()), resc(mbox_rows_in_current_process(Ac));
-    Vector xc(mbox_rows_in_current_process(Ac));
+    Vector res(b.Size()), resc(mbox_rows_in_current_process(restr));
+    Vector xc(mbox_rows_in_current_process(restr));
     xc = 0.0;
 
     pre_smoother(A, b, x, data);
@@ -118,10 +116,10 @@ void tg_cycle_atb(HypreParMatrix& A, HypreParMatrix& Ac, HypreParMatrix& interp,
     subtract(b, res, res);
     restr.Mult(res, resc);
 
-    HypreParVector RESC(PROC_COMM, Ac.GetGlobalNumRows(), resc.GetData(),
-                        Ac.GetRowStarts());
-    HypreParVector XC(PROC_COMM, Ac.GetGlobalNumRows(), xc.GetData(),
-                      Ac.GetRowStarts());
+    HypreParVector RESC(PROC_COMM, restr.GetGlobalNumRows(), resc.GetData(),
+                        restr.GetRowStarts());
+    HypreParVector XC(PROC_COMM, restr.GetGlobalNumRows(), xc.GetData(),
+                      restr.GetRowStarts());
 
     // could repeat this for W-cycle...
     // coarse_solver.solver(Ac, RESC, XC, coarse_solver.data);
@@ -976,6 +974,43 @@ double tg_compute_OC(HypreParMatrix& A, tg_data_t& tg_data)
 {
     SA_ASSERT(tg_data.Ac);
     return 1.0 + tg_data.Ac->NNZ() / ((double) A.NNZ());
+}
+
+void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
+                               bool perform_solve_init, bool coarse_direct)
+{
+    SA_ASSERT(tg_data);
+    SA_ASSERT(tg_data->interp);
+    SA_ASSERT(tg_data->restr);
+
+    tg_free_coarse_operator(*tg_data);
+
+    tg_data->Ac = tg_coarse_matr(A, *(tg_data->interp));
+    if (perform_solve_init)
+    {
+        if (coarse_direct)
+        {
+            if (PROC_NUM == 1)
+            {
+                SA_RPRINTF_L(0, 5, "%s",
+                             "Setting coarse solver as direct UMFPACK solver.\n");
+                tg_data->coarse_solver = new HypreDirect(*tg_data->Ac);
+            } else
+            {
+                SA_RPRINTF_L(0, 5, "%s", "Setting coarse solver as a CG preconditioned "
+                                         "with BoomerAMG.\n");
+                tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+            }
+        }
+        else
+        {
+            SA_RPRINTF_L(0, 5, "%s",
+                       "Setting coarse solver as a single BoomerAMG v-cycle.\n");
+            mfem::HypreBoomerAMG * hbamg = new mfem::HypreBoomerAMG(*tg_data->Ac);
+            hbamg->SetPrintLevel(0);
+            tg_data->coarse_solver = hbamg;
+        }
+    }
 }
 
 } // namespace saamge

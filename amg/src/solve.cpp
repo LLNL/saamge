@@ -237,10 +237,10 @@ void solve_empty(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
 
 
 // Arguably this is more like SetOperator than a constructor...
-AMGSolver::AMGSolver(HypreParMatrix& A, bool iterative_mode) :
+AMGSolver::AMGSolver(HypreParMatrix& A, bool iterative_mode, double rel_tol, int iters_coeff) :
     mfem::Solver(A.M(), iterative_mode),
-    rel_tol(1.e-12),
-    iters_coeff(10)
+    rel_tol(rel_tol),
+    iters_coeff(iters_coeff)
 {
     SA_RPRINTF(0,"solve_spd_AMG_init() runs with size %d\n", A.M());
 
