@@ -757,7 +757,8 @@ void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
     SA_ASSERT(A.GetGlobalNumRows() ==  A.GetGlobalNumCols());
     SA_ASSERT(tg_data->interp->GetGlobalNumRows() == A.GetGlobalNumRows());
     PROC_STR_STREAM << "Level 1 dimension: "
-                    << (tg_data->Ac?tg_data->Ac->GetGlobalNumCols():tg_data->interp->GetGlobalNumCols());
+                    << (tg_data->Ac ? tg_data->Ac->GetGlobalNumCols() :
+                                      tg_data->interp->GetGlobalNumCols());
     if (tg_data->Ac)
     {
         PROC_STR_STREAM << ", Operator nnz: " << tg_data->Ac->NNZ() << "\n";

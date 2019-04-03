@@ -197,7 +197,7 @@ set_tests_properties(mltest
 
 add_test(pmltest
   mpirun -n 2 test/mltest -m ${PROJECT_SOURCE_DIR}/test/mltest.mesh --num-levels 2 --no-visualization --no-correct-nulspace)
-set_tests_properties(mltest
+set_tests_properties(pmltest
   PROPERTIES
   PASS_REGULAR_EXPRESSION
   "Outer PCG converged in 3 iterations.")
@@ -215,6 +215,13 @@ set_tests_properties(threelevel
   PROPERTIES
   PASS_REGULAR_EXPRESSION
   "Outer PCG converged in 3 iterations.")
+
+add_test(threeleveladapt
+  test/mltest --generate-mesh 100 --num-levels 3 --no-visualization --no-correct-nulspace -ad)
+set_tests_properties(threeleveladapt
+  PROPERTIES
+  PASS_REGULAR_EXPRESSION
+  "Outer PCG converged in 12 iterations.")
 
 add_test(elasticity
   test/mltest -m ${PROJECT_SOURCE_DIR}/test/mltest.mesh --num-levels 2 --no-visualization
