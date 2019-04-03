@@ -128,27 +128,30 @@ int adapt_approx_xbad(
     double *err, double *err0, int *executed_iters, double rtol/*=10e-12*/, double atol/*=10e-24*/,
     bool normalize/*=1*/, bool output=true);
 
-/*! \brief Updates operators and relaxation.
+/*! \brief Recomputes hierarchy while assuming spectral information is the same.
 
-    It updates the weighted l1-smoother in accordance to the new matrix \a A.
+    1. It updates the weighted l1-smoother in accordance to the new matrix \a A.
     This effectively results in adapted smoothers in the TG cycle.
+    2. Deletes the coarse operator, so it can be updated, when needed, with a fresh
+    RAP.
 
-    If \a resmooth_interp is \em true, then the old tentative
-    interpolant will be smoothed with the updated smoother. This changes the
-    hierarchy. Otherwise, the old hierarchy stays untouched.
-    The coarse operator is always freed.
+    If \a resmooth_interp is \em true, then the oridinal tentative
+    interpolant will be maintained but resmoothed with the updated smoother.
+    This changes the final interpolant. Otherwise, the original interpolant remains
+    untouched.
 */
 void adapt_update_operators(mfem::HypreParMatrix& A, tg_data_t &tg_data, bool resmooth_interp);
 
-/*! \brief Updates operators and relaxation.
+/*! \brief Recomputes hierarchy while assuming spectral information is the same.
 
-    It updates the weghted l1-smoothers in accordance to the new matrix \a A.
+    1. It updates the weghted l1-smoothers in accordance to the new matrix \a A.
     This effectively results in adapted smoothers in the ML cycle.
-    It also updates the hierarchy of operators.
+    2. It also updates the hierarchy of operators by performing fresh RAPs.
 
-    If \a resmooth_interp is \em true, then the old tentative
-    interpolants will be smoothed with the updated smoothers. This changes the
-    hierarchy.
+    If \a resmooth_interp is \em true, then the original tentative
+    interpolants will be maintained but resmoothed with the updated smoothers.
+    This changes the final interpolants. Otherwise, the original interpolants remain
+    untouched.
 */
 void adapt_update_operators(mfem::HypreParMatrix& A, ml_data_t &ml_data,
                             const MultilevelParameters &mlp, bool resmooth_interp);
