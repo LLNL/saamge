@@ -300,6 +300,9 @@ void interp_compute_vectors(
     interp_data.rhs_matrices_arr with the diagonals of the respective local (on AE) stiffness matrices.
 
     Returns an array of the eigenvalues computed on all AEs. Must be freed by the caller.
+
+    \a full_space is intended for debug. It essentially disables the solution of eigenvalue problems and
+    generates a full fine scale basis (identity basis) after eliminating essential boundary dofs.
 */
 mfem::Vector **interp_compute_vectors_nostore(const agg_partitioning_relations_t& agg_part_rels,
     const interp_data_t& interp_data, ElementMatrixProvider *elem_data, double theta, bool full_space=false);

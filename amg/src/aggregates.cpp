@@ -2396,8 +2396,6 @@ void agg_free_partitioning(agg_partitioning_relations_t *agg_part_rels)
     delete agg_part_rels->cface_to_truecface;
     delete agg_part_rels->cface_cDof_TruecDof;
     delete agg_part_rels->cface_TruecDof_cDof;
-    delete agg_part_rels->cface_only_cDof_TruecDof;
-    delete agg_part_rels->cface_only_TruecDof_cDof;
     delete [] agg_part_rels->dof_num_gcfaces;
 
     if (agg_part_rels->owns_Dof_TrueDof)
@@ -2449,8 +2447,6 @@ agg_partitioning_relations_t
     dst->cface_to_truecface = mbox_clone_parallel_matrix(src->cface_to_truecface);
     dst->cface_cDof_TruecDof = mbox_clone_parallel_matrix(src->cface_cDof_TruecDof);
     dst->cface_TruecDof_cDof = mbox_clone_parallel_matrix(src->cface_TruecDof_cDof);
-    dst->cface_only_cDof_TruecDof = mbox_clone_parallel_matrix(src->cface_only_cDof_TruecDof);
-    dst->cface_only_TruecDof_cDof = mbox_clone_parallel_matrix(src->cface_only_TruecDof_cDof);
     dst->dof_num_gcfaces = helpers_copy_int_arr(src->dof_num_gcfaces, src->ND);
 
     dst->AE_to_dof = mbox_copy_table(src->AE_to_dof);

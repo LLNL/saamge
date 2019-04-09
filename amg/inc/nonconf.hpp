@@ -70,7 +70,7 @@ namespace saamge
 /**
    @brief Solves via Schur complement.
 
-   Reduces the problem (by elimination) to a Schur complement system, then uses the given solver for that
+   Reduces the problem (by elimination) to a Schur complement system, then uses the given \a solver for that
    system and, in the end, recovers the eliminated (by backward substitution) variables.
 */
 class SchurSolver : public mfem::Solver
@@ -91,22 +91,55 @@ private:
 };
 
 /**
-    Once all coarse element Schur complement matrices (on cfaces) are obtained,
+    Once all dense element Schur complement matrices (on cfaces) are obtained,
     the global Schur complement matrix is assembled by a standard procedure in this
-    routine. The procedure is standard but adapted for the particular data structures and organization.
+    routine. The procedure is standard but adapted for the particular data structures
+    and organization. Can be used for both fine and coarse scale discretizations.
 
     The returned global Schur complement matrix must be freed by the caller.
 */
-mfem::HypreParMatrix *nonconf_assemble_coarse_schur_matrix(const interp_data_t& interp_data,
+mfem::HypreParMatrix *nonconf_assemble_schur_matrix(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels,
                     const mfem::HypreParMatrix& cface_cDof_TruecDof);
 
 /*! A Schur complement smoother matching the bulky SAAMGe C-type abstraction.
+
+    Just like a Schur complement solver but instead of inverting the Schur complement,
+    only smoothing is performed. In more detail, it computes the residual, eliminates
+    what needs to be eliminated, smooths, using the Schur complement, then substitutes back
+    to the full size of the vector and updates /a x.
+
+    The smoother and Schur complement data is in \a data, which is of type \b smpr_poly_data_t.
+
+    XXX: This needed to add some stuff to \b smpr_poly_data_t to carry all the information,
+         which I kind of dislike.
 */
 void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem::Vector& x, void *data);
 
-/*! Builds a "coarse" interior penalty formulation and the respective space. tg_data should already
+/*! Builds a "coarse" interior penalty formulation and the respective space. \a tg_data should already
     have some basic initializations via tg_init_data().
+
+    In fact it may or may not coarsen at all. If it coarsens, it computes eigenvectors for the
+    local H1 matrix and obtains basis functions. If not coarsening, it just obtains identity basis.
+    In all cases, the essential boundary dofs are eliminated, in the sense that all basis functions
+    vanish on the essential portion of the boundary.
+
+    It obtains the "coarse" IP matrix, or a Schur complement on the faces, and the transition operator
+    from the H1 space to the IP spaces (straight to the coarse ones if actual coarsening is employed).
+
+    It also fills-in, in \a agg_part_rels, the "dof to true dof" (coarse or fine) relations for the IP
+    spaces. It does it appropriately, respecting what dofs actually remain, whether Schur complement is
+    employed or not.
+
+    \a full_space is a debug feature. It is used to generate a fine-scale IP discretization. I.e.,
+    no actual coarsening is performed.
+
+    XXX: It uses the agglomerate H1 matrix for the eigenvalue problem and distributes the eigenvectors
+         to obtain the final basis (after SVD). That is, even though the "coarse" space is for the
+         IP formulation, the eigenvalue problems do not account for the specifics of a respective
+         fine-scale IP formulation.
+    XXX: It is tuned towards coarse spaces, so it utilizes dense matrices, which can be slow when
+         \a full_space is on.
 */
 void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
                                ElementMatrixProvider *elem_data, double theta, double delta,
@@ -120,20 +153,49 @@ mfem::HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_
                                               ElementMatrixProvider *elem_data);
 
 /*! Prepare "identity" element basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
-*/
-void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, agg_partitioning_relations_t& agg_part_rels,
-                                                    ElementMatrixProvider *elem_data);
 
-/*! Builds a "fine" interior penalty formulation and the respective space using (or abusing) the TG structure.
+    It is concerned with a fine-scale IP setting. Concentrates on the "interiror" portions of the agglomerates,
+    which essentially correspond to the H1 agglomerates. All it does is remove the essential boundary dofs, by deleting the rows
+    and columns in the H1 agglomerate matrices and creating a fine-scale basis that skips those dofs, i.e.,
+    the basis functions vanish on the essential portion of the boundary.
+*/
+void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
+                                                   ElementMatrixProvider *elem_data);
+
+/*! Builds a "fine-scale" interior penalty formulation and the respective spaces using (or abusing) the TG structure.
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
     tg_data should already have some basic initializations via tg_init_data().
-*/
-mfem::HypreParMatrix *nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                                          ElementMatrixProvider *elem_data, double delta, bool schur=false);
 
-/*! Once the fine interior penalty discretization is obtained, this routine provides the partitioning
-    relations for calling SAAMGe on the interior penalty matrix where the AEs on the first level are the same AEs as
-    the interior penalty ones.
+    It can also use straight the Schur complement on the agglomerate faces. Note that the faces are agglomerate,
+    but the dofs are fine-scale.
+
+    It also fills-in, in \a agg_part_rels, the "dof to true dof" (coarse or fine) relations for the IP
+    spaces. It does it appropriately, respecting what dofs actually remain, whether Schur complement is
+    employed or not.
+
+    XXX: The approach here is more direct than \b nonconf_ip_coarsen_finest with the \b full_space option.
+         That is why it allows using sparse matrices.
+*/
+void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                               ElementMatrixProvider *elem_data, double delta, bool schur=false);
+
+/*! Generates partitioning relations to be used by SAAMGe to solve the interior penalty problem.
+
+    Here, \a agg_part_rels_nonconf and \a interp_data_nonconf are generated by one of the routines
+    in this module, that produce the IP spaces and formulations. Using the input, a partitioning structure
+    is generated that is usable in SAAMGe and is formulated in terms of the IP entities. Namely, elements and
+    agglomerates remain unchanged but the dofs are different. Note that the IP spaces are defined on the
+    level of agglomerates, so the main part is the generation of \b AE_to_dof. In the end, it generates MISes.
+
+    It works for both the full IP space or the one for the Schur complement (the condensed IP formulation),
+    which includes only the agglomerate face spaces. The only difference is, whether "interior" dofs are
+    included or not. In this context, MISes reidentify the "interiors" and agglomerate faces (or just
+    the agglomerate faces if the condensed formulation is considered) in a form suitable for SAAMGe.
+
+    It is intended to work with a fine-scale IP formulation. In principle, it can be called on a coarse-scale
+    one but it makes no much sense. The idea is to use SAAMGe to coarsen for the solver and starting with
+    a coarse formulation needs a modified interpretation of the entities. E.g., agglomerates should be
+    considered as elements on the coarse IP space but this is not the case here.
 
     The returned structure must be freed by the caller.
 */
@@ -142,13 +204,25 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
                             const interp_data_t& interp_data_nonconf);
 
 /**
-   Returns agglomerated matrices for the interior penalty formulation.
+    Returns agglomerated matrices for the interior penalty formulation.
+
+    \a interp_data_nonconf is the one filled in through \b nonconf_ip_discretization
+    containing sparse local (on agglomerates) matrices of fine scale. This class simply collects the pieces
+    to obtain a fine-scale IP matrix (no Schur complements involved) on the agglomerate respecting the local
+    ordering of the dofs.
+
+    This is to be used in the construction of a standard SAAMGe hierarchy, where the same agglomerates as the ones
+    for the IP method are used during the first coarsening. Note that the IP method "breaks" the spaces along
+    the agglomerates' faces.
+
+    XXX: Only agglomerate matrices are provided and no actual element matrices, since there are no
+         element matrices available, whose assembly might provide the agglomerate matrices of interest.
 */
-class ElementIPMatrix : public ElementMatrixProvider
+class ElementFineIPMatrix : public ElementMatrixProvider
 {
 public:
-    ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
-                    const interp_data_t& interp_data_nonconf);
+    ElementFineIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
+                        const interp_data_t& interp_data_nonconf);
     virtual mfem::Matrix *GetMatrix(int elno, bool& free_matr) const;
     virtual mfem::SparseMatrix *BuildAEStiff(int elno) const;
 private:

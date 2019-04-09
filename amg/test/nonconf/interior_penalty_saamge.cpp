@@ -154,10 +154,10 @@ int main(int argc, char *argv[])
     int nu_relax_aux = 2;
     args.AddOption(&nu_relax_aux, "-na", "--nu-relax-aux",
                    "Degree for smoother in the relaxation for the auxiliary solver.");
-    bool schur_smooth = false;
-    args.AddOption(&schur_smooth, "-ss", "--schur-smooth",
-                   "-nss", "--no-schur-smooth",
-                   "Schur smoother.");
+//    bool schur_smooth = false;
+//    args.AddOption(&schur_smooth, "-ss", "--schur-smooth",
+//                   "-nss", "--no-schur-smooth",
+//                   "Schur smoother.");
 
     args.Parse();
     if (!args.Good())
@@ -253,12 +253,13 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax_aux, 1.0, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    HypreParMatrix *S;
-    S = nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur_smooth);
+    //HypreParMatrix *S;
+    //S = nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur_smooth);
+    nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, false);
     tg_print_data(*Ag, tg_data);
 
     agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
-    ElementIPMatrix *emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
+    ElementFineIPMatrix *emp_ip = new ElementFineIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
     if (ml)
     {
         nparts_arr = new int[nl-1];
@@ -278,7 +279,7 @@ int main(int argc, char *argv[])
         tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta, false, -1,
                                          !direct_eigensolver, false);
         tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
-        if (schur_smooth)
+/*        if (schur_smooth)
         {
             smpr_free_poly_data(tg_data_saamge->poly_data);
             tg_data_saamge->poly_data = smpr_init_poly_data(*S, nu_relax, 0.0);
@@ -290,7 +291,7 @@ int main(int argc, char *argv[])
             SA_ASSERT(tg_data_saamge->pre_smoother == tg_data_saamge->post_smoother);
             tg_data_saamge->poly_data->schur_smoother = tg_data_saamge->pre_smoother;
             tg_data_saamge->pre_smoother = tg_data_saamge->post_smoother = nonconf_schur_smoother;
-        }
+        }*/
 
         mfem::Solver *solver;
         if (coarse_direct)
@@ -402,7 +403,7 @@ int main(int argc, char *argv[])
     const double energyerr = mbox_energy_norm_parallel(*Ag, *gx);
     SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
 
-    delete S;
+//    delete S;
     delete gx;
     delete cbg;
     tg_free_data(tg_data);

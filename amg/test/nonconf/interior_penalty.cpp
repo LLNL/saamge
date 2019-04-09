@@ -271,8 +271,8 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, theta, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    if (full_space && !schur)
-        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
+    if (full_space)
+        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur);
     else
         nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
 

@@ -29,7 +29,18 @@
 */
 
 /**
-   Nonconforming SAAMGe in two-level setting applied to a basic elliptic problem.
+    Nonconforming SAAMGe in two-level setting applied to a basic elliptic problem.
+
+    This example starts with an H1 problem partitioned in agglomerates.
+    On the agglomerates it builds interior penalty (IP) spaces and formulation
+    together with a transition operators between H1 and IP spaces. The IP spaces
+    can be fine-scale or coarse. If they are coarse the transition operators are
+    straight from fine H1 to coarse IP spaces. The IP problem can be the entire formulation
+    or condensed to the agglomerate faces (utilizing a Schur complement).
+
+    In the end, it uses the transition operator and the IP formulation to obtain a multiplicative
+    auxiliary space preconditioner for the H1 problem. The IP problem is inverted "exactly"
+    in the preconditioner.
 */
 
 #include <mfem.hpp>
@@ -238,8 +249,8 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax, theta, false, 0.0, !direct_eigensolver);
     tg_data->polynomial_coarse_space = -1;
 
-    if (full_space && !schur)
-        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta);
+    if (full_space)
+        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur);
     else
         nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
     tg_print_data(*Ag, tg_data);

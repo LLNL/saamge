@@ -497,7 +497,7 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
 
     // Construct the operator as though it is a "coarse" matrix.
     delete tg_data.Ac;
-    tg_data.Ac = nonconf_assemble_coarse_schur_matrix(*tg_data.interp_data, agg_part_rels,
+    tg_data.Ac = nonconf_assemble_schur_matrix(*tg_data.interp_data, agg_part_rels,
                                                       *agg_part_rels.cface_cDof_TruecDof);
     for (int i=0; i < agg_part_rels.nparts; ++i)
         delete tg_data.interp_data->schurs[i];
