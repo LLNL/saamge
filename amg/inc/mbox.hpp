@@ -1433,6 +1433,15 @@ void mbox_project_parallel(mfem::HypreParMatrix& A, mfem::HypreParMatrix& interp
 mfem::HypreParVector *mbox_restrict_vec_to_faces(const mfem::Vector& vec, int elements_dofs,
                                                  HYPRE_Int *new_processor_offsets, int new_glob_size);
 
+/*! \brief Distributes the diagonal of a global assembled matrix.
+
+    It takes the diagonal of a global assembled matrix defined on true dofs and
+    distributes it to obtain the fully assembled diagonal of the global matrix available
+    on all local dofs (including the ones that are not owned by the processor).
+*/
+void mbox_obtain_global_diagonal(const mfem::HypreParMatrix& A, const mfem::HypreParMatrix& dof_truedof,
+                                 mfem::Vector& local_diag);
+
 /* Inline Functions */
 /*! \brief A wrapper of \b mbox_orthogonalize for sparse \a D.
 

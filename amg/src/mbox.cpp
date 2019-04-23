@@ -1989,4 +1989,14 @@ HypreParVector *mbox_restrict_vec_to_faces(const Vector& vec, int elements_dofs,
     return restr_vec;
 }
 
+void mbox_obtain_global_diagonal(const HypreParMatrix& A, const HypreParMatrix& dof_truedof,
+                                 Vector& local_diag)
+{
+    Vector true_diag;
+    A.GetDiag(true_diag);
+    SA_ASSERT(true_diag.Size() == dof_truedof.GetNumCols());
+    local_diag.SetSize(dof_truedof.GetNumRows());
+    dof_truedof.Mult(true_diag, local_diag);
+}
+
 } // namespace saamge

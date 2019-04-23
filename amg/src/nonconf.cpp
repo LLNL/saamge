@@ -59,11 +59,18 @@ using namespace mfem;
 
     \a onlytheblocks is intended for debug purposes. Namely, if \em true, it will only
     compute and store the blocks of the local IP matrices but will not compute Schur complements.
+
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
 */
 static inline
 void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
                   const agg_partitioning_relations_t& agg_part_rels, const Vector * const *evals,
-                  double delta, bool onlytheblocks=false, bool AEs_spectral=true)
+                  double delta, const Vector *diagonal=NULL, bool onlytheblocks=false, bool AEs_spectral=true)
 {
     SA_ASSERT(NULL != interp_data.cfaces_bases);
     const DenseMatrix * const * const cfaces_bases = interp_data.cfaces_bases;
@@ -90,9 +97,10 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
     for (int i=0; i < agg_part_rels.nparts; ++i)
     {
         SA_ASSERT(NULL != interp_data.cut_evects_arr[i]);
-        SA_ASSERT(NULL != interp_data.rhs_matrices_arr[i]);
-        SA_ASSERT(interp_data.rhs_matrices_arr[i]->Height() == interp_data.rhs_matrices_arr[i]->Width());
-        SA_ASSERT(interp_data.rhs_matrices_arr[i]->Height() == agg_part_rels.AE_to_dof->RowSize(i));
+        SA_ASSERT(NULL != diagonal || NULL != interp_data.rhs_matrices_arr[i]);
+        SA_ASSERT(NULL != diagonal || interp_data.rhs_matrices_arr[i]->Height() == interp_data.rhs_matrices_arr[i]->Width());
+        SA_ASSERT(NULL != diagonal || interp_data.rhs_matrices_arr[i]->Height() == agg_part_rels.AE_to_dof->RowSize(i));
+        SA_ASSERT(NULL == diagonal || diagonal->Size() == agg_part_rels.ND);
         const int num_cfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         const int interior_size = interp_data.cut_evects_arr[i]->Width();
@@ -108,7 +116,8 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
 
         // Loop over the coarse/agglomerate faces of the current agglomerate/coarse element and
         // obtain the respective entries of the matrices.
-        const Vector diag(interp_data.rhs_matrices_arr[i]->GetData(), interp_data.rhs_matrices_arr[i]->Height());
+        const Vector diag(NULL == diagonal ? interp_data.rhs_matrices_arr[i]->GetData() : NULL,
+                          NULL == diagonal ? interp_data.rhs_matrices_arr[i]->Height() : 0);
         int cface_offset = 0;
         for (int j=0; j < num_cfaces; ++j)
         {
@@ -124,9 +133,17 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
             agg_restrict_to_agg_enforce(i, agg_part_rels, agg_part_rels.cfaces_dof_size[cface],
                                         agg_part_rels.cface_to_dof->GetRow(cface),
                                         *(interp_data.cut_evects_arr[i]), cut_evects_cface);
-            agg_restrict_vec_to_agg_enforce(i, agg_part_rels, agg_part_rels.cfaces_dof_size[cface],
-                                            agg_part_rels.cface_to_dof->GetRow(cface),
-                                            diag, cface_diag);
+            if (NULL == diagonal)
+            {
+                agg_restrict_vec_to_agg_enforce(i, agg_part_rels, agg_part_rels.cfaces_dof_size[cface],
+                                                agg_part_rels.cface_to_dof->GetRow(cface),
+                                                diag, cface_diag);
+            } else
+            {
+                Array<int> dofs(agg_part_rels.cface_to_dof->GetRow(cface), agg_part_rels.cface_to_dof->RowSize(cface));
+                SA_ASSERT(dofs.Size() == agg_part_rels.cfaces_dof_size[cface]);
+                diagonal->GetSubVector(dofs, cface_diag);
+            }
 
             for (int n=0; n < cface_basis_size; ++n)
             {
@@ -381,9 +398,16 @@ HypreParMatrix *nonconf_assemble_ip_dense_matrix(const interp_data_t& interp_dat
 }
 
 /**
-    Assembles the global rhs coming from eliminating the interior DoFs. The output vector
+    Assembles the global rhs coming from eliminating the "interior" DoFs. The output vector
     is represented in terms of true cface DoFs (i.e., defined only on cface DoFs)
-    and must be freed by the caller. The input vector is in terms of true DoFs that also include the interior DoFs.
+    and must be freed by the caller. The input vector is in terms of true DoFs that also
+    include the "interior" DoFs. This is not much of a challenge, since all "interior" dofs are
+    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
+    \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
+    is filled with cface dofs only.
+
+    \a cface_TruecDof_cDof is in terms of the cface dofs only (i.e., excluding the
+    "interior" dofs).
 */
 static inline
 HypreParVector *nonconf_assemble_schur_rhs(const interp_data_t& interp_data,
@@ -440,9 +464,17 @@ HypreParVector *nonconf_assemble_schur_rhs(const interp_data_t& interp_data,
 }
 
 /**
-    Performs the backward substitution from the block elimination. It takes the full (including interiors) original
-    rhs in true DoFs and the face portion of the (obtained by inverting the Schur complement) solution in face true DoFs (excluding interiors).
-    The returned vector (i.e., x) is in terms of all (including interiors) true DoFs.
+    Performs the backward substitution from the block elimination. It takes the full
+    (including "interiors") original rhs in true DoFs and the face portion of the
+    (obtained by inverting the Schur complement) solution in face true DoFs (excluding "interiors").
+    The returned vector (i.e., x) is in terms of all (including "interiors") true DoFs.
+    This is not much of a challenge, since all "interior" dofs are
+    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
+    \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
+    is filled with cface dofs only.
+
+    \a cface_cDof_TruecDof is in terms of the cface dofs only (i.e., excluding the
+    "interior" dofs).
 */
 static inline
 void nonconf_schur_update_interior(const interp_data_t& interp_data,
@@ -545,7 +577,7 @@ void nonconf_schur_smoother(HypreParMatrix& A, const Vector& b, Vector& x, void 
 
 void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
                                ElementMatrixProvider *elem_data, double theta, double delta,
-                               bool schur, bool full_space)
+                               const Vector *diagonal, bool schur, bool full_space)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true;
@@ -570,7 +602,12 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
     tg_data.interp_data->coarse_truedof_offset = cfaces_bases_contrib.get_coarse_truedof_offset();
 
     // Compute Schur complements and other matrices necessary for the algorithm.
-    nonconf_ip_first_coarse_schur_matrices(*tg_data.interp_data, agg_part_rels, evals, delta, !schur, !full_space);
+    nonconf_ip_first_coarse_schur_matrices(*tg_data.interp_data, agg_part_rels, evals, delta, diagonal, !schur, !full_space);
+
+    for (int i=0; i < agg_part_rels.nparts; ++i)
+        delete tg_data.interp_data->rhs_matrices_arr[i];
+    delete [] tg_data.interp_data->rhs_matrices_arr;
+    tg_data.interp_data->rhs_matrices_arr = NULL;
 
     for (int i=0; i < agg_part_rels.nparts; ++i)
         delete evals[i];
@@ -618,7 +655,7 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
 
 /**
     Obtains the interior penalty element matrices (their blocks) for a fine scale
-    IP formulation, where essential boundary dofs are removed. It can optionally
+    IP formulation, where essential boundary dofs are already removed. It can optionally
     obtain a condensed version for Schur complements instead, depending on the value
     of \a schur.
 
@@ -628,11 +665,18 @@ void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t&
     produce sparse matrices. However, if \a schur is activated, dense matrices for the Schur complement
     (condensation on the agglomerate faces) are employed.
 
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
+
     Fills in arrays in the interpolation data. They will be freed with the interpolation data.
 */
 static inline
 void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
-                  const agg_partitioning_relations_t& agg_part_rels, double delta, bool schur=false)
+                  const agg_partitioning_relations_t& agg_part_rels, double delta, const Vector *diagonal=NULL, bool schur=false)
 {
     // Assemble the blocks of the interior penalty coarse/agglomerate element matrix for each coarse/agglomerate element.
     if (schur)
@@ -663,21 +707,43 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
 //            interp_data.AEs_stiffm[i]->Print(myfile);
 //            myfile.close();
 //        }
-        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
-        SA_ASSERT(D->Height() == D->Width());
         const int ndofs = agg_part_rels.AE_to_dof->RowSize(i);
         const int num_cfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         const int interior_size = interp_data.celements_cdofs_offsets[i+1] - interp_data.celements_cdofs_offsets[i];
-        SA_ASSERT(D->Height() == interior_size);
-        SA_ASSERT(D->NumNonZeroElems() == interior_size);
         int bdr_size = 0;
         for (int j=0; j < num_cfaces; ++j)
             bdr_size += interp_data.cfaces_cdofs_offsets[cfaces[j]+1] - interp_data.cfaces_cdofs_offsets[cfaces[j]];
         SparseMatrix *Abb = new SparseMatrix(bdr_size);
         SparseMatrix *Aib = new SparseMatrix(interior_size, bdr_size);
 
-        const Vector diag(D->GetData(), D->Height());
+        Vector diag;
+        SparseMatrix *D=NULL;
+        if (NULL == diagonal)
+        {
+            D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
+            SA_ASSERT(D->Height() == D->Width());
+            SA_ASSERT(D->NumNonZeroElems() == D->Height());
+            diag.SetDataAndSize(D->GetData(), D->Height());
+        } else
+        {
+            SA_ASSERT(diagonal->Size() == agg_part_rels.ND);
+            diag.SetSize(interior_size);
+            int intdofs_ctr = 0;
+            for (int j=0; j < ndofs; ++j)
+            {
+                const int gj = agg_num_col_to_glob(*agg_part_rels.AE_to_dof, i, j);
+                SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+                if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                {
+                    SA_ASSERT(intdofs_ctr < interior_size);
+                    diag(intdofs_ctr) = diagonal->Elem(gj);
+                    ++intdofs_ctr;
+                }
+            }
+            SA_ASSERT(intdofs_ctr == interior_size);
+        }
+        SA_ASSERT(diag.Size() == interior_size);
 
         // Loop over the coarse/agglomerate faces of the current agglomerate/coarse element and
         // obtain or finish the respective entries of the matrices.
@@ -713,7 +779,7 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
                 const int ldof = map[loc];
                 SA_ASSERT(0 <= ldof && ldof < interior_size);
                 SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
-                SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] == diag(ldof));
+                SA_ASSERT(NULL != diagonal || interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] == diag(ldof));
             }
         }
 #endif
@@ -1088,7 +1154,8 @@ void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, c
 }
 
 void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double delta, bool schur)
+                               ElementMatrixProvider *elem_data, double delta,
+                               const Vector *diagonal, bool schur)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true;
@@ -1133,7 +1200,7 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
     agg_create_cface_cDof_TruecDof_relations(agg_part_rels, tg_data.interp_data->coarse_truedof_offset,
                                              tg_data.interp_data->cfaces_bases, tg_data.interp_data->celements_cdofs, !schur);
 
-    nonconf_ip_discretization_matrices(*tg_data.interp_data, agg_part_rels, delta, schur);
+    nonconf_ip_discretization_matrices(*tg_data.interp_data, agg_part_rels, delta, diagonal, schur);
 
     // Construct the operator as though it is a "coarse" matrix.
     delete tg_data.Ac;
@@ -1159,9 +1226,9 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
     agg_part_rels->nparts = nparts;
     agg_part_rels->Dof_TrueDof = mbox_clone_parallel_matrix(agg_part_rels_nonconf.cface_cDof_TruecDof);
     agg_part_rels->ND = agg_part_rels->Dof_TrueDof->GetNumRows();
-    SA_ASSERT(interp_data_nonconf.celements_cdofs
-              + interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] == agg_part_rels->ND ||
-              interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] == agg_part_rels->ND);
+    SA_ASSERT((interp_data_nonconf.celements_cdofs
+              + interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] == agg_part_rels->ND) !=
+              (interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] == agg_part_rels->ND));
     agg_part_rels->owns_Dof_TrueDof = true;
     agg_part_rels->partitioning = helpers_copy_int_arr(agg_part_rels_nonconf.partitioning,
                                                        agg_part_rels_nonconf.elem_to_elem->Size());

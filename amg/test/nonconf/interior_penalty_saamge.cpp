@@ -254,8 +254,8 @@ int main(int argc, char *argv[])
     tg_data->polynomial_coarse_space = -1;
 
     //HypreParMatrix *S;
-    //S = nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur_smooth);
-    nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, false);
+    //S = nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, NULL, schur_smooth);
+    nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, NULL, false);
     tg_print_data(*Ag, tg_data);
 
     agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);

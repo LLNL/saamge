@@ -29,7 +29,7 @@
 */
 
 /**
-    Nonconforming SAAMGe in two-level setting applied to a basic elliptic problem.
+    Nonconforming AMGe in two-level setting applied to a basic elliptic problem.
 
     This example starts with an H1 problem partitioned in agglomerates.
     On the agglomerates it builds interior penalty (IP) spaces and formulation
@@ -250,9 +250,9 @@ int main(int argc, char *argv[])
     tg_data->polynomial_coarse_space = -1;
 
     if (full_space)
-        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, schur);
+        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, NULL, schur);
     else
-        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, schur, full_space);
+        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, NULL, schur, full_space);
     tg_print_data(*Ag, tg_data);
 
     mfem::Solver *solver;

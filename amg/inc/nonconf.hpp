@@ -29,28 +29,29 @@
 */
 
 /**
-   @file This file and the respective .cpp file implement a nonconforming interior penalty AMGe
-   approach. It basically "breaks" the space with the first coarsening and reduces the problem to
-   faces similar to static condensation. It is thus natural and easy to recursively extend to multiple levels and
-   is suitable for high-order discretizations when a matrix-free approach is utilized.
+    @file This file and the respective .cpp file implement a nonconforming interior penalty (IP) AMGe
+    approach. It basically "breaks" the space with the first coarsening and can reduce the problem to
+    faces similar to static condensation. It is thus natural and easy to recursively extend to multiple levels and
+    is potentially suitable for high-order discretizations when a matrix-free approach is utilized.
 
-   The main difference is in the first (finest) coarsening. On that level, the agglomerated (coarse) faces need to be obtained.
-   Coarse faces are essentially certain MISes in terms of faces. Once the space is "broken" (and, thus, nonconforming in the sense
-   that the coarse spaces are not subspaces of the finest), it remains "broken" on all coarse levels (which are nested). Therefore,
-   after the first coarsening the rest of the coarsening procedures are very similar to the usual SAAMGE and now faces can be
-   coarsened by simply considering MISes in terms of DoFs, since the faces were already separated (there are no corner DoFs that are
-   shared between faces) and are entirely characterized by the DoFs on them.
+    The main difference is in the first (finest) coarsening. On that level, the agglomerated (coarse) faces need to be obtained.
+    Coarse faces are essentially certain MISes in terms of faces. Once the space is "broken" (and, thus, nonconforming in the sense
+    that the coarse spaces are not subspaces of the finest), it remains "broken" on all coarse levels (which are nested). Therefore,
+    after the first coarsening, or after obtaining the IP formulation, the rest of the coarsening procedures are very similar to
+    the usual SAAMGe and now faces can be coarsened by simply considering MISes in terms of DoFs, since the faces were already
+    separated (there are no corner DoFs that are shared between faces) and are entirely characterized by the DoFs on them.
 
-   It is more convenient to keep this method separate from the rest of SAAMGE as it works in a slightly different way.
+    It is more convenient to keep this method separate from the rest of SAAMGe as it works in a slightly different way.
+    That is why this is considered as a semi-separate module.
 
-   Currently, this is aimed at solver hierarchies, although it may have some potential to become an upscaling approach for
-   coarse discretizations.
+    Currently, this is aimed at solver hierarchies, although it may have some potential to become an upscaling approach for
+    coarse discretizations.
 
-   TODO: Matrix-free implementation. I will point out the exact spots where particular routines need to be replaced by matrix-free
-         versions. Currently, we consider the idea of matrix-free implementations only on the finest level (first coarsening),
-         since this is the most meaningful and it is less clear if there will be any benefit to have the coarse levels matrix-free.
+    TODO: Matrix-free implementation. It may be sufficient to consider the idea of matrix-free implementations only on the
+          finest level (first coarsening), since this is the most meaningful and it is less clear if there will be any benefit
+          to have the coarse levels matrix-free.
 
-   TODO: Consider making this easy to use for hybridized systems.
+    TODO: Consider making this easy to use for hybridized systems.
 */
 
 #pragma once
@@ -134,6 +135,13 @@ void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem
     \a full_space is a debug feature. It is used to generate a fine-scale IP discretization. I.e.,
     no actual coarsening is performed.
 
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
+
     XXX: It uses the agglomerate H1 matrix for the eigenvalue problem and distributes the eigenvectors
          to obtain the final basis (after SVD). That is, even though the "coarse" space is for the
          IP formulation, the eigenvalue problems do not account for the specifics of a respective
@@ -143,7 +151,7 @@ void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem
 */
 void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
                                ElementMatrixProvider *elem_data, double theta, double delta,
-                               bool schur=true, bool full_space=false);
+                               const mfem::Vector *diagonal=NULL, bool schur=true, bool full_space=false);
 
 /*! Builds the right-hand side for the "fine" interior penalty formulation.
     The returned vector must be freed by the caller.
@@ -156,7 +164,7 @@ mfem::HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_
 
     It is concerned with a fine-scale IP setting. Concentrates on the "interiror" portions of the agglomerates,
     which essentially correspond to the H1 agglomerates. All it does is remove the essential boundary dofs, by deleting the rows
-    and columns in the H1 agglomerate matrices and creating a fine-scale basis that skips those dofs, i.e.,
+    and columns in the H1 agglomerate matrices and creating a fine-scale "interior" basis that skips those dofs, i.e.,
     the basis functions vanish on the essential portion of the boundary.
 */
 void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
@@ -164,20 +172,28 @@ void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, c
 
 /*! Builds a "fine-scale" interior penalty formulation and the respective spaces using (or abusing) the TG structure.
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
-    tg_data should already have some basic initializations via tg_init_data().
+    \a tg_data should already have some basic initializations via tg_init_data().
 
     It can also use straight the Schur complement on the agglomerate faces. Note that the faces are agglomerate,
     but the dofs are fine-scale.
 
-    It also fills-in, in \a agg_part_rels, the "dof to true dof" (coarse or fine) relations for the IP
+    It also fills-in, in \a agg_part_rels, the "dof to true dof" relations for the IP
     spaces. It does it appropriately, respecting what dofs actually remain, whether Schur complement is
     employed or not.
+
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
 
     XXX: The approach here is more direct than \b nonconf_ip_coarsen_finest with the \b full_space option.
          That is why it allows using sparse matrices.
 */
 void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double delta, bool schur=false);
+                               ElementMatrixProvider *elem_data, double delta,
+                               const mfem::Vector *diagonal=NULL, bool schur=false);
 
 /*! Generates partitioning relations to be used by SAAMGe to solve the interior penalty problem.
 
@@ -185,14 +201,18 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
     in this module, that produce the IP spaces and formulations. Using the input, a partitioning structure
     is generated that is usable in SAAMGe and is formulated in terms of the IP entities. Namely, elements and
     agglomerates remain unchanged but the dofs are different. Note that the IP spaces are defined on the
-    level of agglomerates, so the main part is the generation of \b AE_to_dof. In the end, it generates MISes.
+    level of agglomerates, so the main part is the generation of \b AE_to_dof, while elem_to_dof
+    makes no sense in general, so it is not produced. In the end, it generates MISes.
 
-    It works for both the full IP space or the one for the Schur complement (the condensed IP formulation),
+    It works for both the entire IP space or the one for the Schur complement (the condensed IP formulation),
     which includes only the agglomerate face spaces. The only difference is, whether "interior" dofs are
     included or not. In this context, MISes reidentify the "interiors" and agglomerate faces (or just
-    the agglomerate faces if the condensed formulation is considered) in a form suitable for SAAMGe.
+    the agglomerate faces if the condensed formulation is considered) in a form suitable for SAAMGe, i.e.,
+    it identifies agglomerate faces in terms of dofs, rather than in terms of fine-scale faces, which at this
+    stage is mathematically equivalent, since the agglomerate faces are separated from each other
+    (and from the "interiors") in terms of dofs.
 
-    It is intended to work with a fine-scale IP formulation. In principle, it can be called on a coarse-scale
+    It is intended to be used with a fine-scale IP formulation. In principle, it can be called on a coarse-scale
     one but it makes no much sense. The idea is to use SAAMGe to coarsen for the solver and starting with
     a coarse formulation needs a modified interpretation of the entities. E.g., agglomerates should be
     considered as elements on the coarse IP space but this is not the case here.
