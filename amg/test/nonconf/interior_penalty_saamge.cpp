@@ -259,7 +259,7 @@ int main(int argc, char *argv[])
     tg_print_data(*Ag, tg_data);
 
     agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
-    ElementFineIPMatrix *emp_ip = new ElementFineIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
+    ElementIPMatrix *emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
     if (ml)
     {
         nparts_arr = new int[nl-1];

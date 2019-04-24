@@ -68,7 +68,7 @@ public:
        copies from global SparseMatrix (if available) rather than doing its own
        assembly.
     */
-    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const = 0;
+    virtual mfem::Matrix * BuildAEStiff(int elno) const = 0;
 
     bool IsGeometric() {return is_geometric;}
 protected:
@@ -91,7 +91,7 @@ public:
         mfem::DomainLFIntegrator *dlfi, mfem::FiniteElementSpace *fes) :
             ElementMatrixProvider(agg_part_rels), dlfi(dlfi), fes(fes) {}
     virtual mfem::Matrix *GetMatrix(int elno, bool& free_matr) const;
-    virtual mfem::SparseMatrix *BuildAEStiff(int elno) const
+    virtual mfem::Matrix *BuildAEStiff(int elno) const
     {
         return agg_build_AE_stiffm(elno, agg_part_rels, this, false);
     }
@@ -124,7 +124,7 @@ public:
     /**
        Just copies (or calls?) agg_build_AE_stiffm_with_global
      */
-    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+    virtual mfem::Matrix * BuildAEStiff(int elno) const;
     mfem::ParBilinearForm* GetParBilinearForm() const {return form;}
     void SetBdrCondImposed(bool val) {bdr_cond_imposed_ = val;}
 private:
@@ -157,7 +157,7 @@ public:
     /**
        Basically copies (or calls?)  agg_build_AE_stiffm()
     */
-    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+    virtual mfem::Matrix * BuildAEStiff(int elno) const;
 private:
     levels_level_t * level;
 };
@@ -173,7 +173,7 @@ public:
     ElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels,
                        const mfem::Array<mfem::SparseMatrix *>& elem_matrs);
     virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
-    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+    virtual mfem::Matrix * BuildAEStiff(int elno) const;
 private:
     const mfem::Array<mfem::SparseMatrix *>& elem_matrs;
 };
@@ -192,7 +192,7 @@ public:
     ElementMatrixDenseArray(const agg_partitioning_relations_t& agg_part_rels,
                        const mfem::Array<mfem::DenseMatrix *>& elem_matrs);
     virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
-    virtual mfem::SparseMatrix * BuildAEStiff(int elno) const;
+    virtual mfem::Matrix * BuildAEStiff(int elno) const;
 private:
     const mfem::Array<mfem::DenseMatrix *>& elem_matrs;
 };

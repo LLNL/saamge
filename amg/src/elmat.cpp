@@ -54,7 +54,7 @@ ElementMatrixStandardGeometric::ElementMatrixStandardGeometric(
     is_geometric = true;
 }
 
-SparseMatrix * ElementMatrixStandardGeometric::BuildAEStiff(int elno) const
+Matrix * ElementMatrixStandardGeometric::BuildAEStiff(int elno) const
 {
     return agg_build_AE_stiffm_with_global(
         assembled_processor_matrix_, elno, agg_part_rels, this,
@@ -130,7 +130,7 @@ ElementMatrixParallelCoarse::ElementMatrixParallelCoarse(
     is_geometric = false;
 }
 
-SparseMatrix * ElementMatrixParallelCoarse::BuildAEStiff(int elno) const
+Matrix * ElementMatrixParallelCoarse::BuildAEStiff(int elno) const
 {
     return agg_build_AE_stiffm(elno, agg_part_rels, this);
 }
@@ -147,9 +147,9 @@ Matrix * ElementMatrixParallelCoarse::GetMatrix(
     Table * mis_to_dof = finer_level->agg_part_rels->mis_to_dof;
     int * mis_numcoarsedof = finer_level->tg_data->interp_data->mis_numcoarsedof;
 
-    SparseMatrix * finer_AE_stiffm =
+    Matrix * finer_AE_stiffm =
         finer_level->tg_data->interp_data->AEs_stiffm[elno];
-    int ae_finedof = finer_AE_stiffm->Size();
+    int ae_finedof = finer_AE_stiffm->Height();
     int ae_coarsedof = 0;
     Array<int> mis_in_AE;
     AE_to_mis->GetRow(elno,mis_in_AE);
@@ -210,8 +210,22 @@ Matrix * ElementMatrixParallelCoarse::GetMatrix(
     free_matr = true;
     local_interp.Finalize();
 
-    SparseMatrix * local_restr = Transpose(local_interp);
-    Matrix * out = RAP(*finer_AE_stiffm, *local_restr);
+    Matrix *out;
+    SparseMatrix *sfiner_AE_stiffm = dynamic_cast<SparseMatrix *>(finer_AE_stiffm);
+    SparseMatrix *local_restr = Transpose(local_interp);
+    if (sfiner_AE_stiffm)
+        out = RAP(*sfiner_AE_stiffm, *local_restr);
+    else
+    {
+        DenseMatrix *dfiner_AE_stiffm = dynamic_cast<DenseMatrix *>(finer_AE_stiffm);
+        SA_ASSERT(dfiner_AE_stiffm);
+        DenseMatrix RA, dlocal_interp;
+        mbox_mult_sparse_to_dense(*local_restr, *dfiner_AE_stiffm, RA);
+        mbox_convert_sparse_to_dense(local_interp, dlocal_interp);
+        DenseMatrix *RAP = new DenseMatrix;
+        Mult(RA, dlocal_interp, *RAP);
+        out = RAP;
+    }
 
     if (agg_part_rels.testmesh && elno == 0 && PROC_RANK == 0)
     {
@@ -237,7 +251,7 @@ ElementMatrixArray::ElementMatrixArray(
     is_geometric = false;
 }
 
-SparseMatrix * ElementMatrixArray::BuildAEStiff(int elno) const
+Matrix * ElementMatrixArray::BuildAEStiff(int elno) const
 {
     SA_ASSERT(agg_part_rels.elem_to_dof &&
               0 <= elno &&
@@ -267,7 +281,7 @@ ElementMatrixDenseArray::ElementMatrixDenseArray(
     is_geometric = false;
 }
 
-SparseMatrix * ElementMatrixDenseArray::BuildAEStiff(int elno) const
+Matrix * ElementMatrixDenseArray::BuildAEStiff(int elno) const
 {
     return agg_build_AE_stiffm(elno, agg_part_rels, this);
 }

@@ -112,7 +112,7 @@ public:
        aggregate_size is not used and should be removed.
     */
     virtual bool Solve(
-        const mfem::SparseMatrix& A, mfem::SparseMatrix *& B, 
+        const mfem::Matrix& A, mfem::SparseMatrix *& B, 
         int part, int agg_id, int aggregate_size, double& theta,
         mfem::DenseMatrix& cut_evects, int fixed_num=-1);
 
@@ -195,7 +195,7 @@ private:
              by the caller.
 */
     bool SolveDirect(
-        const mfem::SparseMatrix& A,
+        const mfem::Matrix& A,
         mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
         double& theta, mfem::DenseMatrix& cut_evects,
         const mfem::DenseMatrix *Tt,
@@ -207,7 +207,7 @@ private:
     */
 #if SAAMGE_USE_ARPACK
     bool SolveIterative(
-        const mfem::SparseMatrix& A,
+        const mfem::Matrix& A,
         mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
         double& theta, mfem::DenseMatrix& cut_evects,
         const mfem::DenseMatrix *Tt,

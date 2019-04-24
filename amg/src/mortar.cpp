@@ -67,6 +67,8 @@ void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data,
         SA_ASSERT(interp_data.AEs_stiffm[i]->Height() == interp_data.AEs_stiffm[i]->Width());
         SA_ASSERT(interp_data.AEs_stiffm[i]->Height() == interp_data.celements_cdofs_offsets[i+1] -
                                                          interp_data.celements_cdofs_offsets[i]);
+        SparseMatrix *AE_stiffm = dynamic_cast<SparseMatrix *>(interp_data.AEs_stiffm[i]);
+        SA_ASSERT(AE_stiffm);
         const int ndofs = agg_part_rels.AE_to_dof->RowSize(i);
         const int interior_dofs = interp_data.AEs_stiffm[i]->Height();
         SA_ASSERT(interior_dofs <= ndofs);
@@ -87,7 +89,7 @@ void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data,
         {
             Array<int> cols;
             Vector srow;
-            interp_data.AEs_stiffm[i]->GetRow(j, cols, srow);
+            AE_stiffm->GetRow(j, cols, srow);
             for (int k=0; k < cols.Size(); ++k)
             {
                 SA_ASSERT(0 <= cols[k] && cols[k] < interior_dofs);
@@ -110,7 +112,7 @@ void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data,
                 map[j] = -1;
         }
         SA_ASSERT(intdofs_ctr == interior_dofs);
-        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
+        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
         delete interp_data.AEs_stiffm[i];
         interp_data.AEs_stiffm[i] = NULL;
         SA_ASSERT(D->Height() == interior_dofs);
@@ -198,6 +200,8 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
         SA_ASSERT(interp_data.AEs_stiffm[i]->Height() == interp_data.AEs_stiffm[i]->Width());
         SA_ASSERT(interp_data.AEs_stiffm[i]->Height() == interp_data.celements_cdofs_offsets[i+1] -
                                                          interp_data.celements_cdofs_offsets[i]);
+        SparseMatrix *AE_stiffm = dynamic_cast<SparseMatrix *>(interp_data.AEs_stiffm[i]);
+        SA_ASSERT(AE_stiffm);
         const int ndofs = agg_part_rels.AE_to_dof->RowSize(i);
         const int interior_dofs = interp_data.AEs_stiffm[i]->Height();
         SA_ASSERT(interior_dofs <= ndofs);
@@ -221,7 +225,7 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
         {
             Array<int> cols;
             Vector srow;
-            interp_data.AEs_stiffm[i]->GetRow(j, cols, srow);
+            AE_stiffm->GetRow(j, cols, srow);
             for (int k=0; k < cols.Size(); ++k)
             {
                 SA_ASSERT(0 <= cols[k] && cols[k] < interior_dofs);
@@ -244,7 +248,7 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
                 map[j] = -1;
         }
         SA_ASSERT(intdofs_ctr == interior_dofs);
-        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
+        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
         delete interp_data.AEs_stiffm[i];
         interp_data.AEs_stiffm[i] = NULL;
         SA_ASSERT(D->Height() == interior_dofs);
@@ -352,7 +356,7 @@ void mortar_condensed_local_rhs(interp_data_t& interp_data, const agg_partitioni
     Vector src;
     for (int i=0; i < nparts; ++i)
     {
-        AE_rhs = elem_data->BuildAEStiff(i);
+        AE_rhs = dynamic_cast<SparseMatrix *>(elem_data->BuildAEStiff(i));
         SA_ASSERT(AE_rhs);
         SA_ASSERT(AE_rhs->Finalized());
         SA_ASSERT(AE_rhs->Width() == AE_rhs->Height());

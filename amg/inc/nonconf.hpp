@@ -224,27 +224,36 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
                             const interp_data_t& interp_data_nonconf);
 
 /**
-    Returns agglomerated matrices for the interior penalty formulation.
+    Returns agglomerate matrices for the interior penalty formulation.
 
-    \a interp_data_nonconf is the one filled in through \b nonconf_ip_discretization
-    containing sparse local (on agglomerates) matrices of fine scale. This class simply collects the pieces
-    to obtain a fine-scale IP matrix (no Schur complements involved) on the agglomerate respecting the local
-    ordering of the dofs.
+    \a interp_data_nonconf is the one filled in through one of the routines in this module
+    containing sparse or dense local (on agglomerates) matrices of fine or coarse scale.
+    This class simply collects the pieces to obtain a fine or coarse scale IP matrix,
+    or a Schur complement, on the agglomerate, or the faces of the agglomerate,
+    respecting the local ordering of the dofs.
+
+    The decision on which matrices to obtain and return depends on the availability and type
+    of the information in \a interp_data_nonconf
 
     This is to be used in the construction of a standard SAAMGe hierarchy, where the same agglomerates as the ones
     for the IP method are used during the first coarsening. Note that the IP method "breaks" the spaces along
     the agglomerates' faces.
 
+    Overall, this (together with \b nonconf_create_partitioning) allows using SAAMGe on any of
+    the IP problems formulated in this module:
+        - coarse or fine
+        - condensed or not
+
     XXX: Only agglomerate matrices are provided and no actual element matrices, since there are no
          element matrices available, whose assembly might provide the agglomerate matrices of interest.
 */
-class ElementFineIPMatrix : public ElementMatrixProvider
+class ElementIPMatrix : public ElementMatrixProvider
 {
 public:
-    ElementFineIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
+    ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
                         const interp_data_t& interp_data_nonconf);
     virtual mfem::Matrix *GetMatrix(int elno, bool& free_matr) const;
-    virtual mfem::SparseMatrix *BuildAEStiff(int elno) const;
+    virtual mfem::Matrix *BuildAEStiff(int elno) const;
 private:
     const interp_data_t& interp_data_nonconf;
 };

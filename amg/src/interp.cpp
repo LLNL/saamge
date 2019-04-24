@@ -241,7 +241,7 @@ interp_data_t *interp_init_data(
     SA_ASSERT(0 < interp_data->nparts);
     interp_data->rhs_matrices_arr = new SparseMatrix*[nparts];
     interp_data->cut_evects_arr = new DenseMatrix*[nparts];
-    interp_data->AEs_stiffm = new SparseMatrix*[nparts];
+    interp_data->AEs_stiffm = new Matrix*[nparts];
     for (int i=0; i < nparts; ++i)
     {
         interp_data->rhs_matrices_arr[i] = NULL;
@@ -331,7 +331,7 @@ interp_data_t *interp_copy_data(const interp_data_t *src)
                                                       src->nparts);
     dst->cut_evects_arr = mbox_copy_dense_matr_arr(src->cut_evects_arr,
                                                    src->nparts);
-    dst->AEs_stiffm = mbox_copy_sparse_matr_arr(src->AEs_stiffm, src->nparts);
+    dst->AEs_stiffm = mbox_copy_matr_arr(src->AEs_stiffm, src->nparts);
 
     // dst->finest_elmat_callback = src->finest_elmat_callback;
 
@@ -389,7 +389,7 @@ void interp_compute_vectors(
 
     DenseMatrix ** const cut_evects_arr = interp_data.cut_evects_arr;
     SparseMatrix ** const rhs_matrices_arr = interp_data.rhs_matrices_arr;
-    SparseMatrix ** const AEs_stiffm = interp_data.AEs_stiffm;
+    Matrix ** const AEs_stiffm = interp_data.AEs_stiffm;
 
     bool xbad_lin_indep_local = false;
     bool vector_added_local = false;
@@ -423,7 +423,7 @@ void interp_compute_vectors(
         if (nparts < 10 || i % (nparts / 10) == 0)
             SA_RPRINTF_L(0, 5, "  local eigenvalue problem %d / %d\n", i, nparts);
         bool local_added = false;
-        const SparseMatrix *AE_stiffm;
+        const Matrix *AE_stiffm;
         Vector xbad_AE;
         DenseMatrix *Tt = NULL;
         double theta_local;
@@ -497,14 +497,16 @@ void interp_compute_vectors(
             else
             {
                 SA_ASSERT(readapting);
-                double denom = mbox_energy_norm_sparse(*AE_stiffm, xbad_AE);
+                const SparseMatrix *sAE_stiffm = dynamic_cast<const SparseMatrix *>(AE_stiffm);
+                SA_ASSERT(sAE_stiffm);
+                double denom = mbox_energy_norm_sparse(*sAE_stiffm, xbad_AE);
                 double ltol = tol * denom;
                 SA_PRINTF_L(9, "xbad_AE norm: %g, tol * [xbad_AE norm]: %g\n",
                             denom, ltol);
                 local_added =
                     mbox_orthogonalize_sparse(xbad_AE, *(cut_evects_arr[i]),
                                               *(rhs_matrices_arr[i]),
-                                              *AE_stiffm, ltol, *Tt);
+                                              *sAE_stiffm, ltol, *Tt);
                 if (local_added)
                     SA_SWAP(cut_evects_arr[i], Tt, DenseMatrix*);
 
@@ -668,7 +670,8 @@ Vector **interp_compute_vectors_nostore(const agg_partitioning_relations_t& agg_
         SA_ASSERT(elem_data);
         SA_ASSERT(interp_data.AEs_stiffm);
         SA_ASSERT(!interp_data.AEs_stiffm[i]);
-        AE_stiffm = elem_data->BuildAEStiff(i);
+        AE_stiffm = dynamic_cast<SparseMatrix *>(elem_data->BuildAEStiff(i));
+        SA_ASSERT(AE_stiffm);
         if (full_space)
             interp_data.AEs_stiffm[i] = AE_stiffm;
         SA_ASSERT(AE_stiffm);

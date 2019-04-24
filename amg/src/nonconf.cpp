@@ -175,14 +175,15 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
 
         if (!AEs_spectral)
         {
-            SA_ASSERT(interp_data.AEs_stiffm[i]);
+            SparseMatrix *AE_stiffm = dynamic_cast<SparseMatrix *>(interp_data.AEs_stiffm[i]);
+            SA_ASSERT(AE_stiffm);
             for (int l=0; l < interior_size; ++l)
             {
                 const Vector ql(interp_data.cut_evects_arr[i]->GetColumn(l), interp_data.cut_evects_arr[i]->Height());
                 for (int k=0; k < interior_size; ++k)
                 {
                     const Vector qk(interp_data.cut_evects_arr[i]->GetColumn(k), interp_data.cut_evects_arr[i]->Height());
-                    (*Aii)(k, l) += mbox_energy_inner_prod_sparse(*interp_data.AEs_stiffm[i], ql, qk);
+                    (*Aii)(k, l) += mbox_energy_inner_prod_sparse(*AE_stiffm, ql, qk);
                 }
             }
         } else
@@ -699,7 +700,9 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
 
     for (int i=0; i < agg_part_rels.nparts; ++i)
     {
-        interp_data.AEs_stiffm[i]->MoveDiagonalFirst();
+        SparseMatrix *AE_stiffm = dynamic_cast<SparseMatrix *>(interp_data.AEs_stiffm[i]);
+        SA_ASSERT(AE_stiffm);
+        AE_stiffm->MoveDiagonalFirst();
 //        if (i == 2)
 //        {
 //            std::ofstream myfile;
@@ -721,7 +724,7 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
         SparseMatrix *D=NULL;
         if (NULL == diagonal)
         {
-            D = mbox_snd_diagA_sparse_from_sparse(*interp_data.AEs_stiffm[i]);
+            D = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
             SA_ASSERT(D->Height() == D->Width());
             SA_ASSERT(D->NumNonZeroElems() == D->Height());
             diag.SetDataAndSize(D->GetData(), D->Height());
@@ -778,8 +781,8 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
                 SA_ASSERT(0 <= loc && loc < ndofs);
                 const int ldof = map[loc];
                 SA_ASSERT(0 <= ldof && ldof < interior_size);
-                SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
-                SA_ASSERT(NULL != diagonal || interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] == diag(ldof));
+                SA_ASSERT(AE_stiffm->GetRowColumns(ldof)[0] == ldof);
+                SA_ASSERT(NULL != diagonal || AE_stiffm->GetRowEntries(ldof)[0] == diag(ldof));
             }
         }
 #endif
@@ -803,8 +806,8 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
                 SA_ASSERT(0 <= loc && loc < ndofs);
                 const int ldof = map[loc];
                 SA_ASSERT(0 <= ldof && ldof < interior_size);
-                SA_ASSERT(interp_data.AEs_stiffm[i]->GetRowColumns(ldof)[0] == ldof);
-                interp_data.AEs_stiffm[i]->GetRowEntries(ldof)[0] += (1./delta) * diag(ldof);
+                SA_ASSERT(AE_stiffm->GetRowColumns(ldof)[0] == ldof);
+                AE_stiffm->GetRowEntries(ldof)[0] += (1./delta) * diag(ldof);
                 SA_ASSERT(ctr < cface_basis_size && cface_offset + ctr < bdr_size);
                 SA_ASSERT(0.0 == Abb->SearchRow(cface_offset + ctr, cface_offset + ctr));
                 Abb->Set(cface_offset + ctr, cface_offset + ctr, (1./delta) * diag(ldof));
@@ -823,7 +826,7 @@ void nonconf_ip_discretization_matrices(interp_data_t& interp_data,
         if (schur)
         {
             DenseMatrix dAii, dAib, *dAbb = new DenseMatrix;
-            mbox_convert_sparse_to_dense(*interp_data.AEs_stiffm[i], dAii);
+            mbox_convert_sparse_to_dense(*AE_stiffm, dAii);
             mbox_convert_sparse_to_dense(*Aib, dAib);
             mbox_convert_sparse_to_dense(*Abb, *dAbb);
             delete Abb;
@@ -1028,7 +1031,7 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
 
     for (int i=0; i < nparts; ++i)
     {
-        AE_rhs = elem_data->BuildAEStiff(i);
+        AE_rhs = dynamic_cast<SparseMatrix *>(elem_data->BuildAEStiff(i));
         SA_ASSERT(AE_rhs);
         SA_ASSERT(AE_rhs->Finalized());
         SA_ASSERT(AE_rhs->Width() == AE_rhs->Height());
@@ -1075,7 +1078,7 @@ void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, c
     SA_ASSERT(interp_data.AEs_stiffm);
     for (int i=0; i < nparts; ++i)
     {
-        AE_stiffm = elem_data->BuildAEStiff(i);
+        AE_stiffm = dynamic_cast<SparseMatrix *>(elem_data->BuildAEStiff(i));
         SA_ASSERT(AE_stiffm);
         SA_ASSERT(AE_stiffm->Finalized());
         SA_ASSERT(AE_stiffm->Width() == AE_stiffm->Height());
@@ -1311,7 +1314,7 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
     return agg_part_rels;
 }
 
-ElementFineIPMatrix::ElementFineIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
+ElementIPMatrix::ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
                                          const interp_data_t& interp_data_nonconf) :
     ElementMatrixProvider(agg_part_rels),
     interp_data_nonconf(interp_data_nonconf)
@@ -1322,7 +1325,7 @@ ElementFineIPMatrix::ElementFineIPMatrix(const agg_partitioning_relations_t& agg
     SA_ASSERT(interp_data_nonconf.Aib);
 }
 
-Matrix *ElementFineIPMatrix::GetMatrix(int elno, bool& free_matr) const
+Matrix *ElementIPMatrix::GetMatrix(int elno, bool& free_matr) const
 {
     SA_ASSERT(false); // Makes no sense, since effectively there is no element matrices,
                       // but only AE matrices.
@@ -1330,36 +1333,72 @@ Matrix *ElementFineIPMatrix::GetMatrix(int elno, bool& free_matr) const
     return new DenseMatrix;
 }
 
-SparseMatrix *ElementFineIPMatrix::BuildAEStiff(int elno) const
+Matrix *ElementIPMatrix::BuildAEStiff(int elno) const
 {
     SA_ASSERT(0 <= elno && elno < interp_data_nonconf.nparts);
-    SparseMatrix *Aii = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aii[elno]);
-    SparseMatrix *Abb = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Abb[elno]);
-    SparseMatrix *Aib = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aib[elno]);
-    SA_ASSERT(Aii);
-    SA_ASSERT(Abb);
-    SA_ASSERT(Aib);
-    SA_ASSERT(Aii->Width() == Aii->Height());
-    SA_ASSERT(Aii->Width() == Aib->Height());
-    SA_ASSERT(Abb->Width() == Abb->Height());
-    SA_ASSERT(Aib->Width() == Abb->Height());
-    SparseMatrix *Abi = Transpose(*Aib);
+    Matrix *ret = NULL;
+    SparseMatrix *Aii;
+    DenseMatrix *dAii;
+    if (NULL != interp_data_nonconf.Aii &&
+        NULL != (Aii = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aii[elno])))
+    {
+        SA_ASSERT(interp_data_nonconf.Abb);
+        SA_ASSERT(interp_data_nonconf.Aib);
+        SparseMatrix *Abb = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Abb[elno]);
+        SparseMatrix *Aib = dynamic_cast<SparseMatrix *>(interp_data_nonconf.Aib[elno]);
+        SA_ASSERT(Abb);
+        SA_ASSERT(Aib);
+        SA_ASSERT(Aii->Width() == Aii->Height());
+        SA_ASSERT(Aii->Width() == Aib->Height());
+        SA_ASSERT(Abb->Width() == Abb->Height());
+        SA_ASSERT(Aib->Width() == Abb->Height());
+        SparseMatrix *Abi = Transpose(*Aib);
 
-    Array<int> blocks(3);
-    blocks[0] = 0;
-    blocks[1] = Aii->Height();
-    blocks[2] = Aii->Height() + Abb->Height();
-    BlockMatrix AEmat(blocks);
-    AEmat.SetBlock(0, 0, Aii);
-    AEmat.SetBlock(0, 1, Aib);
-    AEmat.SetBlock(1, 0, Abi);
-    AEmat.SetBlock(1, 1, Abb);
+        Array<int> blocks(3);
+        blocks[0] = 0;
+        blocks[1] = Aii->Height();
+        blocks[2] = Aii->Height() + Abb->Height();
+        BlockMatrix AEmat(blocks);
+        AEmat.SetBlock(0, 0, Aii);
+        AEmat.SetBlock(0, 1, Aib);
+        AEmat.SetBlock(1, 0, Abi);
+        AEmat.SetBlock(1, 1, Abb);
 
-    SparseMatrix *ret = AEmat.CreateMonolithic();
+        ret = AEmat.CreateMonolithic();
+        SA_ASSERT(ret->Height() == Aii->Height() + Abb->Height());
+        delete Abi;
+    }
+    else if (NULL != interp_data_nonconf.Aii &&
+             NULL != (dAii = dynamic_cast<DenseMatrix *>(interp_data_nonconf.Aii[elno])))
+    {
+        SA_ASSERT(interp_data_nonconf.Abb);
+        SA_ASSERT(interp_data_nonconf.Aib);
+        DenseMatrix *Abb = dynamic_cast<DenseMatrix *>(interp_data_nonconf.Abb[elno]);
+        DenseMatrix *Aib = dynamic_cast<DenseMatrix *>(interp_data_nonconf.Aib[elno]);
+        SA_ASSERT(Abb);
+        SA_ASSERT(Aib);
+        SA_ASSERT(dAii->Width() == dAii->Height());
+        SA_ASSERT(dAii->Width() == Aib->Height());
+        SA_ASSERT(Abb->Width() == Abb->Height());
+        SA_ASSERT(Aib->Width() == Abb->Height());
+
+        DenseMatrix *DM = new DenseMatrix(dAii->Height() + Abb->Height());
+        DM->CopyMN(*dAii, 0, 0);
+        DM->CopyMN(*Aib, 0, dAii->Width());
+        DM->CopyMNt(*Aib, dAii->Height(), 0);
+        DM->CopyMN(*Abb, dAii->Height(), dAii->Width());
+
+        ret = DM;
+    }
+    else
+    {
+        SA_ASSERT(interp_data_nonconf.schurs);
+        SA_ASSERT(interp_data_nonconf.schurs[elno]);
+        ret = new DenseMatrix(*interp_data_nonconf.schurs[elno]);
+    }
+
+    SA_ASSERT(ret);
     SA_ASSERT(ret->Height() == ret->Width());
-    SA_ASSERT(ret->Height() == Aii->Height() + Abb->Height());
-
-    delete Abi;
     return ret;
 }
 

@@ -901,9 +901,8 @@ void tg_replace_submatrices(tg_data_t &tg_data, const SparseMatrix &Alocal,
     {
         delete tg_data.interp_data->AEs_stiffm[i];
         tg_data.interp_data->AEs_stiffm[i] = agglomerate_element_matrices[i];
-    }    
+    }
 }
-                            
 
 /**
    NOTE: only usable for actual two level method, do not use this

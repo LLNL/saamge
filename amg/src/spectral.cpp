@@ -93,7 +93,7 @@ void Eigensolver::PrintStatistics()
 }
 
 bool Eigensolver::Solve(
-    const mfem::SparseMatrix& A, mfem::SparseMatrix *& B, 
+    const mfem::Matrix& A, mfem::SparseMatrix *& B, 
     int part, int agg_id, int aggregate_size, double& theta,
     mfem::DenseMatrix& cut_evects, int fixed_num)
 {
@@ -128,14 +128,15 @@ bool Eigensolver::Solve(
    how this affects accuracy etc.
 */
 bool Eigensolver::SolveDirect(
-    const mfem::SparseMatrix& A,
+    const mfem::Matrix& A,
     mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
     double& theta, mfem::DenseMatrix& cut_evects,
     const mfem::DenseMatrix *Tt,
     bool transf, bool all_eigens, int fixed_num)
 {
     DenseMatrix *cut_ptr, cut_helper;
-    DenseMatrix deA, deB;
+    DenseMatrix dA, deB;
+    const DenseMatrix *deA = &dA;
     delete eigenvalues;
     eigenvalues = new Vector;
     Vector &evals = *eigenvalues;
@@ -146,35 +147,58 @@ bool Eigensolver::SolveDirect(
     bool vector_added = false;
     double skipped = 0.;
 
-    SA_ASSERT(A.Width() == A.Size());
+    SA_ASSERT(A.Width() == A.Height());
 
     SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
     SA_ASSERT(theta >= 0.);
-    // Build the weighted l1-smoother for the eigenvalue problem if not given.
-    if (!B) 
-        B = mbox_snd_D_sparse_from_sparse(A);
 
-    SA_ASSERT(B->Width() == B->Size());
-    SA_ASSERT(B->Width() == A.Width());
     if (transf)
     {
         // Transform the matrices for the eigenproblem.
         SA_ASSERT(Tt);
         DenseMatrix T(*Tt, 't');
-        mbox_transform_sparse(A, *Tt, deA);
+        const SparseMatrix *As = dynamic_cast<const SparseMatrix *>(&A);
+        if (As)
+        {
+            mbox_transform_sparse(*As, *Tt, dA);
+            // Build the weighted l1-smoother for the eigenvalue problem if not given.
+            if (!B)
+                B = mbox_snd_D_sparse_from_sparse(*As);
+        } else
+        {
+            const DenseMatrix *Ad = dynamic_cast<const DenseMatrix *>(&A);
+            SA_ASSERT(Ad);
+            // Build the weighted l1-smoother for the eigenvalue problem if not given.
+            if (!B)
+                B = mbox_snd_D_sparse_from_dense(*Ad);
+            mbox_transform_dense(T, *Ad, dA);
+        }
         mbox_transform_diag(T, *B, deB);
         cut_ptr = &cut_helper;
-    } 
+    }
     else
     {
         // Take the matrices without transforming them.
-        mbox_convert_sparse_to_dense(A, deA);
+        const SparseMatrix *As = dynamic_cast<const SparseMatrix *>(&A);
+        if (As)
+            mbox_convert_sparse_to_dense(*As, dA);
+        else
+        {
+            deA = dynamic_cast<const DenseMatrix *>(&A);
+            SA_ASSERT(deA);
+        }
+        // Build the weighted l1-smoother for the eigenvalue problem if not given.
+        if (!B)
+            B = mbox_snd_D_sparse_from_dense(*deA);
         mbox_convert_sparse_to_dense(*B, deB);
         cut_ptr = &cut_evects;
     }
-    SA_ASSERT(deA.Width() == deA.Height());
+    SA_ASSERT(B);
+    SA_ASSERT(B->Width() == B->Size());
+    SA_ASSERT(B->Width() == A.Width());
+    SA_ASSERT(deA->Width() == deA->Height());
     SA_ASSERT(deB.Width() == deB.Height());
-    SA_ASSERT(deB.Width() == deA.Width());
+    SA_ASSERT(deB.Width() == deA->Width());
     SA_ASSERT((transf && &cut_helper == cut_ptr) ||
               (!transf && &cut_evects == cut_ptr));
 
@@ -184,7 +208,7 @@ bool Eigensolver::SolveDirect(
 
         // Solve the local eigenvalue problem computing all eigenvalues and
         // eigenvectors
-        xpacks_calc_all_gen_eigens_dense(deA, evals, evects, deB);
+        xpacks_calc_all_gen_eigens_dense(*deA, evals, evects, deB);
 #if (SA_IS_DEBUG_LEVEL(12))
         helpers_write_vector_for_gnuplot(part, evals);
 #endif
@@ -201,13 +225,13 @@ bool Eigensolver::SolveDirect(
     {
         // Solve the local eigenvalue problem computing the necessary
         // eigenvalues and eigenvectors
-        xpacks_calc_lower_eigens_dense(deA, evals, *cut_ptr, deB, theta * lmax,
+        xpacks_calc_lower_eigens_dense(*deA, evals, *cut_ptr, deB, theta * lmax,
                                        true, fixed_num);
     }
     if (SA_IS_OUTPUT_LEVEL(9))
     {
         SA_PRINTF("theta * lmax: %g\n", theta * lmax);
-        SA_PRINTF("total eigens: %d, taken: %d\n", deA.Size(),
+        SA_PRINTF("total eigens: %d, taken: %d\n", deA->Size(),
                   cut_ptr->Width());
         // SA_PRINTF("%s","evalues: ");
         // for (int j=0; j<cut_ptr->Width(); ++j)
@@ -246,7 +270,7 @@ bool Eigensolver::SolveDirect(
 
 #if SAAMGE_USE_ARPACK
 bool Eigensolver::SolveIterative(
-    const mfem::SparseMatrix& A,
+    const mfem::Matrix& A,
     mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
     double& theta, mfem::DenseMatrix& cut_evects,
     const mfem::DenseMatrix *Tt,
@@ -265,7 +289,7 @@ bool Eigensolver::SolveIterative(
                                                        // old basis (w/o xbad)
     bool vector_added = false;
 
-    SA_ASSERT(A.Width() == A.Size());
+    SA_ASSERT(A.Width() == A.Height());
 
     SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
     SA_ASSERT(theta >= 0.);
@@ -284,8 +308,10 @@ bool Eigensolver::SolveIterative(
     int num_arnoldi = (A.Width() < 4*max_arpack_vectors) ? A.Width() : 4*max_arpack_vectors;
     if (A.Width() < max_arpack_vectors) max_arpack_vectors = A.Width();
     cut_ptr = &cut_helper;
+    const SparseMatrix *As = dynamic_cast<SparseMatrix *>(&A);
+    SA_ASSERT(As); // It is currently only implemented for sparse matrices
     int numvectors = arpacks_calc_portion_eigens_sparse_diag(
-        A, evals, *cut_ptr, *B, max_arpack_vectors, true,
+        *As, evals, *cut_ptr, *B, max_arpack_vectors, true,
         max_arpack_its, num_arnoldi, arpack_tol);
     int vectors_got = min_vectors;
     for (int ev=min_vectors; ev<max_arpack_vectors; ++ev)
@@ -303,7 +329,7 @@ bool Eigensolver::SolveIterative(
         double eigenvalue_skipped = evals[vectors_got];
         smallest_eigenvalue_skipped = 
             (eigenvalue_skipped < smallest_eigenvalue_skipped) ? eigenvalue_skipped : smallest_eigenvalue_skipped;
-    }   
+    }
     cut_evects.SetSize(A.Height(), vectors_got);
     memcpy(cut_evects.Data(), cut_ptr->Data(), sizeof(double) * A.Height() * vectors_got);
 

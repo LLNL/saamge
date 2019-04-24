@@ -61,7 +61,7 @@ typedef struct {
     mfem::DenseMatrix **cut_evects_arr;
     /** See \b interp_sparse_tent_build. Here the local stiffness matrices are
         saved and if necessary reused. */
-    mfem::SparseMatrix **AEs_stiffm;
+    mfem::Matrix **AEs_stiffm;
 
     /** Some matrices and bases for the nonconforming method. */
     mfem::Matrix **Aii;
