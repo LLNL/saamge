@@ -222,7 +222,7 @@ Matrix * ElementMatrixParallelCoarse::GetMatrix(
         DenseMatrix RA, dlocal_interp;
         mbox_mult_sparse_to_dense(*local_restr, *dfiner_AE_stiffm, RA);
         mbox_convert_sparse_to_dense(local_interp, dlocal_interp);
-        DenseMatrix *RAP = new DenseMatrix;
+        DenseMatrix *RAP = new DenseMatrix(RA.Height(), dlocal_interp.Width());
         Mult(RA, dlocal_interp, *RAP);
         out = RAP;
     }
@@ -241,7 +241,7 @@ Matrix * ElementMatrixParallelCoarse::GetMatrix(
     return out;
 }
 
-ElementMatrixArray::ElementMatrixArray(
+AgglomerateElementMatrixArray::AgglomerateElementMatrixArray(
     const agg_partitioning_relations_t& agg_part_rels,
     const Array<SparseMatrix *>& elem_matrs)
     : 
@@ -251,7 +251,7 @@ ElementMatrixArray::ElementMatrixArray(
     is_geometric = false;
 }
 
-Matrix * ElementMatrixArray::BuildAEStiff(int elno) const
+Matrix * AgglomerateElementMatrixArray::BuildAEStiff(int elno) const
 {
     SA_ASSERT(agg_part_rels.elem_to_dof &&
               0 <= elno &&
@@ -264,16 +264,16 @@ Matrix * ElementMatrixArray::BuildAEStiff(int elno) const
     return elem_matrs[elno];
 }
 
-Matrix * ElementMatrixArray::GetMatrix(
+Matrix * AgglomerateElementMatrixArray::GetMatrix(
     int elno, bool& free_matr) const
 {
     free_matr = false;
     return BuildAEStiff(elno);
 }
 
-ElementMatrixDenseArray::ElementMatrixDenseArray(
+ElementMatrixArray::ElementMatrixArray(
     const agg_partitioning_relations_t& agg_part_rels,
-    const Array<DenseMatrix *>& elem_matrs)
+    const Array<Matrix *>& elem_matrs)
     :
     ElementMatrixProvider(agg_part_rels),
     elem_matrs(elem_matrs)
@@ -281,12 +281,12 @@ ElementMatrixDenseArray::ElementMatrixDenseArray(
     is_geometric = false;
 }
 
-Matrix * ElementMatrixDenseArray::BuildAEStiff(int elno) const
+Matrix * ElementMatrixArray::BuildAEStiff(int elno) const
 {
     return agg_build_AE_stiffm(elno, agg_part_rels, this);
 }
 
-Matrix * ElementMatrixDenseArray::GetMatrix(
+Matrix * ElementMatrixArray::GetMatrix(
     int elno, bool& free_matr) const
 {
     SA_ASSERT(agg_part_rels.elem_to_dof &&

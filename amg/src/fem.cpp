@@ -45,6 +45,7 @@ using std::floor;
 using std::round;
 #endif
 using std::sqrt;
+using std::cbrt;
 using std::stringstream;
 
 namespace saamge
@@ -577,8 +578,6 @@ void fem_get_element_min_vertex(const Mesh& mesh, int elno, Vector& minv)
 int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
                                   int *nparts_y)
 {
-//    SA_ASSERT(PROC_NUM == 1);
-
     SA_ASSERT(nparts);
     SA_ASSERT(nparts_x);
     SA_ASSERT(nparts_y);
@@ -586,33 +585,31 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
     int *partitioning = new int[NE];
 
     SA_ASSERT(2 == mesh.Dimension());
-    SA_PRINTF_L(5, "Number of Partitions: desired: %d", *nparts);
+    SA_RPRINTF_L(0, 5, "Number of Partitions: desired: %d", *nparts);
 
     // Check to make sure square number of partitions.
     if (*nparts_x <= 0 && *nparts_y <= 0)
     {
         SA_ASSERT(*nparts > 0);
         *nparts_x = *nparts_y = (int)round(sqrt(*nparts));
-    } 
+    }
     else if (*nparts_x <= 0)
     {
         SA_ASSERT(*nparts > 0);
-        SA_ASSERT(*nparts_y > 0);
         *nparts_x = (int)round((double)*nparts / (double)*nparts_y);
-    } 
-    else if ((*nparts_y <= 0))
+    }
+    else if (*nparts_y <= 0)
     {
         SA_ASSERT(*nparts > 0);
-        SA_ASSERT(*nparts_x > 0);
         *nparts_y = (int)round((double)*nparts / (double)*nparts_x);
     }
 
     *nparts = *nparts_x * *nparts_y;
-    SA_PRINTF_NOTS_L(5, ", will generate: %d, in x direction: %d, "
-                        "in y direction: %d\n", *nparts, *nparts_x, *nparts_y);
-    SA_ASSERT(*nparts_y > 0);
+    SA_RPRINTF_NOTS_L(0, 5, ", will generate: %d, in x direction: %d, "
+                            "in y direction: %d\n", *nparts, *nparts_x, *nparts_y);
     SA_ASSERT(*nparts > 0);
     SA_ASSERT(*nparts_x > 0);
+    SA_ASSERT(*nparts_y > 0);
 
     double sx=0., sy=0.;
     Vector maximal_point; // top right vertex
@@ -666,9 +663,127 @@ int *fem_partition_dual_simple_2D(Mesh& mesh, int *nparts, int *nparts_x,
     }
 
 #if (SA_IS_DEBUG_LEVEL(4))
-    SA_RPRINTF(0,"%s","AEs { ---------\n");
     part_check_partitioning(mesh.ElementToElementTable(), partitioning);
-    SA_RPRINTF(0,"%s","} AEs ---------\n");
+#endif
+
+    return partitioning;
+}
+
+int *fem_partition_dual_simple_3D(Mesh& mesh, int *nparts, int *nparts_x,
+                                  int *nparts_y, int *nparts_z)
+{
+    SA_ASSERT(nparts);
+    SA_ASSERT(nparts_x);
+    SA_ASSERT(nparts_y);
+    SA_ASSERT(nparts_z);
+    const int NE = mesh.GetNE();
+    int *partitioning = new int[NE];
+
+    SA_ASSERT(3 == mesh.Dimension());
+    SA_RPRINTF_L(0, 5, "Number of Partitions: desired: %d", *nparts);
+
+    // Check to make sure square number of partitions.
+    if (*nparts_x <= 0 && *nparts_y <= 0 && *nparts_z <= 0)
+    {
+        SA_ASSERT(*nparts > 0);
+        *nparts_x = *nparts_y = *nparts_z = (int)round(cbrt(*nparts));
+    }
+    else if (*nparts_x <= 0)
+    {
+        SA_ASSERT(*nparts > 0);
+        if (*nparts_y <= 0)
+            *nparts_x = *nparts_y = (int)round(sqrt((double)*nparts / (double)*nparts_z));
+        else if (*nparts_z <= 0)
+            *nparts_x = *nparts_z = (int)round(sqrt((double)*nparts / (double)*nparts_y));
+        else
+            *nparts_x = (int)round((double)*nparts / (double)(*nparts_y * *nparts_z));
+    }
+    else if (*nparts_y <= 0)
+    {
+        SA_ASSERT(*nparts > 0);
+        if (*nparts_z <= 0)
+            *nparts_y = *nparts_z = (int)round(sqrt((double)*nparts / (double)*nparts_x));
+        else
+            *nparts_y = (int)round((double)*nparts / (double)(*nparts_x * *nparts_z));
+    }
+    else if (*nparts_z <= 0)
+    {
+        SA_ASSERT(*nparts > 0);
+        *nparts_z = (int)round((double)*nparts / (double)(*nparts_x * *nparts_y));
+    }
+
+    *nparts = *nparts_x * *nparts_y * *nparts_z;
+    SA_RPRINTF_NOTS_L(0, 5, ", will generate: %d, in x direction: %d, "
+                            "in y direction: %d, in z direction: %d\n",
+                            *nparts, *nparts_x, *nparts_y, *nparts_z);
+    SA_ASSERT(*nparts > 0);
+    SA_ASSERT(*nparts_x > 0);
+    SA_ASSERT(*nparts_y > 0);
+    SA_ASSERT(*nparts_z > 0);
+
+    double sx=0., sy=0., sz=0.;
+    Vector maximal_point;
+    for (int i=0; i < NE; ++i)
+    {
+        fem_get_element_max_vertex(mesh, i, maximal_point);
+        if (sx < maximal_point(0))
+            sx = maximal_point(0);
+        if (sy < maximal_point(1))
+            sy = maximal_point(1);
+        if (sz < maximal_point(2))
+            sz = maximal_point(2);
+    }
+    SA_ASSERT(sx > 0.);
+    SA_ASSERT(sy > 0.);
+    SA_ASSERT(sz > 0.);
+
+    double lx=sx, ly=sy, lz=sz;
+    Vector minimal_point;
+    for (int i=0; i < NE; ++i)
+    {
+        fem_get_element_min_vertex(mesh, i, minimal_point);
+        if (lx > minimal_point(0))
+            lx = minimal_point(0);
+        if (ly > minimal_point(1))
+            ly = minimal_point(1);
+        if (lz > minimal_point(2))
+            lz = minimal_point(2);
+    }
+    SA_ASSERT(sx > lx);
+    SA_ASSERT(sy > ly);
+    SA_ASSERT(sz > lz);
+
+    for (int i=0; i < NE; ++i)
+    {
+        int x, y, z;
+        double xmax, ymax, zmax;
+#if 0
+        fem_get_element_max_vertex(mesh, i, maximal_point);
+#else
+        fem_get_element_center(mesh, i, maximal_point);
+#endif
+
+        xmax = maximal_point(0);
+        ymax = maximal_point(1);
+        zmax = maximal_point(2);
+
+        x = (int)((xmax - lx) * (double)*nparts_x / (sx - lx));
+        y = (int)((ymax - ly) * (double)*nparts_y / (sy - ly));
+        z = (int)((zmax - lz) * (double)*nparts_z / (sz - lz));
+        if (x == *nparts_x) --x;
+        if (y == *nparts_y) --y;
+        if (z == *nparts_z) --z;
+        SA_ASSERT(0 <= x && x < *nparts_x);
+        SA_ASSERT(0 <= y && y < *nparts_y);
+        SA_ASSERT(0 <= z && z < *nparts_z);
+
+        partitioning[i] = z * *nparts_x * *nparts_y + y * *nparts_x + x;
+
+        SA_ASSERT(0 <= partitioning[i] && partitioning[i] < *nparts);
+    }
+
+#if (SA_IS_DEBUG_LEVEL(4))
+    part_check_partitioning(mesh.ElementToElementTable(), partitioning);
 #endif
 
     return partitioning;

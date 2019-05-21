@@ -298,14 +298,14 @@ void part_check_partitioning(const Table& graph, const int *partitioning)
     FindPartitioningComponents(const_cast<Table&>(graph), partitioning_arr,
                                component, num_comp);
 
-    SA_RPRINTF_L(PROC_NUM-1, 3,"Number of components: %d\n", num_comp.Size());
+    SA_PRINTF_L(3,"Number of components: %d\n", num_comp.Size());
 
     // Simply check which partitions have more than one or zero components.
     for (int i=0; i < num_comp.Size(); ++i)
     {
         if (num_comp[i] > 1)
         {
-            SA_RPRINTF_L(PROC_NUM-1, 8, "Non-connected partition: %d\n", i);
+            SA_PRINTF_L(8, "Non-connected partition: %d\n", i);
             ++non_con_parts;
         } else if (!num_comp[i])
         {
@@ -314,11 +314,11 @@ void part_check_partitioning(const Table& graph, const int *partitioning)
         }
     }
     if (!non_con_parts)
-        SA_RPRINTF_L(PROC_NUM-1, 3,"%s", "All partitions are connected.\n");
+        SA_PRINTF_L(3,"%s", "All partitions are connected.\n");
     else
-        SA_RPRINTF_L(PROC_NUM-1, 3,"%d NON-connected partitions!\n", non_con_parts);
+        SA_PRINTF_L(3,"%d NON-connected partitions!\n", non_con_parts);
     if (!empty_parts)
-        SA_RPRINTF_L(PROC_NUM-1, 3,"%s", "All partitions are non-empty.\n");
+        SA_PRINTF_L(3,"%s", "All partitions are non-empty.\n");
     else
         SA_ALERT_PRINTF("%d EMPTY partitions!", empty_parts);
 }

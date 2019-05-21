@@ -175,6 +175,11 @@ int *helpers_read_int_arr(const char *filename, int *n);
 */
 void helpers_write_int_arr(const char *filename, const int *arr, int n);
 
+/*! A basic integer factorization performed via recursive backtracking
+    in a depth-first manner.
+*/
+bool helpers_factorize(int number, int num_factors, int *factors, int curr_factor=0, int res=-1);
+
 } // namespace saamge
 
 #endif // _HELPERS_HPP

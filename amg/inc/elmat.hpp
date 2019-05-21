@@ -163,15 +163,13 @@ private:
 };
 
 /**
-   Returns element matrices from an array of generated matrices...
-
-   Not really used yet, but might make sense for future algebraic interface.
+   Returns element matrices from an array of generated sparse matrices.
 */
-class ElementMatrixArray : public ElementMatrixProvider
+class AgglomerateElementMatrixArray : public ElementMatrixProvider
 {
 public:
-    ElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels,
-                       const mfem::Array<mfem::SparseMatrix *>& elem_matrs);
+    AgglomerateElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels,
+                                  const mfem::Array<mfem::SparseMatrix *>& elem_matrs);
     virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
     virtual mfem::Matrix * BuildAEStiff(int elno) const;
 private:
@@ -180,21 +178,21 @@ private:
 
 /**
    Provider for element (GetMatrix) and agglomerate (BuildAEStiff) matrices
-   Note that this class is different from ElementMatrixArray in the sense that
-   both the GetMatrix and BuildAEStiff method in ElementMatrixArray returns
+   Note that this class is different from AgglomerateElementMatrixArray in the sense that
+   both the GetMatrix and BuildAEStiff method in AgglomerateElementMatrixArray returns
    agglomerate matrix
 
    Requires element matrices and partition relations as input
 */
-class ElementMatrixDenseArray : public ElementMatrixProvider
+class ElementMatrixArray : public ElementMatrixProvider
 {
 public:
-    ElementMatrixDenseArray(const agg_partitioning_relations_t& agg_part_rels,
-                       const mfem::Array<mfem::DenseMatrix *>& elem_matrs);
+    ElementMatrixArray(const agg_partitioning_relations_t& agg_part_rels,
+                       const mfem::Array<mfem::Matrix *>& elem_matrs);
     virtual mfem::Matrix * GetMatrix(int elno, bool& free_matr) const;
     virtual mfem::Matrix * BuildAEStiff(int elno) const;
 private:
-    const mfem::Array<mfem::DenseMatrix *>& elem_matrs;
+    const mfem::Array<mfem::Matrix *>& elem_matrs;
 };
 
 } // namespace saamge

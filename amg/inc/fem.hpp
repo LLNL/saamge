@@ -422,14 +422,14 @@ mfem::Table* vector_valued_elem_to_dof(const mfem::Table& mfem_elem_to_dof,
                                  const int vdim, const int ordering);
 
 /*! \brief Partitions a Cartesian 2D mesh into rectangles.
-
-    This function is used to do element agglomeration on slices of
-    the SPE10 test problem.
-
-    (is it really? appears deprecated to me)
 */
 int *fem_partition_dual_simple_2D(mfem::Mesh& mesh, int *nparts, int *nparts_x,
                                   int *nparts_y);
+
+/*! \brief Partitions a Cartesian 3D mesh into rectangles.
+*/
+int *fem_partition_dual_simple_3D(mfem::Mesh& mesh, int *nparts, int *nparts_x,
+                                  int *nparts_y, int *nparts_z);
 
 /*! \brief One fine element to one coarse element - possibly useful at high
            order.

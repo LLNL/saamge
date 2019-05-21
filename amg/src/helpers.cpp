@@ -144,4 +144,55 @@ void helpers_write_int_arr(const char *filename, const int *arr, int n)
     oarr.close();
 }
 
+bool helpers_factorize(int number, int num_factors, int *factors, int curr_factor, int res)
+{
+    SA_ASSERT(num_factors > 1);
+
+    if (res <= 0)
+    {
+        res = 1;
+        for (int i=0; i < num_factors; ++i)
+        {
+            SA_ASSERT(factors[i] >= 1);
+            res *= factors[i];
+        }
+
+        if (res == number)
+            return true;
+        else if (res > number)
+            return false;
+    }
+
+
+    SA_ASSERT(curr_factor >= 0);
+    SA_ASSERT(curr_factor < num_factors);
+    SA_ASSERT(factors[curr_factor] >= 1);
+    int init_factor = factors[curr_factor];
+
+    bool ret=false;
+    do
+    {
+        if (curr_factor > 0 && factors[curr_factor] >= factors[curr_factor - 1])
+        {
+            factors[curr_factor] = init_factor;
+            return false;
+        }
+        SA_ASSERT(res % factors[curr_factor] == 0);
+        res /= factors[curr_factor];
+        ++factors[curr_factor];
+        res *= factors[curr_factor];
+        if (res == number)
+            return true;
+        else if (res > number)
+        {
+            factors[curr_factor] = init_factor;
+            return false;
+        }
+        if (curr_factor < num_factors - 1)
+            ret = helpers_factorize(number, num_factors, factors, curr_factor + 1, res);
+    } while (!ret);
+
+    return ret;
+}
+
 } // namespace saamge

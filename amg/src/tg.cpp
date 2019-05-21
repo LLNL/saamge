@@ -875,7 +875,7 @@ tg_data_t *tg_produce_data_algebraic(
     else
         ExtractSubMatrices(Alocal, agg_part_rels, agglomerate_element_matrices);
 
-    ElementMatrixProvider * emp = new ElementMatrixArray(
+    ElementMatrixProvider * emp = new AgglomerateElementMatrixArray(
         agg_part_rels, agglomerate_element_matrices);
 
     tg_data_t * out = tg_produce_data(

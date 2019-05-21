@@ -398,19 +398,6 @@ HypreParMatrix *nonconf_assemble_ip_dense_matrix(const interp_data_t& interp_dat
     return gmat;
 }
 
-/**
-    Assembles the global rhs coming from eliminating the "interior" DoFs. The output vector
-    is represented in terms of true cface DoFs (i.e., defined only on cface DoFs)
-    and must be freed by the caller. The input vector is in terms of true DoFs that also
-    include the "interior" DoFs. This is not much of a challenge, since all "interior" dofs are
-    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
-    \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
-    is filled with cface dofs only.
-
-    \a cface_TruecDof_cDof is in terms of the cface dofs only (i.e., excluding the
-    "interior" dofs).
-*/
-static inline
 HypreParVector *nonconf_assemble_schur_rhs(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels,
                     const HypreParMatrix& cface_TruecDof_cDof, const Vector& rhs)
@@ -464,20 +451,6 @@ HypreParVector *nonconf_assemble_schur_rhs(const interp_data_t& interp_data,
     return trhs;
 }
 
-/**
-    Performs the backward substitution from the block elimination. It takes the full
-    (including "interiors") original rhs in true DoFs and the face portion of the
-    (obtained by inverting the Schur complement) solution in face true DoFs (excluding "interiors").
-    The returned vector (i.e., x) is in terms of all (including "interiors") true DoFs.
-    This is not much of a challenge, since all "interior" dofs are
-    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
-    \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
-    is filled with cface dofs only.
-
-    \a cface_cDof_TruecDof is in terms of the cface dofs only (i.e., excluding the
-    "interior" dofs).
-*/
-static inline
 void nonconf_schur_update_interior(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels, const HypreParMatrix& cface_cDof_TruecDof,
                     const Vector& rhs, const Vector& facev, Vector& x)
@@ -550,7 +523,10 @@ void SchurSolver::Mult(const mfem::Vector &x, mfem::Vector &y) const
                                                            cface_TruecDof_cDof, x);
     // Solve Schur system
     HypreParVector eb(*schur_rhs);
-    eb = 0.0;
+    if (rand_init_guess)
+        eb.Randomize(0);
+    else
+        eb = 0.0;
     solver.Mult(*schur_rhs, eb);
     delete schur_rhs;
 
@@ -1012,7 +988,7 @@ HypreParMatrix *nonconf_assemble_ip_sparse_matrix(const interp_data_t& interp_da
     return gmat;
 }
 
-HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
+HypreParVector *nonconf_ip_discretization_rhs(const tg_data_t& tg_data,
                                               const agg_partitioning_relations_t& agg_part_rels,
                                               ElementMatrixProvider *elem_data)
 {
@@ -1021,13 +997,17 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
     SA_ASSERT(elem_data);
 
     const int nparts = agg_part_rels.nparts;
+    const interp_data_t& interp_data = *tg_data.interp_data;
     SparseMatrix *AE_rhs;
-    HypreParVector lrhs(agg_part_rels.cface_TruecDof_cDof->GetComm(),
-                        agg_part_rels.cface_TruecDof_cDof->GetGlobalNumCols(),
-                        agg_part_rels.cface_TruecDof_cDof->GetColStarts());
+    HypreParVector *rhs = new HypreParVector(tg_data.interp->GetComm(),
+                            tg_data.interp->GetGlobalNumCols(),
+                            tg_data.interp->GetColStarts());
+    mbox_make_owner_partitioning(*rhs);
+    HypreParVector& lrhs = *rhs;
     lrhs = 0.0;
+    SA_ASSERT(interp_data.cfaces_truecdofs_offsets[interp_data.num_cfaces] >= 0);
     SA_ASSERT(lrhs.Size() == interp_data.celements_cdofs +
-                             interp_data.cfaces_cdofs_offsets[interp_data.num_cfaces]);
+                             interp_data.cfaces_truecdofs_offsets[interp_data.num_cfaces]);
 
     for (int i=0; i < nparts; ++i)
     {
@@ -1058,10 +1038,6 @@ HypreParVector *nonconf_ip_discretization_rhs(const interp_data_t& interp_data,
 
         delete AE_rhs;
     }
-
-    HypreParVector *rhs = new HypreParVector(*agg_part_rels.cface_TruecDof_cDof, 1);
-    agg_part_rels.cface_TruecDof_cDof->Mult(lrhs, *rhs);
-    mbox_make_owner_partitioning(*rhs);
 
     return rhs;
 }
@@ -1215,6 +1191,67 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                                                        *agg_part_rels.cface_cDof_TruecDof);
 }
 
+Table *
+nonconf_create_AE_to_dof(const agg_partitioning_relations_t& agg_part_rels_nonconf,
+                         const interp_data_t& interp_data_nonconf)
+{
+    const int nparts = agg_part_rels_nonconf.nparts;
+    const int num_cfaces = agg_part_rels_nonconf.num_cfaces;
+    const int ND = agg_part_rels_nonconf.cface_cDof_TruecDof->GetNumRows();
+    Table *pAE_to_dof = new Table();
+    Table& AE_to_dof = *pAE_to_dof;
+    AE_to_dof.MakeI(nparts);
+    for (int i=0; i < nparts; ++i)
+    {
+        if (interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != ND)
+        {
+            AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.celements_cdofs_offsets[i+1]
+                                         - interp_data_nonconf.celements_cdofs_offsets[i]);
+        }
+        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
+        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
+        for (int j=0; j < ncfaces; ++j)
+        {
+            const int cface = cfaces[j];
+            SA_ASSERT(0 <= cface && cface < num_cfaces);
+            AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.cfaces_cdofs_offsets[cface+1]
+                                         - interp_data_nonconf.cfaces_cdofs_offsets[cface]);
+        }
+    }
+    AE_to_dof.MakeJ();
+
+    for (int i=0; i < nparts; ++i)
+    {
+        if (interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != ND)
+        {
+            const int idofs = interp_data_nonconf.celements_cdofs_offsets[i+1] - interp_data_nonconf.celements_cdofs_offsets[i];
+            int ioffset = interp_data_nonconf.celements_cdofs_offsets[i];
+            for (int k=0; k < idofs; ++k, ++ioffset)
+                AE_to_dof.AddConnection(i, ioffset);
+            SA_ASSERT(ioffset == interp_data_nonconf.celements_cdofs_offsets[i+1]);
+        }
+        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
+        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
+        for (int j=0; j < ncfaces; ++j)
+        {
+            const int cface = cfaces[j];
+            SA_ASSERT(0 <= cface && cface < num_cfaces);
+            const int fdofs = interp_data_nonconf.cfaces_cdofs_offsets[cface+1] - interp_data_nonconf.cfaces_cdofs_offsets[cface];
+            int foffset = ((interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != ND)
+                           ? interp_data_nonconf.celements_cdofs : 0) + interp_data_nonconf.cfaces_cdofs_offsets[cface];
+            for (int k=0; k < fdofs; ++k, ++foffset)
+                AE_to_dof.AddConnection(i, foffset);
+            SA_ASSERT(foffset == ((interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != ND)
+                                  ? interp_data_nonconf.celements_cdofs : 0)
+                                 + interp_data_nonconf.cfaces_cdofs_offsets[cface+1]);
+        }
+    }
+    AE_to_dof.ShiftUpI();
+    AE_to_dof.Finalize(); //This shouldn't do anything. Here for consistency, if implementation ever changes.
+
+    return pAE_to_dof;
+}
+
 agg_partitioning_relations_t *
 nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_nonconf,
                             const interp_data_t& interp_data_nonconf)
@@ -1244,59 +1281,10 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
     agg_part_rels->agg_flags = new agg_dof_status_t[agg_part_rels->ND];
     memset(agg_part_rels->agg_flags, 0, sizeof(agg_dof_status_t) * agg_part_rels->ND);
 
-    agg_part_rels->AE_to_dof = new Table();
-    Table& AE_to_dof = *agg_part_rels->AE_to_dof;
-    AE_to_dof.MakeI(nparts);
-    for (int i=0; i < nparts; ++i)
-    {
-        if (interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != agg_part_rels->ND)
-        {
-            AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.celements_cdofs_offsets[i+1]
-                                         - interp_data_nonconf.celements_cdofs_offsets[i]);
-        }
-        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
-        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
-        for (int j=0; j < ncfaces; ++j)
-        {
-            const int cface = cfaces[j];
-            SA_ASSERT(0 <= cface && cface < num_cfaces);
-            AE_to_dof.AddColumnsInRow(i, interp_data_nonconf.cfaces_cdofs_offsets[cface+1]
-                                         - interp_data_nonconf.cfaces_cdofs_offsets[cface]);
-        }
-    }
-    AE_to_dof.MakeJ();
-
-    for (int i=0; i < nparts; ++i)
-    {
-        if (interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != agg_part_rels->ND)
-        {
-            const int idofs = interp_data_nonconf.celements_cdofs_offsets[i+1] - interp_data_nonconf.celements_cdofs_offsets[i];
-            int ioffset = interp_data_nonconf.celements_cdofs_offsets[i];
-            for (int k=0; k < idofs; ++k, ++ioffset)
-                AE_to_dof.AddConnection(i, ioffset);
-            SA_ASSERT(ioffset == interp_data_nonconf.celements_cdofs_offsets[i+1]);
-        }
-        const int ncfaces = agg_part_rels_nonconf.AE_to_cface->RowSize(i);
-        const int * const cfaces = agg_part_rels_nonconf.AE_to_cface->GetRow(i);
-        for (int j=0; j < ncfaces; ++j)
-        {
-            const int cface = cfaces[j];
-            SA_ASSERT(0 <= cface && cface < num_cfaces);
-            const int fdofs = interp_data_nonconf.cfaces_cdofs_offsets[cface+1] - interp_data_nonconf.cfaces_cdofs_offsets[cface];
-            int foffset = ((interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != agg_part_rels->ND)
-                           ? interp_data_nonconf.celements_cdofs : 0) + interp_data_nonconf.cfaces_cdofs_offsets[cface];
-            for (int k=0; k < fdofs; ++k, ++foffset)
-                AE_to_dof.AddConnection(i, foffset);
-            SA_ASSERT(foffset == ((interp_data_nonconf.cfaces_cdofs_offsets[num_cfaces] != agg_part_rels->ND)
-                                  ? interp_data_nonconf.celements_cdofs : 0)
-                                 + interp_data_nonconf.cfaces_cdofs_offsets[cface+1]);
-        }
-    }
-    AE_to_dof.ShiftUpI();
-    AE_to_dof.Finalize(); //This shouldn't do anything. Here for consistency, if implementation ever changes.
-
+    agg_part_rels->AE_to_dof = nonconf_create_AE_to_dof(agg_part_rels_nonconf,
+                                                        interp_data_nonconf);
     agg_part_rels->dof_to_AE = new Table();
-    Transpose(AE_to_dof, *agg_part_rels->dof_to_AE, agg_part_rels->ND);
+    Transpose(*agg_part_rels->AE_to_dof, *agg_part_rels->dof_to_AE, agg_part_rels->ND);
 
     agg_build_glob_to_AE_id_map(*agg_part_rels);
     HypreParMatrix nil;
@@ -1307,33 +1295,14 @@ nonconf_create_partitioning(const agg_partitioning_relations_t& agg_part_rels_no
         SA_ASSERT(agg_part_rels->dof_to_AE->RowSize(i) > 0);
     agg_part_rels->dof_to_dof = new Table();
     SA_ASSERT(agg_part_rels->dof_to_dof);
-    Mult(*(agg_part_rels->dof_to_AE), *(agg_part_rels->AE_to_dof),
-         *(agg_part_rels->dof_to_dof));
+    Mult(*agg_part_rels->dof_to_AE, *agg_part_rels->AE_to_dof,
+         *agg_part_rels->dof_to_dof);
 #endif
 
     return agg_part_rels;
 }
 
-ElementIPMatrix::ElementIPMatrix(const agg_partitioning_relations_t& agg_part_rels,
-                                         const interp_data_t& interp_data_nonconf) :
-    ElementMatrixProvider(agg_part_rels),
-    interp_data_nonconf(interp_data_nonconf)
-{
-    is_geometric = false;
-    SA_ASSERT(interp_data_nonconf.Aii);
-    SA_ASSERT(interp_data_nonconf.Abb);
-    SA_ASSERT(interp_data_nonconf.Aib);
-}
-
-Matrix *ElementIPMatrix::GetMatrix(int elno, bool& free_matr) const
-{
-    SA_ASSERT(false); // Makes no sense, since effectively there is no element matrices,
-                      // but only AE matrices.
-    free_matr = true;
-    return new DenseMatrix;
-}
-
-Matrix *ElementIPMatrix::BuildAEStiff(int elno) const
+Matrix *nonconf_AE_matrix(const interp_data_t& interp_data_nonconf, int elno)
 {
     SA_ASSERT(0 <= elno && elno < interp_data_nonconf.nparts);
     Matrix *ret = NULL;
