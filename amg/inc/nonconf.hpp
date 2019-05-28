@@ -183,9 +183,9 @@ void nonconf_schur_smoother(mfem::HypreParMatrix& A, const mfem::Vector& b, mfem
     XXX: It is tuned towards coarse spaces, so it utilizes dense matrices, which can be slow when
          \a full_space is on.
 */
-void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double theta, double delta,
-                               const mfem::Vector *diagonal=NULL, bool schur=true, bool full_space=false);
+void nonconf_ip_coarsen_finest_h1(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                  ElementMatrixProvider *elem_data, double theta, double delta,
+                                  const mfem::Vector *diagonal=NULL, bool schur=true, bool full_space=false);
 
 /*! Builds the right-hand side for the "fine" interior penalty formulation.
     The returned vector must be freed by the caller.
@@ -200,9 +200,12 @@ mfem::HypreParVector *nonconf_ip_discretization_rhs(const tg_data_t& tg_data,
     which essentially correspond to the H1 agglomerates. All it does is remove the essential boundary dofs, by deleting the rows
     and columns in the H1 agglomerate matrices and creating a fine-scale "interior" basis that skips those dofs, i.e.,
     the basis functions vanish on the essential portion of the boundary.
+
+    If \a orig_AEs_stiffm is provided, it will be used to return the original H1 agglomerate matrices with boundary entries.
+    Then, the returned matrices must be freed by the caller.
 */
 void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
-                                                   ElementMatrixProvider *elem_data);
+                                                   ElementMatrixProvider *elem_data, mfem::Matrix **orig_AEs_stiffm=NULL);
 
 /*! Builds a "fine-scale" interior penalty formulation and the respective spaces using (or abusing) the TG structure.
     Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
@@ -222,7 +225,7 @@ void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, c
     of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
     NOT just the dofs it owns. This involves a dof_truedof application.
 
-    XXX: The approach here is more direct than \b nonconf_ip_coarsen_finest with the \b full_space option.
+    XXX: The approach here is more direct than \b nonconf_ip_coarsen_finest_h1 with the \b full_space option.
          That is why it allows using sparse matrices.
 */
 void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,

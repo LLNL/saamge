@@ -58,7 +58,7 @@
     transitions are utilized before and after invoking the condensed IP solver/preconditioner.
 
     While stationary iteration is supported here, for the auxiliary-space preconditioner, it is mostly intended to be
-    used in a Krylov solver (mostly CG).
+    used in a Krylov solver (e.g., CG).
 */
 
 #include <mfem.hpp>
@@ -347,7 +347,7 @@ int main(int argc, char *argv[])
     if (full_space)
         nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, global_diag?&diag:NULL, schur);
     else
-        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
+        nonconf_ip_coarsen_finest_h1(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
     tg_print_data(*Ag, tg_data);
 
     Array<Matrix *> *elmats;

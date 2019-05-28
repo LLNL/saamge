@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
     if (full_space)
         nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, global_diag?&diag:NULL, schur);
     else
-        nonconf_ip_coarsen_finest(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
+        nonconf_ip_coarsen_finest_h1(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
     tg_print_data(*Ag, tg_data);
 
     Solver *solver;

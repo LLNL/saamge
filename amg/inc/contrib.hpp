@@ -121,7 +121,7 @@ public:
         const agg_partitioning_relations_t& agg_part_rels,
         mfem::DenseMatrix * const *cut_evects_arr, bool scaling_P);
 
-    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions.
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions using "cut vectors" in H1 dofs.
 
       XXX: It would be good to combine the functions with similar functionality.
            However, I currently prefer to not interfere with existing code, but instead to simply augment it.

@@ -668,12 +668,14 @@ Vector **interp_compute_vectors_nostore(const agg_partitioning_relations_t& agg_
 
         SA_PRINTF_L(9, "%s", "Assembling local stiffness matrix...\n");
         SA_ASSERT(elem_data);
-        SA_ASSERT(interp_data.AEs_stiffm);
-        SA_ASSERT(!interp_data.AEs_stiffm[i]);
         AE_stiffm = dynamic_cast<SparseMatrix *>(elem_data->BuildAEStiff(i));
         SA_ASSERT(AE_stiffm);
         if (full_space)
+        {
+            SA_ASSERT(interp_data.AEs_stiffm);
+            SA_ASSERT(!interp_data.AEs_stiffm[i]);
             interp_data.AEs_stiffm[i] = AE_stiffm;
+        }
         SA_ASSERT(AE_stiffm);
         SA_ASSERT(AE_stiffm->Width() == AE_stiffm->Height());
         SA_ASSERT(NULL != interp_data.rhs_matrices_arr);

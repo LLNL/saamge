@@ -418,7 +418,8 @@ tg_data_t *tg_init_data(
     tg_data->interp_data = interp_init_data(agg_part_rels, nu_pro,
                                             use_arpack, false);
     tg_data->interp_data->drop_tol = smooth_drop_tol;
-    tg_data->poly_data = smpr_init_poly_data(A, nu_relax, 0.0);
+    if (0 != A.Height() && 0 != A.Width())
+        tg_data->poly_data = smpr_init_poly_data(A, nu_relax, 0.0);
 
     tg_data->smooth_interp = smooth_interp;
 

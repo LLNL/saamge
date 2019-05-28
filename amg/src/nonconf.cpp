@@ -97,10 +97,12 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
     for (int i=0; i < agg_part_rels.nparts; ++i)
     {
         SA_ASSERT(NULL != interp_data.cut_evects_arr[i]);
+        SA_ASSERT(NULL != diagonal || NULL != interp_data.rhs_matrices_arr);
         SA_ASSERT(NULL != diagonal || NULL != interp_data.rhs_matrices_arr[i]);
         SA_ASSERT(NULL != diagonal || interp_data.rhs_matrices_arr[i]->Height() == interp_data.rhs_matrices_arr[i]->Width());
         SA_ASSERT(NULL != diagonal || interp_data.rhs_matrices_arr[i]->Height() == agg_part_rels.AE_to_dof->RowSize(i));
         SA_ASSERT(NULL == diagonal || diagonal->Size() == agg_part_rels.ND);
+        SA_ASSERT(interp_data.cut_evects_arr[i]->Height() == agg_part_rels.AE_to_dof->RowSize(i));
         const int num_cfaces = agg_part_rels.AE_to_cface->RowSize(i);
         const int * const cfaces = agg_part_rels.AE_to_cface->GetRow(i);
         const int interior_size = interp_data.cut_evects_arr[i]->Width();
@@ -108,6 +110,7 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
         for (int j=0; j < num_cfaces; ++j)
         {
             SA_ASSERT(cfaces_bases[cfaces[j]]);
+            SA_ASSERT(cfaces_bases[cfaces[j]]->Height() == agg_part_rels.cface_to_dof->RowSize(cfaces[j]));
             bdr_size += cfaces_bases[cfaces[j]]->Width();
         }
         DenseMatrix *Aii = new DenseMatrix(interior_size);
@@ -144,6 +147,7 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
                 SA_ASSERT(dofs.Size() == agg_part_rels.cfaces_dof_size[cface]);
                 diagonal->GetSubVector(dofs, cface_diag);
             }
+            SA_ASSERT(cface_diag.Size() == agg_part_rels.cfaces_dof_size[cface]);
 
             for (int n=0; n < cface_basis_size; ++n)
             {
@@ -155,6 +159,7 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
                 }
                 for (int l=0; l < interior_size; ++l)
                 {
+                    SA_ASSERT(cut_evects_cface.Height() == agg_part_rels.cfaces_dof_size[cface]);
                     const Vector ql(cut_evects_cface.GetColumn(l), agg_part_rels.cfaces_dof_size[cface]);
                     (*Aib)(l, cface_offset + n) = -(1./delta) * mbox_energy_inner_prod_diag(cface_diag, ql, pn);
                 }
@@ -177,6 +182,8 @@ void nonconf_ip_first_coarse_schur_matrices(interp_data_t& interp_data,
         {
             SparseMatrix *AE_stiffm = dynamic_cast<SparseMatrix *>(interp_data.AEs_stiffm[i]);
             SA_ASSERT(AE_stiffm);
+            SA_ASSERT(AE_stiffm->Height() == AE_stiffm->Width());
+            SA_ASSERT(AE_stiffm->Height() == agg_part_rels.AE_to_dof->RowSize(i));
             for (int l=0; l < interior_size; ++l)
             {
                 const Vector ql(interp_data.cut_evects_arr[i]->GetColumn(l), interp_data.cut_evects_arr[i]->Height());
@@ -552,9 +559,9 @@ void nonconf_schur_smoother(HypreParMatrix& A, const Vector& b, Vector& x, void 
     x += update_x;
 }
 
-void nonconf_ip_coarsen_finest(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                               ElementMatrixProvider *elem_data, double theta, double delta,
-                               const Vector *diagonal, bool schur, bool full_space)
+void nonconf_ip_coarsen_finest_h1(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                  ElementMatrixProvider *elem_data, double theta, double delta,
+                                  const Vector *diagonal, bool schur, bool full_space)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true;
@@ -1043,7 +1050,7 @@ HypreParVector *nonconf_ip_discretization_rhs(const tg_data_t& tg_data,
 }
 
 void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
-                                                   ElementMatrixProvider *elem_data)
+                                                   ElementMatrixProvider *elem_data, Matrix **orig_AEs_stiffm)
 {
     DenseMatrix ** const cut_evects_arr = interp_data.cut_evects_arr;
     SA_ASSERT(cut_evects_arr);
@@ -1124,7 +1131,12 @@ void nonconf_eliminate_boundary_full_element_basis(interp_data_t& interp_data, c
             }
         }
         SA_ASSERT(intdofs_ctr == nintdofs);
-        delete AE_stiffm;
+        if (orig_AEs_stiffm)
+        {
+            SA_ASSERT(NULL == orig_AEs_stiffm[i]);
+            orig_AEs_stiffm[i] = AE_stiffm;
+        } else
+            delete AE_stiffm;
         new_AE_stiffm->Finalize();
         SA_ASSERT(new_AE_stiffm->NumNonZeroElems() == total_nnz);
         SA_ASSERT(NULL == interp_data.AEs_stiffm[i]);
@@ -1137,7 +1149,7 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                                const Vector *diagonal, bool schur)
 {
     tg_data.elem_data = elem_data;
-    tg_data.doing_spectral = true;
+    tg_data.doing_spectral = true; // It needs to be true, even though no actual spectral is performed.
 
     // Prepare "identity" element basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
     nonconf_eliminate_boundary_full_element_basis(*tg_data.interp_data, agg_part_rels, elem_data);
