@@ -36,7 +36,7 @@
     Based on the agglomerates it builds IP spaces (on the agglomerate
     elements and agglomerate faces) and formulation together with transition operators (using averaging)
     between H1 and the constructed IP spaces. The IP spaces can be fine-scale or coarse
-    (constructed via eigenvalue problems for the H1 agglomerate matrices).
+    (constructed via eigenvalue problems for the H1 agglomerate matrices or local fine-scale IP matrices).
     If they are coarse the transition operators are straight between fine H1 and coarse IP spaces.
     The IP problem can be the entire formulation or condensed to the agglomerate faces
     (utilizing a Schur complement) for both fine- and coarse-scale IP formulations.
@@ -156,6 +156,11 @@ int main(int argc, char *argv[])
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
                    "Build the full IP space instead of using eigensolvers.");
+    bool ip_spectral = false;
+    args.AddOption(&ip_spectral, "-ips", "--ip-spectral",
+                   "-nips", "--no-ip-spectral",
+                   "If not using full space, this selects whether to use spectral construction based on "
+                   "local H1 or local fine-scale IP matrices.");
     bool schur = false;
     args.AddOption(&schur, "-s", "--schur",
                    "-ns", "--no-schur",
@@ -346,8 +351,10 @@ int main(int argc, char *argv[])
 
     if (full_space)
         nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, global_diag?&diag:NULL, schur);
-    else
+    else if (!ip_spectral)
         nonconf_ip_coarsen_finest_h1(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
+    else
+        nonconf_ip_coarsen_finest_ip(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur);
     tg_print_data(*Ag, tg_data);
 
     Array<Matrix *> *elmats;

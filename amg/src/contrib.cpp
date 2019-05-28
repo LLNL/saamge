@@ -739,6 +739,111 @@ DenseMatrix ** ContribTent::CommunicateEigenvectorsCFaces(
     return sec.Collect();
 }
 
+DenseMatrix ** ContribTent::CommunicateEigenvectorsCFaces_IP(
+    const agg_partitioning_relations_t& agg_part_rels,
+    DenseMatrix * const *cut_evects_arr,
+    SharedEntityCommunication<DenseMatrix>& sec,
+    const int *ip_elements_fdofs_offsets, const int *ip_faces_fdofs_offsets)
+{
+    // restrict local eigenvectors to local coarse faces
+    const int num_cfaces = agg_part_rels.num_cfaces;
+    const int nparts = agg_part_rels.nparts;
+    int * const cfaces_AE_ctr = new int[num_cfaces];
+    std::fill_n(cfaces_AE_ctr, num_cfaces, 0);
+    DenseMatrix ** restricted_evects_array;
+    restricted_evects_array = new DenseMatrix*[num_cfaces];
+    Table *cface_to_AE = Transpose(*(agg_part_rels.AE_to_cface));
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        const int local_AEs_containing = cface_to_AE->RowSize(cface);
+        SA_ASSERT(1 <= local_AEs_containing && local_AEs_containing <= 2);
+        restricted_evects_array[cface] = new DenseMatrix[local_AEs_containing];
+    }
+
+    for (int ae=0; ae < nparts; ++ae)
+    {
+        const int AE_ip_dofs = ip_elements_fdofs_offsets[ae+1] - ip_elements_fdofs_offsets[ae];
+        SA_ASSERT(0 < AE_ip_dofs && AE_ip_dofs <= agg_part_rels.AE_to_dof->RowSize(ae));
+        SA_ASSERT(AE_ip_dofs < cut_evects_arr[ae]->Height());
+        const int AE_num_cfaces = agg_part_rels.AE_to_cface->RowSize(ae);
+        int dof_ctr = 0;
+        for (int cf=0; cf < AE_num_cfaces; ++cf)
+        {
+            const int cface = agg_part_rels.AE_to_cface->GetRow(ae)[cf];
+            const int cface_ip_dofs = ip_faces_fdofs_offsets[cface+1] - ip_faces_fdofs_offsets[cface];
+            const int cface_dof_size = agg_part_rels.cfaces_dof_size[cface];
+            SA_ASSERT(0 < cface_ip_dofs && cface_ip_dofs <= cface_dof_size);
+            SA_ASSERT(cface_dof_size == agg_part_rels.cface_to_dof->RowSize(cface));
+            const int cface_AE_idx = cfaces_AE_ctr[cface]++;
+            SA_ASSERT(cface_AE_idx < cface_to_AE->RowSize(cface));
+            restricted_evects_array[cface][cface_AE_idx].SetSize(cface_dof_size, cut_evects_arr[ae]->Width());
+            int cf_dof_ctr = 0;
+            for (int i=0; i < cface_dof_size; ++i)
+            {
+                const int ldof = agg_part_rels.cface_to_dof->GetRow(cface)[i];
+                if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[ldof], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                {
+                    for (int j=0; j < cut_evects_arr[ae]->Width(); ++j)
+                        restricted_evects_array[cface][cface_AE_idx](i,j) = 0.0;
+                } else
+                {
+                    SA_ASSERT(cf_dof_ctr < cface_ip_dofs);
+                    SA_ASSERT(AE_ip_dofs + dof_ctr + cf_dof_ctr < cut_evects_arr[ae]->Height());
+                    const int idx = AE_ip_dofs + dof_ctr + cf_dof_ctr;
+                    for (int j=0; j < cut_evects_arr[ae]->Width(); ++j)
+                        restricted_evects_array[cface][cface_AE_idx](i,j) = (*cut_evects_arr[ae])(idx, j);
+                    ++cf_dof_ctr;
+                }
+            }
+            SA_ASSERT(cface_ip_dofs == cf_dof_ctr);
+            dof_ctr += cf_dof_ctr;
+        }
+        SA_ASSERT(AE_ip_dofs + dof_ctr == cut_evects_arr[ae]->Height());
+    }
+
+#ifdef SA_ASSERTS
+    for (int cface=0; cface < num_cfaces; ++cface)
+        SA_ASSERT(cface_to_AE->RowSize(cface) == cfaces_AE_ctr[cface]);
+#endif
+
+    delete [] cfaces_AE_ctr;
+
+    // communication: collect cface-restricted eigenvectors on the process that owns the coarse face
+    // so SVD can be performed by the master processor.
+    sec.ReducePrepare();
+    for (int cface=0; cface < num_cfaces; ++cface)
+    {
+        // combine all the AEs into one DenseMatrix (this is complicated
+        // and expensive in memory but might save us latency costs...)
+        // This can possibly be avoided but needs broader code modification.
+        const int cface_dof_size = agg_part_rels.cfaces_dof_size[cface];
+        const int rowsize = cface_to_AE->RowSize(cface);
+        const int * const row = cface_to_AE->GetRow(cface);
+        int numvecs = 0;
+        for (int j=0; j < rowsize; ++j)
+        {
+            const int AE = row[j];
+            numvecs += cut_evects_arr[AE]->Width();
+        }
+        DenseMatrix send_mat(cface_dof_size, numvecs);
+        numvecs = 0;
+        for (int j=0; j < rowsize; ++j)
+        {
+            const int AE = row[j];
+            std::memcpy(send_mat.Data() + numvecs * cface_dof_size,
+                        restricted_evects_array[cface][j].Data(),
+                        cface_dof_size * cut_evects_arr[AE]->Width() * sizeof(double));
+            numvecs += cut_evects_arr[AE]->Width();
+        }
+        delete [] restricted_evects_array[cface];
+
+        sec.ReduceSend(cface, send_mat);
+    }
+    delete cface_to_AE;
+    delete [] restricted_evects_array;
+    return sec.Collect();
+}
+
 void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
                             DenseMatrix ** received_mats, int * row_sizes,
                             bool scaling_P)
@@ -1042,6 +1147,68 @@ DenseMatrix **ContribTent::contrib_cfaces(const agg_partitioning_relations_t& ag
     // Second stage of communication. The masters redistribute the obtained orthogonalized (via SVD)
     // coarse face basis to the respective slaves.
     sec.Broadcast(cfaces_bases);
+
+    return cfaces_bases;
+}
+
+DenseMatrix **ContribTent::contrib_cfaces_ip(const agg_partitioning_relations_t& agg_part_rels,
+                                             DenseMatrix **cut_evects_arr,
+                                             const int *ip_elements_fdofs_offsets, const int *ip_faces_fdofs_offsets)
+{
+    SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
+                                               *agg_part_rels.cface_to_truecface);
+    // First stage of communication. All parties restrict and send their eigenvectors to the master,
+    // for each shared coarse face.
+    DenseMatrix **received_mats = CommunicateEigenvectorsCFaces_IP(agg_part_rels, cut_evects_arr, sec,
+                                      ip_elements_fdofs_offsets, ip_faces_fdofs_offsets);
+
+    // Do SVDs on owned coarse faces (i.e., performed by the masters) and obtain the coarse
+    // face bases on them.
+    int num_cfaces = agg_part_rels.num_cfaces;
+    int *row_sizes = new int[num_cfaces];
+    for (int cface=0; cface < num_cfaces; ++cface)
+        row_sizes[cface] = sec.NumNeighbors(cface);
+    DenseMatrix **cfaces_bases = CFacesSVD(agg_part_rels, received_mats, row_sizes, false);
+    delete [] row_sizes;
+
+    // Second stage of communication. The masters redistribute the obtained orthogonalized (via SVD)
+    // coarse face basis to the respective slaves.
+    sec.Broadcast(cfaces_bases);
+
+    // Finally, restrict and orthogonalize only the "internal" portions of the vectors.
+    // No communication is involved.
+    DenseMatrix restr;
+    DenseMatrix lsvects;
+    Vector svals;
+    for (int ae=0; ae < agg_part_rels.nparts; ++ae)
+    {
+        const int AE_ip_dofs = ip_elements_fdofs_offsets[ae+1] - ip_elements_fdofs_offsets[ae];
+        const int AE_dofs = agg_part_rels.AE_to_dof->RowSize(ae);
+        SA_ASSERT(0 < AE_ip_dofs && AE_ip_dofs <= AE_dofs);
+        SA_ASSERT(AE_ip_dofs < cut_evects_arr[ae]->Height());
+        restr.SetSize(AE_dofs, cut_evects_arr[ae]->Width());
+        int dof_ctr = 0;
+        for (int i=0; i < AE_dofs; ++i)
+        {
+            const int ldof = agg_part_rels.AE_to_dof->GetRow(ae)[i];
+            if (SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[ldof], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+            {
+                for (int j=0; j < cut_evects_arr[ae]->Width(); ++j)
+                    restr(i,j) = 0.0;
+            } else
+            {
+                SA_ASSERT(dof_ctr < AE_ip_dofs);
+                for (int j=0; j < cut_evects_arr[ae]->Width(); ++j)
+                    restr(i,j) = (*cut_evects_arr[ae])(dof_ctr, j);
+                ++dof_ctr;
+            }
+        }
+        SA_ASSERT(AE_ip_dofs == dof_ctr);
+        xpack_svd_dense_arr(&restr, 1, lsvects, svals);
+        SA_ASSERT(svals.Size() > 0);
+        cut_evects_arr[ae]->Clear();
+        xpack_orth_set(lsvects, svals, *cut_evects_arr[ae], svd_eps);
+    }
 
     return cfaces_bases;
 }

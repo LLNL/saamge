@@ -135,6 +135,23 @@ public:
     mfem::DenseMatrix **contrib_cfaces(const agg_partitioning_relations_t& agg_part_rels,
                                        mfem::DenseMatrix * const *cut_evects_arr, bool full_space=false);
 
+    /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions using "cut vectors" in IP dofs.
+
+      It also modifies \a cut_evects_arr to contain linearly independent basis on the "interior" dofs.
+
+      XXX: It would be good to combine the functions with similar functionality.
+           However, I currently prefer to not interfere with existing code, but instead to simply augment it.
+
+      \param agg_part_rels (IN) The partitioning relations.
+      \param cut_evects_arr (IN) The vectors from all local eigenvalue problems.
+
+      \returns An array of coarse faces bases on all coarse faces on the current processor. Must be freed by the caller.
+
+    */
+    mfem::DenseMatrix **contrib_cfaces_ip(const agg_partitioning_relations_t& agg_part_rels,
+                                          mfem::DenseMatrix **cut_evects_arr,
+                                          const int *ip_elements_fdofs_offsets, const int *ip_faces_fdofs_offsets);
+
     /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions.
 
       Uses provided global targets.
@@ -276,6 +293,21 @@ private:
         const agg_partitioning_relations_t& agg_part_rels,
         mfem::DenseMatrix * const *cut_evects_arr,
         SharedEntityCommunication<mfem::DenseMatrix>& sec);
+
+    /**
+       Takes cut_evects_arr, which are vectors defined on local AEs in IP dofs sense,
+       and do the appropriate communication on shared coarse (agglomerate) faces,
+       returning the synchronized matrices of restricted eigenvectors that are now
+       ready for SVD.
+
+       XXX: It would be good to combine the functions with similar functionality.
+            However, I currently prefer to not interfere with existing code, but instead to simply augment it.
+    */
+    mfem::DenseMatrix ** CommunicateEigenvectorsCFaces_IP(
+        const agg_partitioning_relations_t& agg_part_rels,
+        mfem::DenseMatrix * const *cut_evects_arr,
+        SharedEntityCommunication<mfem::DenseMatrix>& sec,
+        const int *ip_elements_fdofs_offsets, const int *ip_faces_fdofs_offsets);
 
     /**
        Given a received_mats array, either from CommunicateEigenvectors() or

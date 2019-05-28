@@ -232,6 +232,35 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                                ElementMatrixProvider *elem_data, double delta,
                                const mfem::Vector *diagonal=NULL, bool schur=false);
 
+/*! Builds a "coarse" interior penalty formulation and the respective space. \a tg_data should already
+    have some basic initializations via tg_init_data().
+
+    It computes eigenvectors for the local fine IP matrix and obtains basis functions.
+    The essential boundary dofs are eliminated, in the sense that all basis functions
+    vanish on the essential portion of the boundary.
+
+    It obtains the "coarse" IP matrix, or a Schur complement on the faces, and the transition operator
+    from the H1 space to the IP spaces (straight to the coarse ones).
+
+    It also fills-in, in \a agg_part_rels, the "dof to true dof" (coarse or fine) relations for the IP
+    spaces. It does it appropriately, respecting what dofs actually remain, whether Schur complement is
+    employed or not.
+
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
+
+    XXX: It uses the agglomerate IP matrix for the eigenvalue problem and distributes the eigenvectors
+         to obtain the final basis (after SVD).
+    XXX: It is tuned towards coarse spaces, so it utilizes dense matrices.
+*/
+void nonconf_ip_coarsen_finest_ip(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                  ElementMatrixProvider *elem_data, double theta, double delta,
+                                  const mfem::Vector *diagonal=NULL, bool schur=false);
+
 /*! Generates \b AE_to_dof for the IP formulation including dofs associated with the
     agglomerates and with the agglomerate faces. Recall that the IP spaces are defined on the
     level of agglomerates.

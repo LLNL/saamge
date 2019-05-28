@@ -1203,6 +1203,126 @@ void nonconf_ip_discretization(tg_data_t& tg_data, agg_partitioning_relations_t&
                                                        *agg_part_rels.cface_cDof_TruecDof);
 }
 
+void nonconf_ip_coarsen_finest_ip(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
+                                  ElementMatrixProvider *elem_data, double theta, double delta,
+                                  const Vector *diagonal, bool schur)
+{
+    tg_data.elem_data = elem_data;
+    tg_data.doing_spectral = true;
+
+    HypreParMatrix dummy;
+    tg_data_t *ip_tg_data = tg_init_data(dummy, agg_part_rels, 0, 0, 0.0, false, 0.0, false);
+
+    // Mostly obtaining the IP local matrices. Currently, works with the full matrices, instead of the
+    // condensed (Schur complement) ones.
+    SA_ASSERT(tg_data.interp_data->AEs_stiffm);
+    nonconf_eliminate_boundary_full_element_basis(*ip_tg_data->interp_data, agg_part_rels, elem_data, tg_data.interp_data->AEs_stiffm);
+    ContribTent *ip_cfaces_bases_contrib = new ContribTent(agg_part_rels.ND);
+    ip_tg_data->interp_data->cfaces_bases = ip_cfaces_bases_contrib->contrib_cfaces_full(agg_part_rels);
+    ip_tg_data->interp_data->num_cfaces = agg_part_rels.num_cfaces;
+    ip_tg_data->interp_data->coarse_truedof_offset = ip_cfaces_bases_contrib->get_coarse_truedof_offset();
+    ip_cfaces_bases_contrib->insert_from_cfaces_celems_bases(ip_tg_data->interp_data->nparts, ip_tg_data->interp_data->num_cfaces,
+                                                             ip_tg_data->interp_data->cut_evects_arr,
+                                                             ip_tg_data->interp_data->cfaces_bases, agg_part_rels);
+    mbox_free_matr_arr((Matrix **)ip_tg_data->interp_data->cut_evects_arr, ip_tg_data->interp_data->nparts);
+    ip_tg_data->interp_data->cut_evects_arr = NULL;
+    mbox_free_matr_arr((Matrix **)ip_tg_data->interp_data->cfaces_bases, ip_tg_data->interp_data->num_cfaces);
+    ip_tg_data->interp_data->cfaces_bases = NULL;
+    ip_tg_data->interp_data->celements_cdofs = ip_cfaces_bases_contrib->get_celements_cdofs();
+    ip_tg_data->interp_data->celements_cdofs_offsets = ip_cfaces_bases_contrib->get_celements_cdofs_offsets();
+    ip_tg_data->interp_data->cfaces_truecdofs_offsets = ip_cfaces_bases_contrib->get_cfaces_truecdofs_offsets();
+    ip_tg_data->interp_data->cfaces_cdofs_offsets = ip_cfaces_bases_contrib->get_cfaces_cdofs_offsets();
+    delete ip_cfaces_bases_contrib;
+    nonconf_ip_discretization_matrices(*ip_tg_data->interp_data, agg_part_rels, delta, diagonal, false);
+    ElementIPMatrix emp_ip(agg_part_rels, *ip_tg_data->interp_data);
+
+    // The coarsening procedure using the local fine IP matrices for the spectral problem.
+
+    Vector **evals;
+
+    // Solve local (on coarse/agglomerated elements) eigenvalue problems and obtain the respective low eigenvectors.
+    //TODO: This function is a candidate to be replaced by a matrix-free version, if having a matrix assembled on AE
+    //      is deemed suboptimal.
+    evals = interp_compute_vectors_nostore(agg_part_rels, *tg_data.interp_data, &emp_ip, theta, false);
+    for (int i=0; i < agg_part_rels.nparts; ++i)
+        delete evals[i];
+    delete [] evals;
+    for (int i=0; i < agg_part_rels.nparts; ++i)
+    {
+        delete tg_data.interp_data->rhs_matrices_arr[i];
+        if (!diagonal)
+            tg_data.interp_data->rhs_matrices_arr[i] =
+                mbox_snd_diagA_sparse_from_sparse(*dynamic_cast<SparseMatrix *>(tg_data.interp_data->AEs_stiffm[i]));
+    }
+    if (diagonal)
+    {
+        delete [] tg_data.interp_data->rhs_matrices_arr;
+        tg_data.interp_data->rhs_matrices_arr = NULL;
+    }
+
+    // Having the local eigenvectors, distribute them on faces (taking into account different contributions and
+    // filtering out linear dependences) to obtain coarse/agglomerated face basis. This involves communicating the
+    // necessary vector and basis information between coarse/agglomerated elements and the respective processors.
+    ContribTent cfaces_bases_contrib(agg_part_rels.ND);
+    SA_ASSERT(NULL == tg_data.interp_data->cfaces_bases);
+    tg_data.interp_data->cfaces_bases = cfaces_bases_contrib.contrib_cfaces_ip(agg_part_rels, tg_data.interp_data->cut_evects_arr,
+                                            ip_tg_data->interp_data->celements_cdofs_offsets,
+                                            ip_tg_data->interp_data->cfaces_cdofs_offsets);
+    tg_free_data(ip_tg_data);
+    tg_data.interp_data->num_cfaces = agg_part_rels.num_cfaces;
+    tg_data.interp_data->coarse_truedof_offset = cfaces_bases_contrib.get_coarse_truedof_offset();
+
+    // Compute Schur complements and other matrices necessary for the algorithm.
+    nonconf_ip_first_coarse_schur_matrices(*tg_data.interp_data, agg_part_rels, NULL, delta, diagonal, !schur, false);
+
+    if (!diagonal)
+    {
+        for (int i=0; i < agg_part_rels.nparts; ++i)
+            delete tg_data.interp_data->rhs_matrices_arr[i];
+        delete [] tg_data.interp_data->rhs_matrices_arr;
+        tg_data.interp_data->rhs_matrices_arr = NULL;
+    }
+
+    // Obtain the local (on CPU) "interpolant" and "restriction".
+    cfaces_bases_contrib.insert_from_cfaces_celems_bases(tg_data.interp_data->nparts, tg_data.interp_data->num_cfaces,
+                                                         tg_data.interp_data->cut_evects_arr,
+                                                         tg_data.interp_data->cfaces_bases, agg_part_rels);
+    delete tg_data.ltent_interp;
+    delete tg_data.ltent_restr;
+    delete tg_data.tent_interp;
+    tg_data.tent_interp = NULL;
+    delete tg_data.interp;
+    delete tg_data.restr;
+    tg_data.ltent_interp = cfaces_bases_contrib.contrib_tent_finalize();
+    tg_data.ltent_restr = NULL;
+//    tg_data.ltent_restr = cfaces_bases_contrib.contrib_restr_finalize();
+    tg_data.interp_data->celements_cdofs = cfaces_bases_contrib.get_celements_cdofs();
+    tg_data.interp_data->celements_cdofs_offsets = cfaces_bases_contrib.get_celements_cdofs_offsets();
+    tg_data.interp_data->cfaces_truecdofs_offsets = cfaces_bases_contrib.get_cfaces_truecdofs_offsets();
+    tg_data.interp_data->cfaces_cdofs_offsets = cfaces_bases_contrib.get_cfaces_cdofs_offsets();
+
+    // Make the "interpolant" and "restriction" global via hypre.
+    tg_data.interp_data->tent_interp_offsets.SetSize(0);
+    tg_data.interp = interp_global_tent_assemble(agg_part_rels, *tg_data.interp_data,
+                                                 tg_data.ltent_interp);
+//    tg_data.restr = interp_global_restr_assemble(agg_part_rels, *tg_data.interp_data,
+//                                                 tg_data.ltent_restr);
+    tg_data.restr = tg_data.interp->Transpose();
+
+    // Obtain the remaining necessary relations.
+    agg_create_cface_cDof_TruecDof_relations(agg_part_rels, tg_data.interp_data->coarse_truedof_offset,
+                                             tg_data.interp_data->cfaces_bases, tg_data.interp_data->celements_cdofs, !schur);
+
+    // Construct the coarse operator, which is a coarse Schur complement on the coarse faces.
+    delete tg_data.Ac;
+    if (schur)
+        tg_data.Ac = nonconf_assemble_schur_matrix(*tg_data.interp_data, agg_part_rels,
+                        *agg_part_rels.cface_cDof_TruecDof);
+    else
+        tg_data.Ac = nonconf_assemble_ip_dense_matrix(*tg_data.interp_data, agg_part_rels,
+                        *agg_part_rels.cface_cDof_TruecDof);
+}
+
 Table *
 nonconf_create_AE_to_dof(const agg_partitioning_relations_t& agg_part_rels_nonconf,
                          const interp_data_t& interp_data_nonconf)
