@@ -203,7 +203,7 @@ int main(int argc, char *argv[])
     bool aux = true;
     args.AddOption(&aux, "-au", "--auxiliary",
                    "-nau", "--no-auxiliary",
-                   "Auxiliary solver. If NOT set, then the resulting IP problem is solved, "
+                   "Auxiliary solver for the H1 problem. If NOT set, then the resulting IP problem is solved, "
                    "whether condensed to agglomerate faces or NOT.");
     int nu_relax_aux = 2;
     args.AddOption(&nu_relax_aux, "-na", "--nu-relax-aux",
@@ -372,7 +372,7 @@ int main(int argc, char *argv[])
 
         Table *elem_to_dof = nonconf_create_AE_to_dof(*agg_part_rels, *tg_data->interp_data);
 
-        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[tg_data->Ac->GetNumRows()]();
+        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
         const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg * 2 :
                                                   elems_per_agg * elems_per_agg * elems_per_agg * 6);
         nparts = (int) round((double) nparts / (double) lev_elems_per_agg);

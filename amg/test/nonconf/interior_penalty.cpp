@@ -580,7 +580,7 @@ int main(int argc, char *argv[])
 
         Table *elem_to_dof = nonconf_create_AE_to_dof(*agg_part_rels, *tg_data->interp_data);
 
-        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[tg_data->Ac->GetNumRows()]();
+        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
         nparts = (int)(nparts/10);
         saamg_agg_part_rels = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof, elem_to_elem, NULL, bdr_dofs, &nparts, agg_part_rels->cface_cDof_TruecDof, false);
         delete [] bdr_dofs;
