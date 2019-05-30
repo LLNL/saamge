@@ -360,7 +360,7 @@ int main(int argc, char *argv[])
         fsolver = new HypreDirect(*Ag);
     } else
     {
-        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1);
         fsolver = new AMGSolver(*Ag, false);
     }
     if (schur)

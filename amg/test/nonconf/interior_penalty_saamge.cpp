@@ -413,7 +413,7 @@ int main(int argc, char *argv[])
         if (coarse_direct)
             solver = new HypreDirect(*tg_data_saamge->Ac);
         else
-            solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1000);
+            solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1);
         tg_data_saamge->coarse_solver = solver;
         tg_print_data(*tg_data->Ac, tg_data_saamge);
     }

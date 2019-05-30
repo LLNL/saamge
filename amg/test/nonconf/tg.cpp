@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
     if (coarse_direct)
         solver = new HypreDirect(*tg_data->Ac);
     else
-        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1);
     if (schur)
         tg_data->coarse_solver = new SchurSolver(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
                                                  *agg_part_rels->cface_TruecDof_cDof, *solver);
