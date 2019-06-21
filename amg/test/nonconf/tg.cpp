@@ -166,6 +166,9 @@ int main(int argc, char *argv[])
                    "-nsi", "--no-stat-it",
                    "Whether to perform stationary iterations. "
                    "PCG is always invoked, independently of this parameter.");
+    double tol = 1e-8;
+    args.AddOption(&tol, "-tol", "--tolerance",
+                   "Relative tolerance for solver convergence.");
 
     args.Parse();
     if (!args.Good())
@@ -340,7 +343,7 @@ int main(int argc, char *argv[])
             SA_RPRINTF(0, "%s", "\n");
         }
 
-        tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, 1e-12, 1e-24, 1.0, tg_data, zero_rhs, true);
+        tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, tol, 1e-24, 1.0, tg_data, zero_rhs, true);
 
         x = *hxg;
         if (visualize)
@@ -371,7 +374,7 @@ int main(int argc, char *argv[])
 
     CGSolver hpcg(MPI_COMM_WORLD);
     hpcg.SetOperator(*Ag);
-    hpcg.SetRelTol(1e-6); // MFEM squares this.
+    hpcg.SetRelTol(sqrt(tol)); // MFEM squares this.
     hpcg.SetMaxIter(1000);
     hpcg.SetPrintLevel(1);
     hpcg.SetPreconditioner(Bprec);

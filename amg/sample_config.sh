@@ -39,7 +39,7 @@ cd $SAAMGE_BUILD_DIR
 rm CMakeCache.txt
 rm -rf CMakeFiles
 
-# DEBUG or OPTIMIZED
+# DEBUG, OPTIMIZED, or RELWITHDEBINFO
 
 cmake \
     -DCMAKE_BUILD_TYPE=DEBUG \

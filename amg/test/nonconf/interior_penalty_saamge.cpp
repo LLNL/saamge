@@ -214,7 +214,7 @@ int main(int argc, char *argv[])
     args.AddOption(&compute_errors, "-ce", "--compute-errors",
                    "-nce", "--no-compute-errors",
                    "Whether to compute errors comparing solutions obtained here to the H1 solution.");
-    double tol = 1e-12;
+    double tol = 1e-8;
     args.AddOption(&tol, "-tol", "--tolerance",
                    "Relative tolerance for solver convergence.");
 
@@ -357,7 +357,7 @@ int main(int argc, char *argv[])
         nonconf_ip_coarsen_finest_ip(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur);
     tg_print_data(*Ag, tg_data);
 
-    Array<Matrix *> *elmats;
+    Array<Matrix *> *elmats=NULL;
     ElementMatrixProvider *emp_ip;
     if (full_space)
     {
@@ -419,6 +419,7 @@ int main(int argc, char *argv[])
     }
     if (!full_space)
     {
+        SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
             delete (*elmats)[i];
         delete elmats;

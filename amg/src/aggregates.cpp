@@ -723,8 +723,8 @@ Table *agg_construct_cfaces(agg_partitioning_relations_t& agg_part_rels,
         // face i becomes the root of a new coarse face being determined
 
         int new_cface_size = 0;
-        int master_proc;
-        bool own_cface;
+        int master_proc=-1;
+        bool own_cface=false;
 
         int iAEs[2];
         int idx=0;
@@ -795,6 +795,7 @@ Table *agg_construct_cfaces(agg_partitioning_relations_t& agg_part_rels,
                 }
             }
         }
+        SA_ASSERT(master_proc >= 0);
         cface_master_a[agg_part_rels.num_cfaces] = master_proc;
         own_cfaces[agg_part_rels.num_cfaces++] = own_cface;
         if (own_cface)
