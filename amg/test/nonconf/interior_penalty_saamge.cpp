@@ -355,7 +355,7 @@ int main(int argc, char *argv[])
         nonconf_ip_coarsen_finest_h1(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
     else
         nonconf_ip_coarsen_finest_ip(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur);
-    tg_print_data(*Ag, tg_data);
+    const double OC_IP = tg_print_data(*Ag, tg_data);
 
     Array<Matrix *> *elmats=NULL;
     ElementMatrixProvider *emp_ip;
@@ -373,8 +373,8 @@ int main(int argc, char *argv[])
         Table *elem_to_dof = nonconf_create_AE_to_dof(*agg_part_rels, *tg_data->interp_data);
 
         agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
-        const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg * 2 :
-                                                  elems_per_agg * elems_per_agg * elems_per_agg * 6);
+        const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg :
+                                                  elems_per_agg * elems_per_agg);
         nparts = (int) round((double) nparts / (double) lev_elems_per_agg);
         agg_part_rels_saamge = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof, elem_to_elem, NULL, bdr_dofs, &nparts, agg_part_rels->cface_cDof_TruecDof, false);
         delete [] bdr_dofs;
@@ -387,12 +387,13 @@ int main(int argc, char *argv[])
         }
         emp_ip = new ElementMatrixArray(*agg_part_rels_saamge, *elmats);
     }
+    double OC_aux = 0.0;
     if (ml)
     {
         int nparts_arr[nl-1];
         nparts_arr[0] = nparts;
-        const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg * 2 :
-                                                  elems_per_agg * elems_per_agg * elems_per_agg * 6);
+        const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg :
+                                                  elems_per_agg * elems_per_agg);
         for (int i=1; i < nl-1; ++i)
         {
             nparts_arr[i] = (int) round((double) nparts_arr[i-1] / (double) lev_elems_per_agg);
@@ -403,6 +404,7 @@ int main(int argc, char *argv[])
         if (coarse_direct)
             mlp.set_coarse_direct(true);
         ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_ip, mlp);
+        OC_aux = ml_compute_OC(*tg_data->Ac, *ml_data_saamge);
     } else
     {
         tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta_saamge, false, -1,
@@ -415,9 +417,9 @@ int main(int argc, char *argv[])
         else
             solver = new AMGSolver(*tg_data_saamge->Ac, false, 1e-16, 1);
         tg_data_saamge->coarse_solver = solver;
-        tg_print_data(*tg_data->Ac, tg_data_saamge);
+        OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
-    if (!full_space)
+    SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
@@ -488,6 +490,13 @@ int main(int argc, char *argv[])
                                                      *agg_part_rels->cface_TruecDof_cDof, *solver);
         else
         {
+//            CGSolver *hpcg = new CGSolver(MPI_COMM_WORLD);
+//            hpcg->SetOperator(*tg_data->Ac);
+//            hpcg->SetRelTol(sqrt(1e-16)); // MFEM squares this.
+//            hpcg->SetMaxIter(1000);
+//            hpcg->SetPrintLevel(0);
+//            hpcg->SetPreconditioner(*solver);
+
             tg_data->coarse_solver = solver;
             solver = NULL;
         }

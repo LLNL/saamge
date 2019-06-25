@@ -672,7 +672,7 @@ void tg_free_coarse_operator(tg_data_t& tg_data);
     \param tg_data (IN) Two-grid data.
 */
 static inline
-void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data);
+double tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data);
 
 /* Inline Functions Definitions */
 static inline
@@ -745,8 +745,9 @@ void tg_free_coarse_operator(tg_data_t& tg_data)
 }
 
 static inline
-void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
+double tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
 {
+    double OC = 0.0;
     SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     SA_RPRINTF(0,"%s", "\tTwo-grid data:\n");
@@ -765,7 +766,7 @@ void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
         SA_RPRINTF(0,"%s", PROC_STR_STREAM.str().c_str());
         PROC_CLEAR_STR_STREAM;
         SA_RPRINTF(0,"Operator complexity: %g\n",
-                   1. + tg_data->Ac->NNZ() / (double)A.NNZ());
+                   OC = 1. + tg_data->Ac->NNZ() / (double)A.NNZ());
         SA_ASSERT(tg_data->Ac->GetGlobalNumRows() ==
                   tg_data->Ac->GetGlobalNumCols());
         //SA_ASSERT(tg_data->interp->GetGlobalNumCols() ==
@@ -778,6 +779,7 @@ void tg_print_data(mfem::HypreParMatrix& A, const tg_data_t *tg_data)
     }
     SA_RPRINTF(0,"%s", ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                ">>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    return OC;
 }
 
 } // namespace saamge
