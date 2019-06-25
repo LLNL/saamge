@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
     ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
-    int avg_procs_on_side = (int)((2 == dim ? sqrt((double)nprocs) : cbrt((double)nprocs)) + 1e-10);
+    int avg_procs_on_side = 1 << (int)log2((2 == dim ? sqrt((double)nprocs) : cbrt((double)nprocs)) + 1e-10);
     SA_ASSERT(avg_procs_on_side >= 1);
     int procs_on_side[dim];
     for (int i=0; i < dim; ++i)

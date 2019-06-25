@@ -41,7 +41,7 @@ rm -rf CMakeFiles
 
 # DEBUG, OPTIMIZED, or RELWITHDEBINFO
 
-cmake \
+CC=mpicc CXX=mpicxx cmake \
     -DCMAKE_BUILD_TYPE=DEBUG \
     \
     -DMETIS_DIR=$SAAMGE_BASE_DIR/../../lib/metis-5.1.0/final \
