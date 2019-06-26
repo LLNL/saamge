@@ -420,6 +420,7 @@ int main(int argc, char *argv[])
         OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
     SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
+    if (!full_space)
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
