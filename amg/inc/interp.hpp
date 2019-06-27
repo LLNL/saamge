@@ -368,7 +368,7 @@ mfem::SparseMatrix *interp_sparse_tent_build(
     ElementMatrixProvider * elem_data, double& tol,
     double& theta, bool *xbad_lin_indep/*=NULL*/, bool *vector_added/*=NULL*/,
     const mfem::Vector *xbad/*=NULL*/, bool transf/*=0*/, bool readapting/*=0*/,
-    bool all_eigens/*=0*/, bool spect_update/*=1*/, bool avoid_ess_bdr_dofs);
+    bool all_eigens/*=0*/, bool spect_update/*=1*/, bool avoid_ess_bdr_dofs, int svd_min_skip=0);
 
 /*! \brief Simply (re)assembles the tentative interpolant.
 
@@ -389,7 +389,7 @@ mfem::SparseMatrix *interp_sparse_tent_build(
 */
 mfem::SparseMatrix *interp_sparse_tent_assemble(
      const agg_partitioning_relations_t& agg_part_rels,
-     interp_data_t& interp_data, bool avoid_ess_bdr_dofs);
+     interp_data_t& interp_data, bool avoid_ess_bdr_dofs, int svd_min_skip=0);
 
 /*! \brief Assembles the global parallel tentative interpolant.
 

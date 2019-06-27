@@ -101,7 +101,8 @@ public:
     Eigensolver(
         const int * aggregates, 
         const agg_partitioning_relations_t &agg_part_rels,
-        int threshold=std::numeric_limits<int>::max());
+        int threshold=std::numeric_limits<int>::max(),
+        bool all_eigens=false);
 
     ~Eigensolver();
 

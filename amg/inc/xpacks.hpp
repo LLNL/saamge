@@ -219,9 +219,10 @@ void xpack_svd_dense_arr(const mfem::DenseMatrix *arr, int arr_size,
     \param orth_set (OUT) The orthogonal set of left singular vectors.
     \param eps (IN) The threshold for removing the left singular vectors with
                     effectively zero singular values.
+    \param min_skip (IN) Minimal number of left singular vectors to remove.
 */
 void xpack_orth_set(const mfem::DenseMatrix& lsvects, const mfem::Vector& svals,
-                    mfem::DenseMatrix& orth_set, double eps);
+                    mfem::DenseMatrix& orth_set, double eps, int min_skip=0);
 
 /*! \brief solves least squares problem Ax = b for possibly rectangular A.
  */

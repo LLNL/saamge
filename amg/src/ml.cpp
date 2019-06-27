@@ -64,7 +64,8 @@ MultilevelParameters::MultilevelParameters(
     avoid_ess_bdr_dofs(true),
     use_double_cycle(false),
     coarse_direct(false),
-    smooth_drop_tol(0.0)
+    smooth_drop_tol(0.0),
+    svd_min_skip(0)
 {
     nparts_arr = new int[num_coarsenings];
     nu_pro = new int[num_coarsenings];
@@ -187,7 +188,7 @@ void ml_produce_hierarchy_from_level(
         ElementMatrixProvider * emp = new ElementMatrixParallelCoarse(
             *agg_part_rels, ml_data.levels_list.coarsest);
         tg_build_hierarchy(*A, *tg_data, *agg_part_rels,
-                           emp, mlp.get_avoid_ess_bdr_dofs());
+                           emp, mlp.get_avoid_ess_bdr_dofs(), mlp.get_svd_min_skip());
 
         if (agg_part_rels->testmesh)
         {
@@ -440,7 +441,7 @@ ml_data_t * ml_produce_data(
     else
     {
         tg_build_hierarchy(Ag, *tg_data, *agg_part_rels,
-                           elem_data_finest, mlp.get_avoid_ess_bdr_dofs());
+                           elem_data_finest, mlp.get_avoid_ess_bdr_dofs(), mlp.get_svd_min_skip());
     }
 
     if (agg_part_rels->testmesh)

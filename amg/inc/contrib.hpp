@@ -119,7 +119,7 @@ public:
     */
     void contrib_mises(
         const agg_partitioning_relations_t& agg_part_rels,
-        mfem::DenseMatrix * const *cut_evects_arr, bool scaling_P);
+        mfem::DenseMatrix * const *cut_evects_arr, bool scaling_P, int svd_min_skip=0);
 
     /*! \brief Visits all coarse (agglomerate) faces and obtains the coarse face basis functions using "cut vectors" in H1 dofs.
 
@@ -346,7 +346,7 @@ private:
     */
     void SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
                    mfem::DenseMatrix ** received_mats, int * row_sizes,
-                   bool scaling_P);
+                   bool scaling_P, int svd_min_skip=0);
 
     /**
        Take received_mats, do SVDs on coarse faces, and then destroy received_mats.

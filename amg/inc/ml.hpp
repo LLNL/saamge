@@ -97,6 +97,9 @@ public:
     bool get_coarse_direct() const {return coarse_direct;}
     void set_coarse_direct(bool cd) {coarse_direct = cd;}
     void set_smooth_drop_tol(double tol) {smooth_drop_tol = tol;}
+
+    int get_svd_min_skip() const {return svd_min_skip;}
+    void set_svd_min_skip(int svd_ms) {svd_min_skip = svd_ms;}
 private:
     int num_coarsenings;
     int * nparts_arr;
@@ -111,6 +114,7 @@ private:
     bool use_double_cycle;
     bool coarse_direct; // use direct solver on coarsest level
     double smooth_drop_tol;
+    int svd_min_skip;
 };
 
 /*! \brief Multilevel data.

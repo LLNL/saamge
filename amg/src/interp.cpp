@@ -872,7 +872,7 @@ SparseMatrix *interp_sparse_tent_build(
     interp_data_t& interp_data, ElementMatrixProvider *elem_data, double& tol,
     double& theta, bool *xbad_lin_indep, bool *vector_added, const Vector *xbad,
     bool transf, bool readapting, bool all_eigens, bool spect_update,
-    bool avoid_ess_bdr_dofs)
+    bool avoid_ess_bdr_dofs, int svd_min_skip)
 {
     SA_RPRINTF_L(0,4, "%s", "---------- interp_compute_vectors { --------------"
                  "-----\n");
@@ -893,7 +893,7 @@ SparseMatrix *interp_sparse_tent_build(
 
     SparseMatrix *tent_interp;
     tent_interp = interp_sparse_tent_assemble(agg_part_rels, interp_data,
-                                              avoid_ess_bdr_dofs);
+                                              avoid_ess_bdr_dofs, svd_min_skip);
 
     SA_RPRINTF_L(0,4, "%s", "---------- } interp_sparse_tent_assemble -----------"
                  "---\n");
@@ -903,7 +903,7 @@ SparseMatrix *interp_sparse_tent_build(
 
 SparseMatrix *interp_sparse_tent_assemble(
     const agg_partitioning_relations_t& agg_part_rels,
-    interp_data_t& interp_data, bool avoid_ess_bdr_dofs)
+    interp_data_t& interp_data, bool avoid_ess_bdr_dofs, int svd_min_skip)
 {
     SparseMatrix *tent_interp;
 
@@ -915,7 +915,7 @@ SparseMatrix *interp_sparse_tent_assemble(
     // in original Delyan code it is probably contrib_big_aggs_nosvd() 
     tent_int_struct.contrib_mises(agg_part_rels,
                                   interp_data.cut_evects_arr,
-                                  interp_data.scaling_P);
+                                  interp_data.scaling_P, svd_min_skip);
 
     interp_data.local_coarse_one_representation = tent_int_struct.get_local_coarse_one_representation(); // copying a pointer (interp_data deletes)
     interp_data.coarse_truedof_offset = tent_int_struct.get_coarse_truedof_offset();

@@ -846,7 +846,7 @@ DenseMatrix ** ContribTent::CommunicateEigenvectorsCFaces_IP(
 
 void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
                             DenseMatrix ** received_mats, int * row_sizes,
-                            bool scaling_P)
+                            bool scaling_P, int svd_min_skip)
 {
     int num_mises = agg_part_rels.num_mises;
     DenseMatrix lsvects;
@@ -930,7 +930,7 @@ void ContribTent::SVDInsert(const agg_partitioning_relations_t& agg_part_rels,
                     delete [] received_mats[mis];
                     continue; // TODO: remove this, refactor 
                 }
-                xpack_orth_set(lsvects, svals, *mis_tent_interps[mis], svd_eps);
+                xpack_orth_set(lsvects, svals, *mis_tent_interps[mis], svd_eps, svd_min_skip);
             }
             if (agg_part_rels.testmesh)
             {
@@ -1111,7 +1111,7 @@ DenseMatrix **ContribTent::CFacesSVDnocomm(const agg_partitioning_relations_t& a
 */
 void ContribTent::contrib_mises(
     const agg_partitioning_relations_t& agg_part_rels,
-    DenseMatrix * const *cut_evects_arr, bool scaling_P)
+    DenseMatrix * const *cut_evects_arr, bool scaling_P, int svd_min_skip)
 {
     SharedEntityCommunication<DenseMatrix> sec(PROC_COMM,
                                                *agg_part_rels.mis_truemis);
@@ -1122,7 +1122,7 @@ void ContribTent::contrib_mises(
     int * row_sizes = new int[num_mises];
     for (int mis=0; mis<num_mises; ++mis)
         row_sizes[mis] = sec.NumNeighbors(mis);
-    SVDInsert(agg_part_rels, received_mats, row_sizes, scaling_P);
+    SVDInsert(agg_part_rels, received_mats, row_sizes, scaling_P, svd_min_skip);
     delete [] row_sizes;
 }
 

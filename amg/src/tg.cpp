@@ -503,7 +503,7 @@ void tg_build_hierarchy_with_polynomial(
 void tg_build_hierarchy(HypreParMatrix& Ag, tg_data_t& tg_data,
                         const agg_partitioning_relations_t& agg_part_rels,
                         ElementMatrixProvider *elem_data,
-                        bool avoid_ess_bdr_dofs)
+                        bool avoid_ess_bdr_dofs, int svd_min_skip)
 {
     double useless_parameter = 0.; // Essentially, not used.
 
@@ -521,7 +521,7 @@ void tg_build_hierarchy(HypreParMatrix& Ag, tg_data_t& tg_data,
         tg_data.ltent_interp = interp_sparse_tent_build(
             agg_part_rels, *tg_data.interp_data, elem_data,
             useless_parameter, tg_data.theta, NULL, NULL, NULL, false, false,
-            all_eigens, true, avoid_ess_bdr_dofs);
+            all_eigens, true, avoid_ess_bdr_dofs, svd_min_skip);
     }
     else if (tg_data.polynomial_coarse_space == 1)
     {
@@ -918,7 +918,7 @@ tg_data_t *tg_produce_data(
     HypreParMatrix& Ag, const agg_partitioning_relations_t& agg_part_rels,
     int nu_pro, int nu_relax, ElementMatrixProvider *elem_data, double theta,
     bool smooth_interp, int polynomial_coarse_arg,
-    bool use_arpack, bool avoid_ess_bdr_dofs)
+    bool use_arpack, bool avoid_ess_bdr_dofs, int svd_min_skip)
 {
     const double smooth_drop_tol = 0.0;
     tg_data_t *tg_data = tg_init_data(
@@ -927,7 +927,7 @@ tg_data_t *tg_produce_data(
     tg_data->polynomial_coarse_space = polynomial_coarse_arg;
 
     tg_build_hierarchy(Ag, *tg_data, agg_part_rels, elem_data,
-                       avoid_ess_bdr_dofs);
+                       avoid_ess_bdr_dofs, svd_min_skip);
     return tg_data;
 }
 

@@ -214,9 +214,17 @@ int main(int argc, char *argv[])
     args.AddOption(&compute_errors, "-ce", "--compute-errors",
                    "-nce", "--no-compute-errors",
                    "Whether to compute errors comparing solutions obtained here to the H1 solution.");
+    bool solver_agg = true;
+    args.AddOption(&solver_agg, "-sa", "--solver-agglomerate",
+                   "-nsa", "--no-solver-agglomerate",
+                   "Whether to aggregate when building AMGe for the IP problem or to remain with "
+                   "the original aggregates of the IP formulation.");
     double tol = 1e-8;
     args.AddOption(&tol, "-tol", "--tolerance",
                    "Relative tolerance for solver convergence.");
+    int svd_min_skip = 0;
+    args.AddOption(&svd_min_skip, "-sms", "--svd-min-skip",
+                   "Minimal number of left singular vectors to remove when using SVD in the AMGe multigrid for the IP problem.");
 
     args.Parse();
     if (!args.Good())
@@ -359,7 +367,7 @@ int main(int argc, char *argv[])
 
     Array<Matrix *> *elmats=NULL;
     ElementMatrixProvider *emp_ip;
-    if (full_space)
+    if (full_space || !solver_agg)
     {
         agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
         emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
@@ -396,11 +404,12 @@ int main(int argc, char *argv[])
                                                   elems_per_agg * elems_per_agg);
         for (int i=1; i < nl-1; ++i)
         {
-            nparts_arr[i] = (int) round((double) nparts_arr[i-1] / (double) lev_elems_per_agg);
+            nparts_arr[i] = solver_agg ? (int) round((double) nparts_arr[i-1] / (double) lev_elems_per_agg) : nparts_arr[i-1];
             if (nparts_arr[i] < 1) nparts_arr[i] = 1;
         }
         MultilevelParameters mlp(nl-1, nparts_arr, 0, 0, nu_relax, theta_saamge,
                                  theta_saamge_c, -1, false, !direct_eigensolver, false);
+        mlp.set_svd_min_skip(svd_min_skip);
         if (coarse_direct)
             mlp.set_coarse_direct(true);
         ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_ip, mlp);
@@ -408,7 +417,7 @@ int main(int argc, char *argv[])
     } else
     {
         tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta_saamge, false, -1,
-                                         !direct_eigensolver, false);
+                                         !direct_eigensolver, false, svd_min_skip);
         tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
 
         Solver *solver;
@@ -420,7 +429,7 @@ int main(int argc, char *argv[])
         OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
     SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
-    if (!full_space)
+    if (!full_space && solver_agg)
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)

@@ -46,13 +46,14 @@ using namespace mfem;
 Eigensolver::Eigensolver(
     const int * aggregates, 
     const agg_partitioning_relations_t &agg_part_rels,
-    int threshold)
+    int threshold,
+    bool all_eigens)
     :
     aggregates(aggregates),
     agg_part_rels(agg_part_rels),
     threshold(threshold),
     transf(false),
-    all_eigens(false),
+    all_eigens(all_eigens),
     max_arpack_vectors(10),
     count_solves(0),
     count_direct_solves(0),

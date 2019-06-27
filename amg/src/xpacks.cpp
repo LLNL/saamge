@@ -593,7 +593,7 @@ void xpack_svd_dense_arr(const DenseMatrix *arr, int arr_size,
 }
 
 void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
-                    DenseMatrix& orth_set, double eps)
+                    DenseMatrix& orth_set, double eps, int min_skip)
 {
     const int h = lsvects.Height();
     int i;
@@ -612,12 +612,14 @@ void xpack_orth_set(const DenseMatrix& lsvects, const Vector& svals,
     SA_ASSERT(lsvects.Width() == svals.Size());
     eps *= svals(0);
     for (i=0; i < svals.Size() && svals(i) > eps; ++i);
+    if (svals.Size() - i < min_skip) i = svals.Size() - min_skip;
+    if (i < 1) i = 1;
 
     SA_PRINTF_L(9, "xpack_orth_set cuts: %d, takes: %d, total: %d, eps: %g,"
                    " max sval: %g\n", lsvects.Width() - i, i, lsvects.Width(),
                 eps, svals(0));
 
-    SA_ASSERT(i);
+    SA_ASSERT(i > 0);
 
     orth_set.SetSize(h, i);
     memcpy(orth_set.Data(), lsvects.Data(), sizeof(double)*i*h);

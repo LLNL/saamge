@@ -2318,12 +2318,21 @@ agg_create_partitioning_coarse(
         Array<int> p_array(agg_part_rels->partitioning, num_elem);
         connectedComponents(p_array, *(agg_part_rels->elem_to_elem));
 #else
-        int * weights = new int[num_elem];
-        for (int i=0; i<num_elem; ++i)
-            weights[i] = agg_part_rels_fine.AE_to_dof->RowSize(i);
-        agg_part_rels->partitioning =
-            part_generate_partitioning(*(agg_part_rels->elem_to_elem), weights, nparts);
-        delete [] weights;
+        if (*nparts >= num_elem)
+        {
+            *nparts = num_elem;
+            agg_part_rels->partitioning = new int[num_elem];
+            for (int i=0; i < num_elem; ++i)
+                agg_part_rels->partitioning[i] = i;
+        } else
+        {
+            int *weights = new int[num_elem];
+            for (int i=0; i < num_elem; ++i)
+                weights[i] = agg_part_rels_fine.AE_to_dof->RowSize(i);
+            agg_part_rels->partitioning =
+                part_generate_partitioning(*(agg_part_rels->elem_to_elem), weights, nparts);
+            delete [] weights;
+        }
 #endif
     }
     agg_part_rels->nparts = *nparts;
