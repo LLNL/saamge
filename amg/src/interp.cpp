@@ -542,6 +542,35 @@ void interp_compute_vectors(
                 agg_size,
                 theta_local, *(cut_evects_arr[i]));
 
+#if 0
+            const double lower_bound = 1e-4;
+            Vector *evals = eigensolver.StealEigenvalues();
+            SA_ASSERT(cut_evects_arr[i]->Width() >= 1);
+            SA_ASSERT(evals->Size() == cut_evects_arr[i]->Width());
+            int num_vecs = 1;
+            for (int l=1; l < evals->Size(); ++l)
+                if (evals->Elem(l) > lower_bound)
+                    ++num_vecs;
+            DenseMatrix *new_cut_evects_arr = new DenseMatrix(cut_evects_arr[i]->Height(), num_vecs);
+            Vector col(cut_evects_arr[i]->GetColumn(0), cut_evects_arr[i]->Height());
+            new_cut_evects_arr->SetCol(0, col);
+            int ctr = 1;
+            for (int l=1; l < evals->Size(); ++l)
+            {
+                if (evals->Elem(l) > lower_bound)
+                {
+                    SA_ASSERT(ctr < num_vecs);
+                    col.SetData(cut_evects_arr[i]->GetColumn(l));
+                    new_cut_evects_arr->SetCol(ctr, col);
+                    ++ctr;
+                }
+            }
+            SA_ASSERT(ctr == num_vecs);
+            delete evals;
+            delete cut_evects_arr[i];
+            cut_evects_arr[i] = new_cut_evects_arr;
+#endif
+
 //            std::ofstream myfile;
 //            std::string name = "evec_" + std::to_string(i) + ".out";
 //            myfile.open(name);
