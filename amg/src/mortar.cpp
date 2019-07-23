@@ -445,7 +445,7 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
                            ElementMatrixProvider *elem_data, const Array<Vector *> *face_targets)
 {
     tg_data.elem_data = elem_data;
-    tg_data.doing_spectral = true;
+    tg_data.doing_spectral = true; // It needs to be true, even though no actual spectral is performed.
 
     // Prepare "identity" element basis and "interior" stiffness matrix, removing all essential BCs' DoFs.
     nonconf_eliminate_boundary_full_element_basis(*tg_data.interp_data, agg_part_rels, elem_data);
