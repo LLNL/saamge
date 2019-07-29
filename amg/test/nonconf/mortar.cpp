@@ -281,7 +281,7 @@ int main(int argc, char *argv[])
     Array<Vector *> targets;
     fem_polynomial_targets(&fes, targets, faceorder);
 
-    mortar_discretization(*tg_data, *agg_part_rels, emp, &targets);
+    mortar_discretization(*tg_data, *agg_part_rels, emp, &targets, global_diag?&diag:NULL);
     tg_print_data(*Ag, tg_data);
 
     fem_free_targets(targets);
