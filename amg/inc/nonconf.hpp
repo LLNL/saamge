@@ -73,6 +73,9 @@ namespace saamge
 
    Reduces the problem (by elimination) to a Schur complement system, then uses the given \a solver for that
    system and, in the end, recovers the eliminated (by backward substitution) variables.
+
+   That is, reduces the problem to the cface space, solves or preconditions the reduced system, and
+   recovers to the full space, including "interiors".
 */
 class SchurSolver : public mfem::Solver
 {

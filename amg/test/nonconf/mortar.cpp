@@ -29,9 +29,27 @@
 */
 
 /**
-    Nonconforming SAAMGe as an statically-condensed mortar discretization appearing as a "coarse" space.
-    It is intended for solver setting, which means that we consider essential BCs that
-    can only be zero. By tradition, BCs are messy in this code.
+    Nonconforming mortar AMGe as a statically-condensed (on agglomerate faces) discretization for an elliptic problem.
+
+    This example starts with an H1 problem and produces an agglomeration.
+    Based on the agglomerates it builds mortar spaces (on the agglomerate
+    elements and agglomerate faces) and formulation together with transition operators (using averaging only on "interior" DoFs)
+    between H1 and the constructed mortar spaces. The mortar spaces are fine-scale on the interior and coarse
+    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors
+    and right-hand sides. The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
+    via the elimination of the "interiors" and Lagrangian multipliers.
+
+    The matrix of the mortar system is obtained via assembly, whereas the right-hand side of the
+    mortar system (excluding Lagrangian multipliers) can be assembled or obtained via the transition
+    operators. This does NOT result in equal right-hand sides but seems to provide similar results.
+
+    In the end, it inverts "exactly" the mortar problem and the H1 problem, and uses the transition
+    operators to compute errors between the two solutions.
+
+    It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
+    can only be zero. Essential BCs are strongly enforced in the mortar formulation by considering basis
+    (both the ones associated with the agglomerates and the agglomerate faces) functions that are
+    NOT supported on the respective portion of the boundary.
 */
 
 #include <mfem.hpp>
@@ -44,7 +62,7 @@ using namespace saamge;
 double checkboard_coef(Vector& x)
 {
     SA_ASSERT(2 <= x.Size() && x.Size() <= 3);
-    double d = (double)10;
+    double d = (double)8;
 
     if ((x.Size() == 2 &&
          ((int)ceil(x(0)*d) & 1) == ((int)ceil(x(1)*d) & 1)) ||
@@ -69,6 +87,12 @@ double rhs_func(Vector& x)
 //    return 2.0 * (x[0]*(1.0-x[0]) + x[1]*(1.0-x[1]));
 }
 
+double ex_func(Vector& x)
+{
+    SA_ASSERT(2 <= x.Size() && x.Size() <= 2);
+    return x[0]*(1.0-x[0])*x[1]*(1.0-x[1]);
+}
+
 double bdr_cond(Vector& x)
 {
     SA_ASSERT(2 <= x.Size() && x.Size() <= 3);
@@ -90,10 +114,10 @@ int main(int argc, char *argv[])
 
     OptionsParser args(argc, argv);
 
-    const char *mesh_file = "";
-    args.AddOption(&mesh_file, "-m", "--mesh",
-                   "Mesh file to use.", true);
-    bool visualize = true;
+    int dim = 2;
+    args.AddOption(&dim, "-dim", "--dimension",
+                   "The domain dimension.");
+    bool visualize = false;
     args.AddOption(&visualize, "-vis", "--visualization", "-no-vis",
                    "--no-visualization",
                    "Enable or disable GLVis visualization.");
@@ -101,7 +125,7 @@ int main(int argc, char *argv[])
     args.AddOption(&serial_times_refine, "-sr", "--serial-refine",
                    "How many times to refine mesh before parallel partition.");
     int times_refine = 0;
-    args.AddOption(&times_refine, "-r", "--refine", 
+    args.AddOption(&times_refine, "-r", "--refine",
                    "How many times to refine the mesh (in parallel).");
     int order = 2;
     args.AddOption(&order, "-o", "--order",
@@ -109,9 +133,13 @@ int main(int argc, char *argv[])
     int faceorder = 1;
     args.AddOption(&faceorder, "-fo", "--face-order",
                    "Polynomial order of face space.");
-    int elems_per_agg = 8;
+    bool global_diag = true;
+    args.AddOption(&global_diag, "-gd", "--global-diagonal",
+                   "-ngd", "--no-global-diagonal",
+                   "Use the global diagonal for face penalties in the IP formulation.");
+    int elems_per_agg = 2;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
-                   "Number of elements per agglomerated element.");
+                   "Number of rectangular partitions in one direction that constitute an agglomerated element.");
     bool coarse_direct = false;
     args.AddOption(&coarse_direct, "--coarse-direct", "--coarse-direct",
                    "--coarse-amg", "--coarse-amg",
@@ -119,7 +147,7 @@ int main(int argc, char *argv[])
     bool indirect_rhs = false;
     args.AddOption(&indirect_rhs, "-ind", "--indirect-rhs",
                    "---no-ind", "--no-indirect-rhs",
-                   "Obtain RHS via the transfer operator.");
+                   "Obtain RHS via the transfer operator. Otherwise, construct it consistently with the actual discrete weak form.");
 
     args.Parse();
     if (!args.Good())
@@ -134,10 +162,16 @@ int main(int argc, char *argv[])
 
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
-    // Read the mesh from the given mesh file.
-//    mesh = fem_read_mesh(mesh_file);
-    mesh = new Mesh(elems_per_agg >> 1, elems_per_agg >> 1, Element::TRIANGLE, 1);
+    SA_ASSERT(2 <= dim && dim <= 3);
+
+    // Build mesh.
+    if (2 == dim)
+        mesh = new Mesh(elems_per_agg, elems_per_agg, Element::TRIANGLE, 1);
+    else
+        mesh = new Mesh(elems_per_agg, elems_per_agg, elems_per_agg, Element::TETRAHEDRON, 1);
     fem_refine_mesh_times(serial_times_refine, *mesh);
+    const int init_intervals_on_side = elems_per_agg << serial_times_refine;
+    const int init_aggs_on_side = 1 << serial_times_refine;
     // Serial mesh.
     SA_RPRINTF(0,"NV: %d, NE: %d\n", mesh->GetNV(), mesh->GetNE());
 
@@ -147,17 +181,40 @@ int main(int argc, char *argv[])
     ess_bdr[3] = 1;
 
     int nprocs = PROC_NUM;
+    int avg_procs_on_side = 1 << (int)log2((2 == dim ? sqrt((double)nprocs) : cbrt((double)nprocs)) + 1e-10);
+    SA_ASSERT(avg_procs_on_side >= 1);
+    int procs_on_side[dim];
+    for (int i=0; i < dim; ++i)
+        procs_on_side[i] = avg_procs_on_side;
+    bool ret;
+    ret = helpers_factorize(nprocs, dim, procs_on_side);
+    if (!ret)
+        SA_ALERT_RPRINTF(0, "Failed to factorize %d in %d factors!", nprocs, dim);
     int *proc_partitioning;
-    proc_partitioning = fem_partition_mesh(*mesh, &nprocs);
-//    int nprocs_x = 2;
-//    int nprocs_y = nprocs_x;
-//    proc_partitioning = fem_partition_dual_simple_2D(*mesh, &nprocs, &nprocs_x, &nprocs_y);
-    SA_ASSERT(PROC_NUM == nprocs);
+    if (2 == dim)
+        proc_partitioning = fem_partition_dual_simple_2D(*mesh, &nprocs, &procs_on_side[0], &procs_on_side[1]);
+    else
+        proc_partitioning = fem_partition_dual_simple_3D(*mesh, &nprocs, &procs_on_side[0], &procs_on_side[1], &procs_on_side[2]);
     if (0 == PROC_RANK && visualize)
         fem_serial_visualize_partitioning(*mesh, proc_partitioning);
+    for (int i=0; i < dim && 0 == PROC_RANK; ++i)
+    {
+        SA_ASSERT(init_intervals_on_side % procs_on_side[i] == 0);
+        SA_ASSERT(init_aggs_on_side % procs_on_side[i] == 0);
+    }
+    MPI_Barrier(PROC_COMM);
+    SA_ASSERT(PROC_NUM == nprocs);
     ParMesh pmesh(MPI_COMM_WORLD, *mesh, proc_partitioning);
     delete [] proc_partitioning;
     fem_refine_mesh_times(times_refine, pmesh);
+    int intervals_on_side[dim];
+    int aggs_on_side[dim];
+    for (int i=0; i < dim; ++i)
+    {
+        intervals_on_side[i] = (init_intervals_on_side / procs_on_side[i]) << times_refine;
+        aggs_on_side[i] = (init_aggs_on_side / procs_on_side[i]) << times_refine;
+        SA_ASSERT(intervals_on_side[i] = aggs_on_side[i] * elems_per_agg);
+    }
 
     H1_FECollection fec(order);
     ParFiniteElementSpace fes(&pmesh, &fec);
@@ -187,25 +244,26 @@ int main(int argc, char *argv[])
     SparseMatrix& Al = a->SpMat();
     HypreParMatrix *Ag = a->ParallelAssemble();
     HypreParVector *bg = b->ParallelAssemble();
-    HypreParVector *hxg = x.ParallelAverage();
 
     // Actual AMGe stuff
 
     int nparts;
     agg_dof_status_t *bdr_dofs = fem_find_bdr_dofs(fes, &ess_bdr);
-    nparts = pmesh.GetNE() / elems_per_agg;
+    if (2 == dim)
+        nparts = elems_per_agg * elems_per_agg * 2;
+    else
+        nparts = elems_per_agg * elems_per_agg * elems_per_agg * 6;
+    nparts = pmesh.GetNE() / nparts;
     if (nparts == 0)
         nparts = 1;
-//    agg_part_rels = fem_create_partitioning(*Ag, fes, bdr_dofs, &nparts, false, false);
-//    agg_part_rels = fem_create_partitioning_identity(*Ag, fes, bdr_dofs, &nparts, false);
-
-    int nparts_x = 1 << (serial_times_refine + times_refine + 1);
-    int nparts_y = nparts_x;
-    int *partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &nparts_x, &nparts_y);
+    int *partitioning;
+    if (2 == dim)
+        partitioning = fem_partition_dual_simple_2D(pmesh, &nparts, &aggs_on_side[0], &aggs_on_side[1]);
+    else
+        partitioning = fem_partition_dual_simple_3D(pmesh, &nparts, &aggs_on_side[0], &aggs_on_side[1], &aggs_on_side[2]);
     agg_part_rels = agg_create_partitioning_fine(
         *Ag, fes.GetNE(), mbox_copy_table(&(fes.GetElementToDofTable())), mbox_copy_table(&(pmesh.ElementToElementTable())), partitioning, bdr_dofs, &nparts,
         fes.Dof_TrueDof_Matrix(), false, false, false);
-
     delete [] bdr_dofs;
     fem_build_face_relations(agg_part_rels, fes);
     if (visualize)
@@ -216,6 +274,10 @@ int main(int argc, char *argv[])
     tg_data = tg_init_data(*Ag, *agg_part_rels, 0, 1, 1.0, false, 0.0, false);
     tg_data->polynomial_coarse_space = -1;
 
+    Vector diag;
+    if (global_diag)
+        mbox_obtain_global_diagonal(*Ag, *(agg_part_rels->Dof_TrueDof), diag);
+
     Array<Vector *> targets;
     fem_polynomial_targets(&fes, targets, faceorder);
 
@@ -224,22 +286,25 @@ int main(int argc, char *argv[])
 
     fem_free_targets(targets);
 
-    mfem::Solver *solver;
-    mfem::Solver *fsolver;
+    Solver *solver;
+    Solver *fsolver;
     if (coarse_direct)
     {
         solver = new HypreDirect(*tg_data->Ac);
         fsolver = new HypreDirect(*Ag);
     } else
     {
-        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+        solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1);
         fsolver = new AMGSolver(*Ag, false);
     }
     tg_data->coarse_solver = solver;
 
     // Obtain the usual solution.
+    HypreParVector *hxg = x.ParallelAverage();
     fsolver->Mult(*bg, *hxg);
+    delete fsolver;
     x = *hxg;
+    delete hxg;
 //    FunctionCoefficient uex(ex_func);
 //    x.ProjectCoefficient(uex);
     if (visualize)
@@ -251,7 +316,6 @@ int main(int argc, char *argv[])
     HypreParVector *precbg=NULL;
     HypreParVector cx(*tg_data->Ac);
     cx = 0.0;
-
     if (!indirect_rhs)
     {
         ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
@@ -262,8 +326,9 @@ int main(int argc, char *argv[])
         tg_data->restr->Mult(*bg, *precbg);
         cbg = mortar_assemble_schur_rhs(*tg_data->interp_data, *agg_part_rels, *precbg);
     }
-
+    delete bg;
     tg_data->coarse_solver->Mult(*cbg, cx);
+    delete cbg;
     if (!indirect_rhs)
         hx1g = mortar_reverse_condensation(cx, *tg_data, *agg_part_rels);
     else
@@ -273,7 +338,13 @@ int main(int argc, char *argv[])
         hx1g = new HypreParVector(*tg_data->interp, 1);
         tg_data->interp->Mult(postcx, *hx1g);
     }
+    delete precbg;
+    tg_free_data(tg_data);
+    agg_free_partitioning(agg_part_rels);
+    delete a;
+    delete b;
     x1 = *hx1g;
+    delete hx1g;
     if (visualize)
         fem_parallel_visualize_gf(pmesh, x1);
 
@@ -290,17 +361,7 @@ int main(int argc, char *argv[])
     SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
 
     delete gx;
-    delete cbg;
-    delete precbg;
-    tg_free_data(tg_data);
-    delete fsolver;
-    agg_free_partitioning(agg_part_rels);
-    delete hx1g;
-    delete hxg;
-    delete bg;
     delete Ag;
-    delete a;
-    delete b;
     delete mesh;
     MPI_Finalize();
     return 0;

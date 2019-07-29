@@ -51,36 +51,53 @@ namespace saamge
 
    Reduces the problem (by elimination) to a Schur complement system, then uses the given solver for that
    system and, in the end, recovers the eliminated (by backward substitution) variables.
+
+   That is, reduces the problem to the cface space, solves or preconditions the reduced system, and
+   recovers to the full space, including "interiors".
 */
 class MortarSchurSolver : public mfem::Solver
 {
 public:
     MortarSchurSolver(const interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
-                      const mfem::Solver& solver)
-        : interp_data(interp_data), agg_part_rels(agg_part_rels), solver(solver) {}
+                      const mfem::Solver& solver, bool rand_init_guess=false)
+        : interp_data(interp_data), agg_part_rels(agg_part_rels), solver(solver), rand_init_guess(rand_init_guess) {}
     virtual void SetOperator(const mfem::Operator &op) {}
     virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
 private:
     const interp_data_t& interp_data;
     const agg_partitioning_relations_t& agg_part_rels;
     const mfem::Solver& solver;
+    const bool rand_init_guess;
 };
 
-/*! Assembles the global mortar condensed rhs. Caller must free the returned vector.
+/*! Assembles the global mortar condensed (i.e., defined only on cface DoFs) rhs.
+    Caller must free the returned vector.
 */
 mfem::HypreParVector *mortar_assemble_condensed_rhs(interp_data_t& interp_data,
                                               const agg_partitioning_relations_t& agg_part_rels,
                                               ElementMatrixProvider *elem_data);
 
-/*! Builds a "fine" condensed mortar formulation and the respective space using (or abusing) the TG structure.
-    Essential BCs are removed from the space via having vanishing basis functions on that portion of the boundary.
+/*! Builds a "fine" condensed mortar formulation and the respective spaces using (or abusing) the TG structure.
+    Essential BCs are removed from the spaces via having vanishing basis functions on that portion of the boundary.
     tg_data should already have some basic initializations via tg_init_data().
+
+    \a face_targets provides global targets, the span of whose restriction to agglomerate faces, provides the
+    coarse face space. If NOT provided, a global constant is used.
+
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
 */
 void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                           ElementMatrixProvider *elem_data, const mfem::Array<mfem::Vector *> *face_targets=NULL);
+                           ElementMatrixProvider *elem_data, const mfem::Array<mfem::Vector *> *face_targets=NULL,
+                           const mfem::Vector *diagonal=NULL);
 
-/*! Returns an H^1 vector (expressed in true dofs) from a face mortar vector (also expressed in true dofs).
-    The returned vector must be freed by the caller
+/*! Returns an H^1 vector (expressed in true dofs) from a face mortar cface vector (also expressed in true dofs).
+    This involves calling the averaging interpolator from the full mortar space to H^1.
+    The returned vector must be freed by the caller.
 */
 mfem::HypreParVector *mortar_reverse_condensation(const mfem::HypreParVector& mortar_sol, const tg_data_t& tg_data,
                                             const agg_partitioning_relations_t& agg_part_rels);
@@ -88,15 +105,22 @@ mfem::HypreParVector *mortar_reverse_condensation(const mfem::HypreParVector& mo
 /**
     Assembles the global rhs coming from eliminating the "interior" DoFs. The output vector
     is represented in terms of true cface DoFs (i.e., defined only on cface DoFs)
-    and must be freed by the caller. The input vector is in terms of true DoFs that also include the actual interior DoFs.
+    and must be freed by the caller. The input vector (\a rhs) is in terms of true DoFs that also include the "interior" DoFs.
+    This is not much of a challenge, since all "interior" dofs are
+    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
+    \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
+    is filled with cface dofs only. Only the "interior" DoFs are used from the input vector.
+
+    Lagrangian multipliers DoFs are not involved in the representation of the vectors. Internally, the function
+    introduces them by padding with zeros.
 */
 mfem::HypreParVector *mortar_assemble_schur_rhs(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels, const mfem::Vector& rhs);
 
 /**
-    Performs the backward substitution from the block elimination. It takes the full (including interiors) original
-    rhs in true DoFs and the face portion of the (obtained by inverting the Schur complement) solution in face true DoFs (excluding interiors).
-    The returned vector (i.e., x) is in terms of all (including interiors) true DoFs.
+    Performs the backward substitution from the block elimination. It takes the full (including "interiors" and cfaces)
+    \a rhs in true DoFs and the face portion of the (obtained by inverting the Schur complement) solution in face true DoFs (excluding "interiors").
+    The returned vector (i.e., x) is in terms of all (including "interiors") true DoFs. Only the "interior" DoFs are used from the rhs.
 */
 void mortar_schur_recover(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels,

@@ -42,7 +42,7 @@ using namespace mfem;
 
 /**
     Obtains the mortar condensed element matrices and maintains some additional data for later use.
-    This is an over-constrained version with identity bases on the faces.
+    This is an over-constrained version with identity bases everywhere.
 */
 static inline
 void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels)
@@ -175,9 +175,19 @@ void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data,
 
 /**
     Obtains the mortar condensed element matrices and maintains some additional data for later use.
+
+    Uses the cface bases, while the "interiors" are taken fine-scale.
+
+    \a diagonal gives the option to provide a vector that serves as a diagonal matrix (of size equal to
+    the number of dofs on the processor), whose restrictions define inner products for the agglomerate face
+    penalty terms. It is generic but the main intent is to be used to provide the entries of the global stiffness
+    matrix diagonal. In parallel, some communication would be needed on the shared dofs so that all entries
+    of interest become known to the processor, i.e., the processor needs to know the entries for all dofs it sees
+    NOT just the dofs it owns. This involves a dof_truedof application.
 */
 static inline
-void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels)
+void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
+                                     const Vector *diagonal=NULL)
 {
     const int nparts = agg_part_rels.nparts;
     SA_ASSERT(interp_data.AEs_stiffm);
@@ -248,12 +258,37 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
                 map[j] = -1;
         }
         SA_ASSERT(intdofs_ctr == interior_dofs);
-        SparseMatrix *D = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
+
+        Vector diag;
+        SparseMatrix *D=NULL;
+        if (NULL == diagonal)
+        {
+            D = mbox_snd_diagA_sparse_from_sparse(*AE_stiffm);
+            SA_ASSERT(D->Height() == D->Width());
+            SA_ASSERT(D->NumNonZeroElems() == D->Height());
+            diag.SetDataAndSize(D->GetData(), D->Height());
+        } else
+        {
+            SA_ASSERT(diagonal->Size() == agg_part_rels.ND);
+            diag.SetSize(interior_dofs);
+            int intdofs_ctr = 0;
+            for (int j=0; j < ndofs; ++j)
+            {
+                const int gj = agg_num_col_to_glob(*agg_part_rels.AE_to_dof, i, j);
+                SA_ASSERT(0 <= gj && gj < agg_part_rels.ND);
+                if (!SA_IS_SET_A_FLAG(agg_part_rels.agg_flags[gj], AGG_ON_ESS_DOMAIN_BORDER_FLAG))
+                {
+                    SA_ASSERT(intdofs_ctr < interior_dofs);
+                    diag(intdofs_ctr) = diagonal->Elem(gj);
+                    ++intdofs_ctr;
+                }
+            }
+            SA_ASSERT(intdofs_ctr == interior_dofs);
+        }
+        SA_ASSERT(diag.Size() == interior_dofs);
         delete interp_data.AEs_stiffm[i];
         interp_data.AEs_stiffm[i] = NULL;
-        SA_ASSERT(D->Height() == interior_dofs);
-        SA_ASSERT(D->NumNonZeroElems() == interior_dofs);
-        const Vector diag(D->GetData(), D->Height());
+
         int cface_offset = 0;
         for (int j=0; j < num_cfaces; ++j)
         {
@@ -335,7 +370,8 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
 }
 
 /**
-    Obtains the mortar condensed element rhs vectors and maintains some additional data for later use.
+    Obtains the mortar condensed (i.e., defined only on cface DoFs) element rhs vectors
+    and maintains some additional data for later use.
 */
 static inline
 void mortar_condensed_local_rhs(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
@@ -442,7 +478,8 @@ HypreParVector *mortar_assemble_condensed_rhs(interp_data_t& interp_data,
 }
 
 void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg_part_rels,
-                           ElementMatrixProvider *elem_data, const Array<Vector *> *face_targets)
+                           ElementMatrixProvider *elem_data, const Array<Vector *> *face_targets,
+                           const mfem::Vector *diagonal)
 {
     tg_data.elem_data = elem_data;
     tg_data.doing_spectral = true; // It needs to be true, even though no actual spectral is performed.
@@ -492,7 +529,7 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
     agg_create_cface_cDof_TruecDof_relations(agg_part_rels, tg_data.interp_data->coarse_truedof_offset,
                                              tg_data.interp_data->cfaces_bases, tg_data.interp_data->celements_cdofs, false);
 
-    mortar_condensed_local_matrices(*tg_data.interp_data, agg_part_rels);
+    mortar_condensed_local_matrices(*tg_data.interp_data, agg_part_rels, diagonal);
 
     for (int i=0; i < agg_part_rels.num_cfaces; ++i)
         delete tg_data.interp_data->cfaces_bases[i];
@@ -502,7 +539,7 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
     // Construct the operator as though it is a "coarse" matrix.
     delete tg_data.Ac;
     tg_data.Ac = nonconf_assemble_schur_matrix(*tg_data.interp_data, agg_part_rels,
-                                                      *agg_part_rels.cface_cDof_TruecDof);
+                                               *agg_part_rels.cface_cDof_TruecDof);
     for (int i=0; i < agg_part_rels.nparts; ++i)
         delete tg_data.interp_data->schurs[i];
     delete [] tg_data.interp_data->schurs;
@@ -729,7 +766,10 @@ void MortarSchurSolver::Mult(const mfem::Vector &x, mfem::Vector &y) const
                                                           agg_part_rels, x);
     // Solve Schur system
     HypreParVector eb(*schur_rhs);
-    eb = 0.0;
+    if (rand_init_guess)
+        eb.Randomize(0);
+    else
+        eb = 0.0;
     solver.Mult(*schur_rhs, eb);
     delete schur_rhs;
 

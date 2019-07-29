@@ -37,6 +37,7 @@
 #include "common.hpp"
 #include <mfem.hpp>
 #include <cmath>
+#include <algorithm>
 #include "mfem_addons.hpp"
 #include "aggregates.hpp"
 #include "elmat.hpp"
@@ -60,7 +61,8 @@ public:
     MonomialCoefficient(int orderx, int ordery, int orderz = 0):
         order_x(orderx),
         order_y(ordery),
-        order_z(orderz)
+        order_z(orderz),
+        max_order(std::max(std::max(order_x, order_y), orderz))
     {}
 
     virtual double Eval(mfem::ElementTransformation &T,
@@ -72,14 +74,25 @@ public:
 
         T.Transform(ip, transip);
 
-        return pow(x[0],order_x)*pow(x[1],order_y)*pow(x[2],order_z);
+        //return pow(x[0],order_x)*pow(x[1],order_y)*pow(x[2],order_z);
+
+        double val = 1.0;
+        for (int i=0; i < max_order; ++i)
+        {
+            double factor = 1.0;
+            if (i < order_x) factor *= x[0];
+            if (i < order_y) factor *= x[1];
+            if (i < order_z) factor *= x[2];
+            val *= factor;
+        }
+        return val;
     }
-    virtual void Read(std::istream &in){ in >> order_x >> order_y >> order_z;}
 
 private:
-    int order_x;
-    int order_y;
-    int order_z;
+    const int order_x;
+    const int order_y;
+    const int order_z;
+    const int max_order;
 };
 
 /* Functions */
