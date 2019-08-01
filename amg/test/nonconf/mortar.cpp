@@ -50,6 +50,12 @@
     can only be zero. Essential BCs are strongly enforced in the mortar formulation by considering basis
     (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
+
+    XXX: One can also test a two-level SAAMGe on the resulting condensed (Schur)
+         mortar problem, using the same theta and some hard-coded parameters. It considers the agglomerates
+         as elements and uses the mortar cface dofs to obtain elem_to_elem and elem_to_dof. From there,
+         it calls the standard procedures of SAAMGe that obtain partitions by grouping
+         elements (i.e., agglomerates) together, using, e.g., METIS, and constructing the hierarchy.
 */
 
 #include <mfem.hpp>
@@ -136,7 +142,7 @@ int main(int argc, char *argv[])
     bool global_diag = true;
     args.AddOption(&global_diag, "-gd", "--global-diagonal",
                    "-ngd", "--no-global-diagonal",
-                   "Use the global diagonal for face penalties in the IP formulation.");
+                   "Use the global diagonal for face penalties in the mortar formulation.");
     int elems_per_agg = 2;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of rectangular partitions in one direction that constitute an agglomerated element.");
@@ -148,6 +154,18 @@ int main(int argc, char *argv[])
     args.AddOption(&indirect_rhs, "-ind", "--indirect-rhs",
                    "---no-ind", "--no-indirect-rhs",
                    "Obtain RHS via the transfer operator. Otherwise, construct it consistently with the actual discrete weak form.");
+    double theta = 0.003;
+    args.AddOption(&theta, "-t", "--theta",
+                   "Tolerance for eigenvalue problems, when --saamge is set.");
+    bool direct_eigensolver = true;
+    args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
+                   "-nq", "--no-direct-eigensolver",
+                   "Use direct eigensolver from LAPACK or ARPACK, when --saamge is set.");
+    bool saamge = false;
+    args.AddOption(&saamge, "-a", "--saamge",
+                   "-na", "--no-saamge",
+                   "Test a two-level SAAMGe on the resulting ondensed (Schur) mortar problem, "
+                   "using the --theta and some hard-coded parameters.");
 
     args.Parse();
     if (!args.Good())
@@ -339,8 +357,6 @@ int main(int argc, char *argv[])
         tg_data->interp->Mult(postcx, *hx1g);
     }
     delete precbg;
-    tg_free_data(tg_data);
-    agg_free_partitioning(agg_part_rels);
     delete a;
     delete b;
     x1 = *hx1g;
@@ -362,6 +378,55 @@ int main(int argc, char *argv[])
 
     delete gx;
     delete Ag;
+
+    if (saamge)
+    {
+        agg_partitioning_relations_t *saamg_agg_part_rels;
+        tg_data_t *saamg_tg_data;
+
+        Table cface_to_AE;
+        Transpose(*agg_part_rels->AE_to_cface, cface_to_AE, agg_part_rels->num_cfaces);
+        Table *elem_to_elem = Mult(*agg_part_rels->AE_to_cface, cface_to_AE);
+
+        Table *elem_to_dof = nonconf_create_AE_to_dof(*agg_part_rels, *tg_data->interp_data);
+
+        agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
+        nparts = (int)(nparts/10);
+        saamg_agg_part_rels = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof,
+                                                           elem_to_elem, NULL, bdr_dofs, &nparts,
+                                                           agg_part_rels->cface_cDof_TruecDof, false);
+        delete [] bdr_dofs;
+
+        Array<Matrix *> elmats(agg_part_rels->nparts);
+        for (int i=0; i < agg_part_rels->nparts; ++i)
+        {
+            elmats[i] = nonconf_AE_matrix(*tg_data->interp_data, i);
+            SA_ASSERT(elmats[i]);
+        }
+        interp_free_data(tg_data->interp_data, tg_data->doing_spectral,
+                         tg_data->theta);
+        tg_data->interp_data = NULL;
+        ElementMatrixArray *emp = new ElementMatrixArray(*saamg_agg_part_rels, elmats);
+
+        saamg_tg_data = tg_produce_data(*tg_data->Ac, *saamg_agg_part_rels, 0, 3, emp, theta, false, -1, !direct_eigensolver, true);
+        tg_fillin_coarse_operator(*tg_data->Ac, saamg_tg_data, false);
+        if (coarse_direct)
+            saamg_tg_data->coarse_solver = new HypreDirect(*saamg_tg_data->Ac);
+        else
+            saamg_tg_data->coarse_solver = new AMGSolver(*saamg_tg_data->Ac, false);
+
+        HypreParVector xg(*tg_data->Ac);
+        xg = 0.0;
+        tg_run(*tg_data->Ac, agg_part_rels, xg, *cbg, 1000, 10e-12, 10e-24, 1., saamg_tg_data, true, true);
+
+        tg_free_data(saamg_tg_data);
+        agg_free_partitioning(saamg_agg_part_rels);
+        for (int i=0; i < agg_part_rels->nparts; ++i)
+            delete elmats[i];
+    }
+
+    tg_free_data(tg_data);
+    agg_free_partitioning(agg_part_rels);
     delete mesh;
     MPI_Finalize();
     return 0;

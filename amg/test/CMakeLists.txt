@@ -29,7 +29,7 @@
 list(APPEND EXE_SRCS algebraic/algebraic.cpp basicupscale/basicupscale.cpp
   mltest/mltest.cpp partialsmooth/partialsmooth.cpp parttest/parttest.cpp startfromcoarse/startfromcoarse.cpp
   encapsulate/encapsulate.cpp nonconf/interior_penalty_tg.cpp nonconf/interior_penalty.cpp nonconf/interior_penalty_saamge.cpp
-  nonconf/mortar.cpp nonconf/mortar_tg.cpp)
+  nonconf/mortar.cpp nonconf/mortar_tg.cpp nonconf/mortar_saamge.cpp)
 
 list(APPEND EXE_SRCS  leastsquaretest/leastsquaretest.cpp 
                       secondorderpdetest/secondorderpdetest.cpp

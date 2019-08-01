@@ -582,7 +582,9 @@ int main(int argc, char *argv[])
 
         agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
         nparts = (int)(nparts/10);
-        saamg_agg_part_rels = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof, elem_to_elem, NULL, bdr_dofs, &nparts, agg_part_rels->cface_cDof_TruecDof, false);
+        saamg_agg_part_rels = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof,
+                                                           elem_to_elem, NULL, bdr_dofs, &nparts,
+                                                           agg_part_rels->cface_cDof_TruecDof, false);
         delete [] bdr_dofs;
 
         Array<Matrix *> elmats(agg_part_rels->nparts);
@@ -591,6 +593,9 @@ int main(int argc, char *argv[])
             elmats[i] = nonconf_AE_matrix(*tg_data->interp_data, i);
             SA_ASSERT(elmats[i]);
         }
+        interp_free_data(tg_data->interp_data, tg_data->doing_spectral,
+                         tg_data->theta);
+        tg_data->interp_data = NULL;
         ElementMatrixArray *emp = new ElementMatrixArray(*saamg_agg_part_rels, elmats);
 
         saamg_tg_data = tg_produce_data(*tg_data->Ac, *saamg_agg_part_rels, 0, 3, emp, theta, false, -1, !direct_eigensolver, true);

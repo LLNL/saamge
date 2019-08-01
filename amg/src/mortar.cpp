@@ -540,14 +540,10 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
     delete tg_data.Ac;
     tg_data.Ac = nonconf_assemble_schur_matrix(*tg_data.interp_data, agg_part_rels,
                                                *agg_part_rels.cface_cDof_TruecDof);
-    for (int i=0; i < agg_part_rels.nparts; ++i)
-        delete tg_data.interp_data->schurs[i];
-    delete [] tg_data.interp_data->schurs;
-    tg_data.interp_data->schurs = NULL;
 }
 
 HypreParVector *mortar_reverse_condensation(const HypreParVector& mortar_sol, const tg_data_t& tg_data,
-                                            const agg_partitioning_relations_t& agg_part_rels)
+                                            const agg_partitioning_relations_t& agg_part_rels, bool zero_rhs)
 {
     SA_ASSERT(agg_part_rels.cface_cDof_TruecDof);
     SA_ASSERT(tg_data.interp);
@@ -569,13 +565,13 @@ HypreParVector *mortar_reverse_condensation(const HypreParVector& mortar_sol, co
         rec(interp_data.celements_cdofs + i) = mortar_sol(i);
 
     // Update (backward substitute) the interior portions of the solution vector.
-    SA_ASSERT(interp_data.pre_rhs);
+    SA_ASSERT(zero_rhs || interp_data.pre_rhs);
     SA_ASSERT(interp_data.invAiiAib);
     Vector bdr;
     Vector total;
     for (int i=0; i < interp_data.nparts; ++i)
     {
-        SA_ASSERT(interp_data.pre_rhs[i]);
+        SA_ASSERT(zero_rhs || interp_data.pre_rhs[i]);
         SA_ASSERT(interp_data.invAiiAib[i]);
         SA_ASSERT(interp_data.celements_cdofs_offsets[i] < interp_data.celements_cdofs);
         SA_ASSERT(interp_data.celements_cdofs_offsets[i+1] <= interp_data.celements_cdofs);
@@ -583,10 +579,13 @@ HypreParVector *mortar_reverse_condensation(const HypreParVector& mortar_sol, co
         const int total_size = interp_data.invAiiAib[i]->Height();
         const int bdr_size = interp_data.invAiiAib[i]->Width();
         SA_ASSERT(total_size == interior_size + bdr_size);
-        SA_ASSERT(total_size == interp_data.pre_rhs[i]->Height());
+        SA_ASSERT(zero_rhs || total_size == interp_data.pre_rhs[i]->Height());
         Vector rec_interior(rec.GetData() + interp_data.celements_cdofs_offsets[i], interior_size);
         total.SetSize(total_size);
-        total = interp_data.pre_rhs[i]->GetData();
+        if (zero_rhs)
+            total = 0.0;
+        else
+            total = interp_data.pre_rhs[i]->GetData();
 
         // Add the contribution of the actual backward substitution.
 

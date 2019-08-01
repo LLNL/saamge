@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
     bool global_diag = true;
     args.AddOption(&global_diag, "-gd", "--global-diagonal",
                    "-ngd", "--no-global-diagonal",
-                   "Use the global diagonal for face penalties in the IP formulation.");
+                   "Use the global diagonal for face penalties in the mortar formulation.");
     int elems_per_agg = 2;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of rectangular partitions in one direction that constitute an agglomerated element.");

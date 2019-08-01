@@ -98,9 +98,13 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
 /*! Returns an H^1 vector (expressed in true dofs) from a face mortar cface vector (also expressed in true dofs).
     This involves calling the averaging interpolator from the full mortar space to H^1.
     The returned vector must be freed by the caller.
+
+    \a zero_rhs indicates that the righ-hand side in the original system was zero. Otherwise, information for the
+    right-hand side, stored in \a tg_data->interp_data and produced during a call tob mortar_assemble_condensed_rhs,
+    is utilized.
 */
 mfem::HypreParVector *mortar_reverse_condensation(const mfem::HypreParVector& mortar_sol, const tg_data_t& tg_data,
-                                            const agg_partitioning_relations_t& agg_part_rels);
+                                            const agg_partitioning_relations_t& agg_part_rels, bool zero_rhs=false);
 
 /**
     Assembles the global rhs coming from eliminating the "interior" DoFs. The output vector

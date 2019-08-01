@@ -29,33 +29,32 @@
 */
 
 /**
-    Nonconforming interior penalty (IP) AMGe in two-level setting applied to
-    an elliptic problem as an auxiliary space solver, using SAAMGe for the IP problem.
+    Nonconforming mortar AMGe in two-level setting applied to
+    an elliptic problem as an auxiliary space solver, using SAAMGe for the mortar problem.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds IP spaces (on the agglomerate
+    Based on the agglomerates it builds mortar spaces (on the agglomerate
     elements and agglomerate faces) and formulation together with transition operators (using averaging)
-    between H1 and the constructed IP spaces. The IP spaces can be fine-scale or coarse
-    (constructed via eigenvalue problems for the H1 agglomerate matrices or local fine-scale IP matrices).
-    If they are coarse the transition operators are straight between fine H1 and coarse IP spaces.
-    The IP problem can be the entire formulation or condensed to the agglomerate faces
-    (utilizing a Schur complement) for both fine- and coarse-scale IP formulations.
+    between H1 and the constructed mortar spaces. The mortar spaces are fine-scale on the interior and coarse
+    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors.
+    The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
+    via the elimination of the "interiors" and Lagrangian multipliers.
 
-    The matrix of the IP system is obtained via assembly. The constructed IP problem is preconditioned
+    The matrix of the mortar system is obtained via assembly. The constructed mortar problem is preconditioned
     by SAAMGe (two- or multi-level). This configuration can be used as an auxiliary solver for the
-    H1 problem or SAAMGe can be tested for solving the IP problem alone. Whenever the IP problem is
-    solved alone and in accordance with the need, the right-hand side of the IP system can be assembled
-    (in a fine-scale IP formulation) or obtained via the transition operators (in a coarse-scale IP formulation).
-    This does NOT result in equal right-hand sides but seems to provide similar results.
+    H1 problem or SAAMGe can be tested for solving the mortar problem alone. Whenever the mortar problem is
+    solved alone and in accordance with the need, the right-hand side of the mortar system
+    (excluding Lagrangian multipliers) can be assembled or obtained via the transition
+    operators. This does NOT result in equal right-hand sides but seems to provide similar results.
 
     It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
-    can only be zero in the IP formulation. Essential BCs are strongly enforced in the IP formulation by considering
+    can only be zero in the mortar formulation. Essential BCs are strongly enforced in the mortar formulation by considering
     basis (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
 
-    When a condensed (Schur complement) version is utilized, the IP system is reduced only on the agglomerate faces.
-    However, the averaging transition operator (between H1 and IP) is for the whole IP space. Therefore, some additional
-    transitions are utilized before and after invoking the condensed IP solver/preconditioner.
+    The mortar system is reduced (via Schur complement) only on the agglomerate faces. However, the averaging transition
+    operator (between H1 and mortar) is for the whole mortar space (Lagrangian multipliers are NOT included). Therefore,
+    some additional transitions are utilized before and after invoking the condensed morter solver/preconditioner.
 
     While stationary iteration is supported here, for the auxiliary-space preconditioner, it is mostly intended to be
     used in a Krylov solver (e.g., CG).
@@ -137,41 +136,25 @@ int main(int argc, char *argv[])
     int times_refine = 0;
     args.AddOption(&times_refine, "-r", "--refine",
                    "How many times to refine the mesh (in parallel).");
-    int order = 1;
+    int order = 2;
     args.AddOption(&order, "-o", "--order",
                    "Polynomial order of finite element space.");
-    double theta = 0.003;
-    args.AddOption(&theta, "-t", "--theta",
-                   "Tolerance for eigenvalue problems for the IP spaces.");
+    int faceorder = 1;
+    args.AddOption(&faceorder, "-fo", "--face-order",
+                   "Polynomial order of face space.");
     double theta_saamge = 0.003;
     args.AddOption(&theta_saamge, "-ts", "--theta-saamge",
-                   "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the IP matrix for the first coarsening.");
+                   "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the mortar matrix for the first coarsening.");
     double theta_saamge_c = theta_saamge;
     args.AddOption(&theta_saamge_c, "-tsc", "--theta-saamge-c",
-                   "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the IP matrix for the rest of the coarsenings.");
+                   "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the mortar matrix for the rest of the coarsenings.");
     int nu_relax = 2;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
-                   "Degree for smoother in the relaxation when preconditioning the IP problem.");
-    bool full_space = true;
-    args.AddOption(&full_space, "-f", "--full-space",
-                   "-nf", "--no-full-space",
-                   "Build the full IP space instead of using eigensolvers.");
-    bool ip_spectral = false;
-    args.AddOption(&ip_spectral, "-ips", "--ip-spectral",
-                   "-nips", "--no-ip-spectral",
-                   "If not using full space, this selects whether to use spectral construction based on "
-                   "local H1 or local fine-scale IP matrices.");
-    bool schur = false;
-    args.AddOption(&schur, "-s", "--schur",
-                   "-ns", "--no-schur",
-                   "Whether to use the Schur complement on the IP problem.");
-    double delta = 1.0;
-    args.AddOption(&delta, "-d", "--delta",
-                   "The reciprocal of the interface term weight.");
+                   "Degree for smoother in the relaxation when preconditioning the mortar problem.");
     bool global_diag = true;
     args.AddOption(&global_diag, "-gd", "--global-diagonal",
                    "-ngd", "--no-global-diagonal",
-                   "Use the global diagonal for face penalties in the IP formulation.");
+                   "Use the global diagonal for face penalties in the mortar formulation.");
     int elems_per_agg = 2;
     args.AddOption(&elems_per_agg, "-e", "--elems-per-agg",
                    "Number of rectangular partitions in one direction that constitute an agglomerated element.");
@@ -179,6 +162,11 @@ int main(int argc, char *argv[])
     args.AddOption(&coarse_direct, "--coarse-direct", "--coarse-direct",
                    "--coarse-amg", "--coarse-amg",
                    "Use a direct solver on coarsest level or AMG V-cycle.");
+    bool indirect_rhs = false;
+    args.AddOption(&indirect_rhs, "-ind", "--indirect-rhs",
+                   "---no-ind", "--no-indirect-rhs",
+                   "When --auxiliary is unset, obtain RHS via the transfer operator. "
+                   "Otherwise, construct it consistently with the actual discrete weak form.");
     bool direct_eigensolver = true;
     args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
                    "-nq", "--no-direct-eigensolver",
@@ -203,28 +191,28 @@ int main(int argc, char *argv[])
     bool aux = true;
     args.AddOption(&aux, "-au", "--auxiliary",
                    "-nau", "--no-auxiliary",
-                   "Auxiliary solver for the H1 problem. If NOT set, then the resulting IP problem is solved, "
-                   "whether condensed to agglomerate faces or NOT.");
+                   "Auxiliary solver for the H1 problem. If NOT set, then the resulting mortar problem is solved, "
+                   "condensed to agglomerate faces.");
     int nu_relax_aux = 2;
     args.AddOption(&nu_relax_aux, "-na", "--nu-relax-aux",
                    "Degree for smoother in the relaxation for the auxiliary-space solver. "
                    "That is for the smoother on the H1 form before and after invoking the auxiliary "
-                   "IP correction.");
+                   "mortar correction.");
     bool compute_errors = false;
     args.AddOption(&compute_errors, "-ce", "--compute-errors",
                    "-nce", "--no-compute-errors",
                    "Whether to compute errors comparing solutions obtained here to the H1 solution.");
-    bool solver_agg = true;
+    bool solver_agg = false;
     args.AddOption(&solver_agg, "-sa", "--solver-agglomerate",
                    "-nsa", "--no-solver-agglomerate",
-                   "Whether to aggregate when building AMGe for the IP problem or to remain with "
-                   "the original aggregates of the IP formulation.");
+                   "Whether to aggregate when building AMGe for the mortar problem or to remain with "
+                   "the original aggregates of the mortar formulation.");
     double tol = 1e-8;
     args.AddOption(&tol, "-tol", "--tolerance",
                    "Relative tolerance for solver convergence.");
     int svd_min_skip = 0;
     args.AddOption(&svd_min_skip, "-sms", "--svd-min-skip",
-                   "Minimal number of left singular vectors to remove when using SVD in the AMGe multigrid for the IP problem.");
+                   "Minimal number of left singular vectors to remove when using SVD in the AMGe multigrid for the mortar problem.");
 
     args.Parse();
     if (!args.Good())
@@ -350,24 +338,24 @@ int main(int argc, char *argv[])
 
     ElementMatrixStandardGeometric *emp = new ElementMatrixStandardGeometric(*agg_part_rels, Al, a);
 
-    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax_aux, theta, false, 0.0, !direct_eigensolver);
+    tg_data = tg_init_data(*Ag, *agg_part_rels, 0, nu_relax_aux, 1.0, false, 0.0, false);
     tg_data->polynomial_coarse_space = -1;
 
     Vector diag;
     if (global_diag)
         mbox_obtain_global_diagonal(*Ag, *(agg_part_rels->Dof_TrueDof), diag);
 
-    if (full_space)
-        nonconf_ip_discretization(*tg_data, *agg_part_rels, emp, delta, global_diag?&diag:NULL, schur);
-    else if (!ip_spectral)
-        nonconf_ip_coarsen_finest_h1(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur, full_space);
-    else
-        nonconf_ip_coarsen_finest_ip(*tg_data, *agg_part_rels, emp, theta, delta, global_diag?&diag:NULL, schur);
+    Array<Vector *> targets;
+    fem_polynomial_targets(&fes, targets, faceorder);
+
+    mortar_discretization(*tg_data, *agg_part_rels, emp, &targets, global_diag?&diag:NULL);
     const double OC_IP = tg_print_data(*Ag, tg_data);
+
+    fem_free_targets(targets);
 
     Array<Matrix *> *elmats=NULL;
     ElementMatrixProvider *emp_ip;
-    if (full_space || !solver_agg)
+    if (!solver_agg)
     {
         agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
         emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
@@ -430,7 +418,7 @@ int main(int argc, char *argv[])
         OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
     SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
-    if (!full_space && solver_agg)
+    if (solver_agg)
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
@@ -455,40 +443,10 @@ int main(int argc, char *argv[])
             fem_parallel_visualize_gf(pmesh, x);
     }
 
-    // Obtain IP solution.
-    HypreParVector cx(*tg_data->interp);
+    // Obtain mortar solution.
+    HypreParVector cx(*tg_data->Ac);
     HypreParVector *cbg = NULL;
-
-//    HypreParVector *hx1g = x1.ParallelAverage();
-//    *(tg_data->interp) = 1.0;
-//    SparseMatrix *restr = Transpose(*(tg_data_saamge->ltent_interp));
-//    for (int i=0; i < restr->Height(); ++i)
-//    {
-//        cx = 0.0;
-//        for (int j=0; j < restr->RowSize(i); ++j)
-//            cx(restr->GetRowColumns(i)[j]) = 1.0;
-//        tg_data->interp->Mult(cx, *hx1g);
-//        x = *hx1g;
-//        fem_parallel_visualize_gf(pmesh, x);
-//        int foo;
-//        std::cin >> foo;
-//    }
-//    delete restr;
-
-//    *(tg_data->interp) = 1.0;
-//    for (int i=0; i < agg_part_rels_saamge->num_mises; ++i)
-//    {
-//        cx = 0.0;
-//        for (int j=0; j < agg_part_rels_saamge->mis_to_dof->RowSize(i); ++j)
-//            cx(agg_part_rels_saamge->mis_to_dof->GetRow(i)[j]) = 1.0;
-//        tg_data->interp->Mult(cx, *hx1g);
-//        x = *hx1g;
-//        fem_parallel_visualize_gf(pmesh, x);
-//        int foo;
-//        std::cin >> foo;
-//    }
-//    delete hx1g;
-
+    HypreParVector *precbg=NULL;
     Solver *solver=NULL;
     if (aux)
     {
@@ -496,36 +454,23 @@ int main(int argc, char *argv[])
                                         tg_data_saamge), false);
         solver->SetOperator(*tg_data->Ac);
 //        solver = new HypreDirect(*tg_data->Ac);
-        if (schur)
-            tg_data->coarse_solver = new SchurSolver(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
-                                                     *agg_part_rels->cface_TruecDof_cDof, *solver);
-        else
-        {
-//            CGSolver *hpcg = new CGSolver(MPI_COMM_WORLD);
-//            hpcg->SetOperator(*tg_data->Ac);
-//            hpcg->SetRelTol(sqrt(1e-16)); // MFEM squares this.
-//            hpcg->SetMaxIter(1000);
-//            hpcg->SetPrintLevel(0);
-//            hpcg->SetPreconditioner(*solver);
-
-            tg_data->coarse_solver = solver;
-            solver = NULL;
-        }
+        tg_data->coarse_solver = new MortarSchurSolver(*tg_data->interp_data, *agg_part_rels, *solver);
     } else
     {
+        cx = 0.0;
         if (zero_rhs)
-            cbg = new HypreParVector(*tg_data->interp);
+            cbg = new HypreParVector(*tg_data->Ac);
         else
         {
-            cx = 0.0;
-            if (full_space)
+            if (!indirect_rhs)
             {
                 ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
-                cbg = nonconf_ip_discretization_rhs(*tg_data, *agg_part_rels, &rhsp);
+                cbg = mortar_assemble_condensed_rhs(*tg_data->interp_data, *agg_part_rels, &rhsp);
             } else
             {
-                cbg = new HypreParVector(*tg_data->interp);
-                tg_data->restr->Mult(*bg, *cbg);
+                precbg = new HypreParVector(*tg_data->interp);
+                tg_data->restr->Mult(*bg, *precbg);
+                cbg = mortar_assemble_schur_rhs(*tg_data->interp_data, *agg_part_rels, *precbg);
             }
         }
     }
@@ -552,25 +497,19 @@ int main(int argc, char *argv[])
             tg_run(*Ag, agg_part_rels, *hxg, *bg, 1000, tol, 1e-24, 1.0, tg_data, zero_rhs, true);
         else
         {
-            if (schur)
-            {
-                HypreParVector *schur_rhs = nonconf_assemble_schur_rhs(*tg_data->interp_data, *agg_part_rels,
-                                                                       *agg_part_rels->cface_TruecDof_cDof, *cbg);
-                HypreParVector eb(*schur_rhs);
-                eb = 0.0;
-                tg_run(*tg_data->Ac, agg_part_rels_saamge, eb, *schur_rhs, 1000, tol, 1e-24, 1.0,
-                       (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
-                        tg_data_saamge), zero_rhs, true);
-                delete schur_rhs;
-                nonconf_schur_update_interior(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof, *cbg, eb, cx);
-            }
+            tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, tol, 1e-24, 1.0,
+                   (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+                   tg_data_saamge), zero_rhs, true);
+            delete hxg;
+            if (!indirect_rhs || zero_rhs)
+                hxg = mortar_reverse_condensation(cx, *tg_data, *agg_part_rels, zero_rhs);
             else
             {
-                tg_run(*tg_data->Ac, agg_part_rels_saamge, cx, *cbg, 1000, tol, 1e-24, 1.0,
-                       (ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
-                        tg_data_saamge), zero_rhs, true);
+                HypreParVector postcx(*tg_data->interp);
+                mortar_schur_recover(*tg_data->interp_data, *agg_part_rels, *precbg, cx, postcx);
+                hxg = new HypreParVector(*tg_data->interp, 1);
+                tg_data->interp->Mult(postcx, *hxg);
             }
-            tg_data->interp->Mult(cx, *hxg);
         }
         x1 = *hxg;
         if (visualize)
@@ -654,19 +593,21 @@ int main(int argc, char *argv[])
         hpcg.SetMaxIter(1000);
         hpcg.SetPrintLevel(1);
         hpcg.SetPreconditioner(Bprec);
-        if (schur)
-        {
-            SchurSolver SS(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
-                           *agg_part_rels->cface_TruecDof_cDof, hpcg, zero_rhs);
-            SS.Mult(*cbg, cx);
-        }
-        else
-            hpcg.Mult(*cbg, cx);
+        hpcg.Mult(*cbg, cx);
         iterations = hpcg.GetNumIterations();
         converged = hpcg.GetConverged();
-
-        tg_data->interp->Mult(cx, *pxg);
+        delete pxg;
+        if (!indirect_rhs || zero_rhs)
+            pxg = mortar_reverse_condensation(cx, *tg_data, *agg_part_rels, zero_rhs);
+        else
+        {
+            HypreParVector postcx(*tg_data->interp);
+            mortar_schur_recover(*tg_data->interp_data, *agg_part_rels, *precbg, cx, postcx);
+            pxg = new HypreParVector(*tg_data->interp, 1);
+            tg_data->interp->Mult(postcx, *pxg);
+        }
     }
+    delete precbg;
     x1 = *pxg;
     if (visualize)
         fem_parallel_visualize_gf(pmesh, x1);
