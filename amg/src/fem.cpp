@@ -291,7 +291,7 @@ void fem_serial_visualize_partitioning(Mesh& mesh, int *partitioning,
     else
         sol_sock << "fem3d_gf_data_keys\n";
     sol_sock.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
-    mesh.PrintWithPartitioning(partitioning, sol_sock);
+    mesh.PrintWithPartitioning(partitioning, sol_sock, true);
     p.Save(sol_sock);
     sol_sock << "f" << (2 == mesh.Dimension()?"Rjl":"") << keys;
     // sol_sock.send();
@@ -345,7 +345,7 @@ void fem_parallel_visualize_partitioning(ParMesh& mesh, int *partitioning,
     else
         sol_sock << "fem3d_gf_data_keys\n";
     sol_sock.precision(CONFIG_ACCESS_OPTION(GLOBAL, prec));
-    mesh.PrintWithPartitioning(lpartitioning, sol_sock);
+    mesh.PrintWithPartitioning(lpartitioning, sol_sock, true);
     p.Save(sol_sock);
     sol_sock << "f" << (2 == mesh.Dimension()?"Rjl":"") << keys;
     // sol_sock.send();
