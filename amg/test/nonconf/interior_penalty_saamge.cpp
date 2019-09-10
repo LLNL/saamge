@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
     ParGridFunction x, x1;
     ParLinearForm *b;
     ParBilinearForm *a;
-    agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge;
+    agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge=NULL;
     tg_data_t *tg_data, *tg_data_saamge=NULL;
     ml_data_t *ml_data_saamge=NULL;
 
@@ -225,6 +225,17 @@ int main(int argc, char *argv[])
     int svd_min_skip = 0;
     args.AddOption(&svd_min_skip, "-sms", "--svd-min-skip",
                    "Minimal number of left singular vectors to remove when using SVD in the AMGe multigrid for the IP problem.");
+    bool use_cg = false;
+    args.AddOption(&use_cg, "-cg", "--cg",
+                   "-ncg", "--no-cg",
+                   "Use CG on the auxiliary space, preconditioned by the SAAMGe. Otherwise, use a basic static iteration of SAAMGe.");
+    int iters = 1;
+    args.AddOption(&iters, "-iters", "--iterations",
+                   "Number of static linear or CG iterations on the auxiliary level.");
+    bool use_saamge = true;
+    args.AddOption(&use_saamge, "-saamge", "--saamge",
+                   "-nsaamge", "--no-saamge",
+                   "Use SAAMGe on the auxiliary level. Otherwise, use BoomerAMG.");
 
     args.Parse();
     if (!args.Good())
@@ -236,6 +247,9 @@ int main(int argc, char *argv[])
     }
     if (PROC_RANK == 0)
         args.PrintOptions(cout);
+
+    if (!aux)
+        use_saamge = true;
 
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
@@ -367,12 +381,12 @@ int main(int argc, char *argv[])
 
     Array<Matrix *> *elmats=NULL;
     ElementMatrixProvider *emp_ip;
-    if (full_space || !solver_agg)
+    if (use_saamge && (full_space || !solver_agg))
     {
         agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
         emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
     }
-    else
+    else if (use_saamge)
     {
         Table cface_to_AE;
         Transpose(*agg_part_rels->AE_to_cface, cface_to_AE, agg_part_rels->num_cfaces);
@@ -397,7 +411,7 @@ int main(int argc, char *argv[])
         emp_ip = new ElementMatrixArray(*agg_part_rels_saamge, *elmats);
     }
     double OC_aux = 0.0;
-    if (ml)
+    if (use_saamge && ml)
     {
         int nparts_arr[nl-1];
         nparts_arr[0] = nparts;
@@ -415,7 +429,7 @@ int main(int argc, char *argv[])
             mlp.set_coarse_direct(true);
         ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_ip, mlp);
         OC_aux = ml_compute_OC(*tg_data->Ac, *ml_data_saamge);
-    } else
+    } else if (use_saamge)
     {
         tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta_saamge, false, -1,
                                          !direct_eigensolver, false, svd_min_skip);
@@ -430,7 +444,7 @@ int main(int argc, char *argv[])
         OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
     SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
-    if (!full_space && solver_agg)
+    if (use_saamge && (!full_space && solver_agg))
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
@@ -490,26 +504,51 @@ int main(int argc, char *argv[])
 //    delete hx1g;
 
     Solver *solver=NULL;
+    Solver *solver_iter=NULL;
     if (aux)
     {
-        solver = new VCycleSolver((ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+        if (use_saamge)
+        {
+            solver = new VCycleSolver((ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
                                         tg_data_saamge), false);
-        solver->SetOperator(*tg_data->Ac);
-//        solver = new HypreDirect(*tg_data->Ac);
+            solver->SetOperator(*tg_data->Ac);
+        } else
+        {
+            solver = new HypreBoomerAMG(*tg_data->Ac);
+            ((HypreBoomerAMG *)solver)->SetPrintLevel(0);
+        }
+
+        if (use_cg)
+        {
+            CGSolver *hpcg = new CGSolver(MPI_COMM_WORLD);
+            hpcg->SetOperator(*tg_data->Ac);
+            hpcg->SetRelTol(0.0); // MFEM squares this.
+            hpcg->SetMaxIter(iters);
+            hpcg->SetPrintLevel(-1);
+            hpcg->SetPreconditioner(*solver);
+            solver_iter = hpcg;
+        } else if (iters > 1)
+        {
+            SLISolver *sli = new SLISolver(MPI_COMM_WORLD);
+            sli->SetOperator(*tg_data->Ac);
+            sli->SetRelTol(0.0); // MFEM squares this.
+            sli->SetMaxIter(iters);
+            sli->SetPrintLevel(-1);
+            sli->SetPreconditioner(*solver);
+            solver_iter = sli;
+        } else
+        {
+            solver_iter = solver;
+            solver = NULL;
+        }
+
         if (schur)
             tg_data->coarse_solver = new SchurSolver(*tg_data->interp_data, *agg_part_rels, *agg_part_rels->cface_cDof_TruecDof,
-                                                     *agg_part_rels->cface_TruecDof_cDof, *solver);
+                                                     *agg_part_rels->cface_TruecDof_cDof, *solver_iter);
         else
         {
-//            CGSolver *hpcg = new CGSolver(MPI_COMM_WORLD);
-//            hpcg->SetOperator(*tg_data->Ac);
-//            hpcg->SetRelTol(sqrt(1e-16)); // MFEM squares this.
-//            hpcg->SetMaxIter(1000);
-//            hpcg->SetPrintLevel(0);
-//            hpcg->SetPreconditioner(*solver);
-
-            tg_data->coarse_solver = solver;
-            solver = NULL;
+            tg_data->coarse_solver = solver_iter;
+            solver_iter = NULL;
         }
     } else
     {
@@ -696,6 +735,14 @@ int main(int argc, char *argv[])
         SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
     }
 
+    if (!use_saamge)
+    {
+        if (solver)
+            hypre_BoomerAMGSetupStats((HYPRE_Solver)(*(HypreBoomerAMG *)solver), (hypre_ParCSRMatrix *)*tg_data->Ac);
+        else
+            hypre_BoomerAMGSetupStats((HYPRE_Solver)(*(HypreBoomerAMG *)solver_iter), (hypre_ParCSRMatrix *)*tg_data->Ac);
+    }
+
     delete xg;
     delete cbg;
     delete pxg;
@@ -707,6 +754,7 @@ int main(int argc, char *argv[])
     ml_free_data(ml_data_saamge);
     tg_free_data(tg_data_saamge);
     delete solver;
+    delete solver_iter;
     agg_free_partitioning(agg_part_rels);
     agg_free_partitioning(agg_part_rels_saamge);
     delete mesh;
