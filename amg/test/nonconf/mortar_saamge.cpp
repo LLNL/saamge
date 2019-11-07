@@ -33,14 +33,15 @@
     an elliptic problem as an auxiliary space solver, using SAAMGe for the mortar problem.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds mortar spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging)
-    between H1 and the constructed mortar spaces. The mortar spaces are fine-scale on the interior and coarse
-    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors.
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and a mortar formulation together with transition operators (using averaging only on "element" DoFs)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces are fine-scale on the interior and coarse
+    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors
+    and right-hand sides, but the space for them is cloned from the interface non-conforming space.
     The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
-    via the elimination of the "interiors" and Lagrangian multipliers.
+    via the elimination of the "elements" and Lagrangian multipliers.
 
-    The matrix of the mortar system is obtained via assembly. The constructed mortar problem is preconditioned
+    The matrix of the (condensed) mortar system is obtained via assembly. The constructed mortar problem is preconditioned
     by SAAMGe (two- or multi-level). This configuration can be used as an auxiliary solver for the
     H1 problem or SAAMGe can be tested for solving the mortar problem alone. Whenever the mortar problem is
     solved alone and in accordance with the need, the right-hand side of the mortar system
@@ -49,11 +50,11 @@
 
     It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
     can only be zero in the mortar formulation. Essential BCs are strongly enforced in the mortar formulation by considering
-    basis (both the ones associated with the agglomerates and the agglomerate faces) functions that are
+    non-conforming basis (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
 
     The mortar system is reduced (via Schur complement) only on the agglomerate faces. However, the averaging transition
-    operator (between H1 and mortar) is for the whole mortar space (Lagrangian multipliers are NOT included). Therefore,
+    operator (between H1 and non-conforming) is for the whole non-conforming space (Lagrangian multipliers are NOT included). Therefore,
     some additional transitions are utilized before and after invoking the condensed morter solver/preconditioner.
 
     While stationary iteration is supported here, for the auxiliary-space preconditioner, it is mostly intended to be
@@ -117,7 +118,7 @@ int main(int argc, char *argv[])
     ParGridFunction x, x1;
     ParLinearForm *b;
     ParBilinearForm *a;
-    agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge;
+    agg_partitioning_relations_t *agg_part_rels, *agg_part_rels_saamge=NULL;
     tg_data_t *tg_data, *tg_data_saamge=NULL;
     ml_data_t *ml_data_saamge=NULL;
 
@@ -165,7 +166,7 @@ int main(int argc, char *argv[])
     bool indirect_rhs = false;
     args.AddOption(&indirect_rhs, "-ind", "--indirect-rhs",
                    "---no-ind", "--no-indirect-rhs",
-                   "When --auxiliary is unset, obtain RHS via the transfer operator. "
+                   "When --auxiliary is unset, obtain RHS, for the mortar problem, via the transfer operator. "
                    "Otherwise, construct it consistently with the actual discrete weak form.");
     bool direct_eigensolver = true;
     args.AddOption(&direct_eigensolver, "-q", "--direct-eigensolver",
@@ -213,6 +214,17 @@ int main(int argc, char *argv[])
     int svd_min_skip = 0;
     args.AddOption(&svd_min_skip, "-sms", "--svd-min-skip",
                    "Minimal number of left singular vectors to remove when using SVD in the AMGe multigrid for the mortar problem.");
+    bool use_cg = false;
+    args.AddOption(&use_cg, "-cg", "--cg",
+                   "-ncg", "--no-cg",
+                   "Use CG on the auxiliary space, preconditioned by the SAAMGe. Otherwise, use a basic static iteration of SAAMGe.");
+    int iters = 1;
+    args.AddOption(&iters, "-iters", "--iterations",
+                   "Number of static linear or CG iterations on the auxiliary level.");
+    bool use_saamge = true;
+    args.AddOption(&use_saamge, "-saamge", "--saamge",
+                   "-nsaamge", "--no-saamge",
+                   "Use SAAMGe on the auxiliary level. Otherwise, use BoomerAMG.");
 
     args.Parse();
     if (!args.Good())
@@ -224,6 +236,9 @@ int main(int argc, char *argv[])
     }
     if (PROC_RANK == 0)
         args.PrintOptions(cout);
+
+    if (!aux)
+        use_saamge = true;
 
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
@@ -349,18 +364,18 @@ int main(int argc, char *argv[])
     fem_polynomial_targets(&fes, targets, faceorder);
 
     mortar_discretization(*tg_data, *agg_part_rels, emp, &targets, global_diag?&diag:NULL);
-    const double OC_IP = tg_print_data(*Ag, tg_data);
+    const double OC_mortar = tg_print_data(*Ag, tg_data);
 
     fem_free_targets(targets);
 
     Array<Matrix *> *elmats=NULL;
-    ElementMatrixProvider *emp_ip;
-    if (!solver_agg)
+    ElementMatrixProvider *emp_mortar;
+    if (use_saamge && !solver_agg)
     {
         agg_part_rels_saamge = nonconf_create_partitioning(*agg_part_rels, *tg_data->interp_data);
-        emp_ip = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
+        emp_mortar = new ElementIPMatrix(*agg_part_rels_saamge, *tg_data->interp_data);
     }
-    else
+    else if (use_saamge)
     {
         Table cface_to_AE;
         Transpose(*agg_part_rels->AE_to_cface, cface_to_AE, agg_part_rels->num_cfaces);
@@ -382,10 +397,10 @@ int main(int argc, char *argv[])
             (*elmats)[i] = nonconf_AE_matrix(*tg_data->interp_data, i);
             SA_ASSERT((*elmats)[i]);
         }
-        emp_ip = new ElementMatrixArray(*agg_part_rels_saamge, *elmats);
+        emp_mortar = new ElementMatrixArray(*agg_part_rels_saamge, *elmats);
     }
     double OC_aux = 0.0;
-    if (ml)
+    if (use_saamge && ml)
     {
         int nparts_arr[nl-1];
         nparts_arr[0] = nparts;
@@ -401,11 +416,11 @@ int main(int argc, char *argv[])
         mlp.set_svd_min_skip(svd_min_skip);
         if (coarse_direct)
             mlp.set_coarse_direct(true);
-        ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_ip, mlp);
+        ml_data_saamge = ml_produce_data(*tg_data->Ac, agg_part_rels_saamge, emp_mortar, mlp);
         OC_aux = ml_compute_OC(*tg_data->Ac, *ml_data_saamge);
-    } else
+    } else if (use_saamge)
     {
-        tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta_saamge, false, -1,
+        tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_mortar, theta_saamge, false, -1,
                                          !direct_eigensolver, false, svd_min_skip);
         tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
 
@@ -417,8 +432,8 @@ int main(int argc, char *argv[])
         tg_data_saamge->coarse_solver = solver;
         OC_aux = tg_print_data(*tg_data->Ac, tg_data_saamge);
     }
-    SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_IP - 1.0));
-    if (solver_agg)
+    SA_RPRINTF(0, "Total OC: %g\n", 1.0 + OC_aux*(OC_mortar - 1.0));
+    if (use_saamge && solver_agg)
     {
         SA_ASSERT(elmats);
         for (int i=0; i < agg_part_rels->nparts; ++i)
@@ -448,20 +463,52 @@ int main(int argc, char *argv[])
     HypreParVector *cbg = NULL;
     HypreParVector *precbg=NULL;
     Solver *solver=NULL;
+    Solver *solver_iter=NULL;
     if (aux)
     {
-        solver = new VCycleSolver((ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
+        if (use_saamge)
+        {
+            solver = new VCycleSolver((ml ? levels_list_get_level(ml_data_saamge->levels_list, 0)->tg_data :
                                         tg_data_saamge), false);
-        solver->SetOperator(*tg_data->Ac);
-//        solver = new HypreDirect(*tg_data->Ac);
-        tg_data->coarse_solver = new MortarSchurSolver(*tg_data->interp_data, *agg_part_rels, *solver);
+            solver->SetOperator(*tg_data->Ac);
+        } else
+        {
+            solver = new HypreBoomerAMG(*tg_data->Ac);
+            ((HypreBoomerAMG *)solver)->SetPrintLevel(0);
+        }
+
+        if (use_cg)
+        {
+            CGSolver *hpcg = new CGSolver(MPI_COMM_WORLD);
+            hpcg->SetOperator(*tg_data->Ac);
+            hpcg->SetRelTol(0.0); // MFEM squares this.
+            hpcg->SetMaxIter(iters);
+            hpcg->SetPrintLevel(-1);
+            hpcg->SetPreconditioner(*solver);
+            solver_iter = hpcg;
+        } else if (iters > 1)
+        {
+            SLISolver *sli = new SLISolver(MPI_COMM_WORLD);
+            sli->SetOperator(*tg_data->Ac);
+            sli->SetRelTol(0.0); // MFEM squares this.
+            sli->SetMaxIter(iters);
+            sli->SetPrintLevel(-1);
+            sli->SetPreconditioner(*solver);
+            solver_iter = sli;
+        } else
+        {
+            solver_iter = solver;
+            solver = NULL;
+        }
+
+        tg_data->coarse_solver = new MortarSchurSolver(*tg_data->interp_data, *agg_part_rels, *solver_iter);
     } else
     {
-        cx = 0.0;
         if (zero_rhs)
             cbg = new HypreParVector(*tg_data->Ac);
         else
         {
+            cx = 0.0;
             if (!indirect_rhs)
             {
                 ElementDomainLFVectorStandardGeometric rhsp(*agg_part_rels, new DomainLFIntegrator(rhs), &fes);
@@ -637,6 +684,14 @@ int main(int argc, char *argv[])
         SA_RPRINTF(0, "ERROR: L2 = %g; Linf = %g; ENERGY = %g\n", l2err, maxerr, energyerr);
     }
 
+    if (!use_saamge)
+    {
+        if (solver)
+            hypre_BoomerAMGSetupStats((HYPRE_Solver)(*(HypreBoomerAMG *)solver), (hypre_ParCSRMatrix *)*tg_data->Ac);
+        else
+            hypre_BoomerAMGSetupStats((HYPRE_Solver)(*(HypreBoomerAMG *)solver_iter), (hypre_ParCSRMatrix *)*tg_data->Ac);
+    }
+
     delete xg;
     delete cbg;
     delete pxg;
@@ -648,6 +703,7 @@ int main(int argc, char *argv[])
     ml_free_data(ml_data_saamge);
     tg_free_data(tg_data_saamge);
     delete solver;
+    delete solver_iter;
     agg_free_partitioning(agg_part_rels);
     agg_free_partitioning(agg_part_rels_saamge);
     delete mesh;

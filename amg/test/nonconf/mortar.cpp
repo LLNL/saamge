@@ -32,14 +32,15 @@
     Nonconforming mortar AMGe as a statically-condensed (on agglomerate faces) discretization for an elliptic problem.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds mortar spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging only on "interior" DoFs)
-    between H1 and the constructed mortar spaces. The mortar spaces are fine-scale on the interior and coarse
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and a mortar formulation together with transition operators (using averaging only on "element" DoFs)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces are fine-scale on the interior and coarse
     (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors
-    and right-hand sides. The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
-    via the elimination of the "interiors" and Lagrangian multipliers.
+    and right-hand sides, but the space for them is cloned from the interface non-conforming space.
+    The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
+    via the elimination of the "elements" and Lagrangian multipliers.
 
-    The matrix of the mortar system is obtained via assembly, whereas the right-hand side of the
+    The matrix of the (condensed) mortar system is obtained via assembly, whereas the right-hand side of the
     mortar system (excluding Lagrangian multipliers) can be assembled or obtained via the transition
     operators. This does NOT result in equal right-hand sides but seems to provide similar results.
 
@@ -47,13 +48,13 @@
     operators to compute errors between the two solutions.
 
     It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
-    can only be zero. Essential BCs are strongly enforced in the mortar formulation by considering basis
+    can only be zero. Essential BCs are strongly enforced in the mortar formulation by considering non-conforming basis
     (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
 
     XXX: One can also test a two-level SAAMGe on the resulting condensed (Schur)
-         mortar problem, using the same theta and some hard-coded parameters. It considers the agglomerates
-         as elements and uses the mortar cface dofs to obtain elem_to_elem and elem_to_dof. From there,
+         mortar problem, using some given theta and some hard-coded parameters. It considers the agglomerates
+         as elements and uses the non-conforming cface dofs to obtain elem_to_elem and elem_to_dof. From there,
          it calls the standard procedures of SAAMGe that obtain partitions by grouping
          elements (i.e., agglomerates) together, using, e.g., METIS, and constructing the hierarchy.
 */
@@ -153,7 +154,7 @@ int main(int argc, char *argv[])
     bool indirect_rhs = false;
     args.AddOption(&indirect_rhs, "-ind", "--indirect-rhs",
                    "---no-ind", "--no-indirect-rhs",
-                   "Obtain RHS via the transfer operator. Otherwise, construct it consistently with the actual discrete weak form.");
+                   "Obtain RHS, for the mortar problem, via the transfer operator. Otherwise, construct it consistently with the actual discrete weak form.");
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
                    "Tolerance for eigenvalue problems, when --saamge is set.");
@@ -346,7 +347,6 @@ int main(int argc, char *argv[])
     }
     delete bg;
     tg_data->coarse_solver->Mult(*cbg, cx);
-    delete cbg;
     if (!indirect_rhs)
         hx1g = mortar_reverse_condensation(cx, *tg_data, *agg_part_rels);
     else
@@ -425,6 +425,7 @@ int main(int argc, char *argv[])
             delete elmats[i];
     }
 
+    delete cbg;
     tg_free_data(tg_data);
     agg_free_partitioning(agg_part_rels);
     delete mesh;

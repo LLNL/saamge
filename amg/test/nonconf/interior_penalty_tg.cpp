@@ -30,14 +30,14 @@
 
 /**
     Nonconforming interior penalty (IP) AMGe in two-level setting applied to
-    an elliptic problem as a solver.
+    an elliptic problem as as an auxiliary space solver.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds IP spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging)
-    between H1 and the constructed IP spaces. The IP spaces can be fine-scale or coarse
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and an IP formulation together with transition operators (using averaging)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces can be fine-scale or coarse
     (constructed via eigenvalue problems for the H1 agglomerate matrices or local fine-scale IP matrices).
-    If they are coarse the transition operators are straight between fine H1 and coarse IP spaces.
+    If they are coarse the transition operators are straight between fine H1 and coarse non-conforming spaces.
     The IP problem can be the entire formulation or condensed to the agglomerate faces
     (utilizing a Schur complement) for both fine- and coarse-scale IP formulations.
 
@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
                    "Polynomial order of finite element space.");
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
-                   "Tolerance for eigenvalue problems for the IP spaces.");
+                   "Tolerance for eigenvalue problems for the non-conforming spaces.");
     int nu_relax = 2;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation for the auxiliary-space solver. "
@@ -129,7 +129,7 @@ int main(int argc, char *argv[])
     bool full_space = true;
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
-                   "Build the full IP space instead of using eigensolvers.");
+                   "Build the full non-conforming space instead of using eigensolvers.");
     bool ip_spectral = false;
     args.AddOption(&ip_spectral, "-ips", "--ip-spectral",
                    "-nips", "--no-ip-spectral",

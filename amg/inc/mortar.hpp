@@ -71,6 +71,7 @@ private:
 };
 
 /*! Assembles the global mortar condensed (i.e., defined only on cface DoFs) rhs.
+    This is the RHS for the Schur complement.
     Caller must free the returned vector.
 */
 mfem::HypreParVector *mortar_assemble_condensed_rhs(interp_data_t& interp_data,
@@ -100,20 +101,20 @@ void mortar_discretization(tg_data_t& tg_data, agg_partitioning_relations_t& agg
     The returned vector must be freed by the caller.
 
     \a zero_rhs indicates that the righ-hand side in the original system was zero. Otherwise, information for the
-    right-hand side, stored in \a tg_data->interp_data and produced during a call tob mortar_assemble_condensed_rhs,
+    right-hand side, stored in \a tg_data->interp_data and produced during a call to mortar_assemble_condensed_rhs,
     is utilized.
 */
 mfem::HypreParVector *mortar_reverse_condensation(const mfem::HypreParVector& mortar_sol, const tg_data_t& tg_data,
                                             const agg_partitioning_relations_t& agg_part_rels, bool zero_rhs=false);
 
 /**
-    Assembles the global rhs coming from eliminating the "interior" DoFs. The output vector
+    Assembles the global rhs coming from eliminating the "element" DoFs. The output vector
     is represented in terms of true cface DoFs (i.e., defined only on cface DoFs)
     and must be freed by the caller. The input vector (\a rhs) is in terms of true DoFs that also include the "interior" DoFs.
-    This is not much of a challenge, since all "interior" dofs are
-    always true dofs (no sharing) and adding and removing interior dofs is essentially working with
+    This is not much of a challenge, since all "element" dofs are
+    always true dofs (no sharing) and adding and removing "element" dofs is essentially working with
     \a interp_data.celements_cdofs number of dofs at the beginning of the vector. The rest of the vector
-    is filled with cface dofs only. Only the "interior" DoFs are used from the input vector.
+    is filled with cface dofs only. Only the "element" DoFs are used from the input (rhs) vector.
 
     Lagrangian multipliers DoFs are not involved in the representation of the vectors. Internally, the function
     introduces them by padding with zeros.
@@ -122,9 +123,9 @@ mfem::HypreParVector *mortar_assemble_schur_rhs(const interp_data_t& interp_data
                     const agg_partitioning_relations_t& agg_part_rels, const mfem::Vector& rhs);
 
 /**
-    Performs the backward substitution from the block elimination. It takes the full (including "interiors" and cfaces)
+    Performs the backward substitution from the block elimination. It takes the full (including "elements" and cfaces)
     \a rhs in true DoFs and the face portion of the (obtained by inverting the Schur complement) solution in face true DoFs (excluding "interiors").
-    The returned vector (i.e., x) is in terms of all (including "interiors") true DoFs. Only the "interior" DoFs are used from the rhs.
+    The returned vector (i.e., x) is in terms of all (including "elements") true DoFs. Only the "element" DoFs are used from the rhs.
 */
 void mortar_schur_recover(const interp_data_t& interp_data,
                     const agg_partitioning_relations_t& agg_part_rels,

@@ -32,11 +32,11 @@
     Nonconforming interior penalty (IP) AMGe as a discretization for an elliptic problem.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds IP spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging)
-    between H1 and the constructed IP spaces. The IP spaces can be fine-scale or coarse
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and an IP formulation together with transition operators (using averaging)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces can be fine-scale or coarse
     (constructed via eigenvalue problems for the H1 agglomerate matrices or local fine-scale IP matrices).
-    If they are coarse the transition operators are straight between fine H1 and coarse IP spaces.
+    If they are coarse the transition operators are straight between fine H1 and coarse non-conforming spaces.
     The IP problem can be the entire formulation or condensed to the agglomerate faces
     (utilizing a Schur complement) for both fine- and coarse-scale IP formulations.
 
@@ -49,7 +49,7 @@
     operators to compute errors between the two solutions.
 
     It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
-    can only be zero. Essential BCs are strongly enforced in the IP formulation by considering basis
+    can only be zero. Essential BCs are strongly enforced in the IP formulation by considering non-conforming basis
     (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
 
@@ -58,7 +58,7 @@
 
     XXX: One can also test a two-level SAAMGe on the resulting entire or condensed (Schur)
          IP problem, using the same theta and some hard-coded parameters. It considers the agglomerates
-         as elements and uses the IP dofs to obtain elem_to_elem and elem_to_dof. From there,
+         as elements and uses the non-conforming dofs to obtain elem_to_elem and elem_to_dof. From there,
          it calls the standard procedures of SAAMGe that obtain partitions by grouping
          elements (i.e., agglomerates) together, using, e.g., METIS, and constructing the hierarchy.
 */
@@ -143,11 +143,11 @@ int main(int argc, char *argv[])
                    "Polynomial order of finite element space.");
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
-                   "Tolerance for eigenvalue problems for the IP spaces.");
+                   "Tolerance for eigenvalue problems for the non-conforming spaces.");
     bool full_space = true;
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
-                   "Build the full IP space instead of using eigensolvers.");
+                   "Build the full non-conforming space instead of using eigensolvers.");
     bool ip_spectral = false;
     args.AddOption(&ip_spectral, "-ips", "--ip-spectral",
                    "-nips", "--no-ip-spectral",

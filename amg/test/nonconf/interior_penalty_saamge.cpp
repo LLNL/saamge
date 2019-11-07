@@ -33,11 +33,11 @@
     an elliptic problem as an auxiliary space solver, using SAAMGe for the IP problem.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds IP spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging)
-    between H1 and the constructed IP spaces. The IP spaces can be fine-scale or coarse
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and an IP formulation together with transition operators (using averaging)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces can be fine-scale or coarse
     (constructed via eigenvalue problems for the H1 agglomerate matrices or local fine-scale IP matrices).
-    If they are coarse the transition operators are straight between fine H1 and coarse IP spaces.
+    If they are coarse the transition operators are straight between fine H1 and coarse non-conforming spaces.
     The IP problem can be the entire formulation or condensed to the agglomerate faces
     (utilizing a Schur complement) for both fine- and coarse-scale IP formulations.
 
@@ -50,11 +50,11 @@
 
     It is intended for solver settings, which means that we consider essential BCs (boundary conditions) that
     can only be zero in the IP formulation. Essential BCs are strongly enforced in the IP formulation by considering
-    basis (both the ones associated with the agglomerates and the agglomerate faces) functions that are
+    non-conforming basis (both the ones associated with the agglomerates and the agglomerate faces) functions that are
     NOT supported on the respective portion of the boundary.
 
     When a condensed (Schur complement) version is utilized, the IP system is reduced only on the agglomerate faces.
-    However, the averaging transition operator (between H1 and IP) is for the whole IP space. Therefore, some additional
+    However, the averaging transition operator (between H1 and non-conforming) is for the whole non-conforming space. Therefore, some additional
     transitions are utilized before and after invoking the condensed IP solver/preconditioner.
 
     While stationary iteration is supported here, for the auxiliary-space preconditioner, it is mostly intended to be
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
                    "Polynomial order of finite element space.");
     double theta = 0.003;
     args.AddOption(&theta, "-t", "--theta",
-                   "Tolerance for eigenvalue problems for the IP spaces.");
+                   "Tolerance for eigenvalue problems for the non-conforming spaces.");
     double theta_saamge = 0.003;
     args.AddOption(&theta_saamge, "-ts", "--theta-saamge",
                    "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the IP matrix for the first coarsening.");
@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
     bool full_space = true;
     args.AddOption(&full_space, "-f", "--full-space",
                    "-nf", "--no-full-space",
-                   "Build the full IP space instead of using eigensolvers.");
+                   "Build the full non-conforming space instead of using eigensolvers.");
     bool ip_spectral = false;
     args.AddOption(&ip_spectral, "-ips", "--ip-spectral",
                    "-nips", "--no-ip-spectral",

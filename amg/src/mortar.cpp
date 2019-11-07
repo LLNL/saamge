@@ -41,7 +41,8 @@ namespace saamge
 using namespace mfem;
 
 /**
-    Obtains the mortar condensed element matrices and maintains some additional data for later use.
+    Obtains the mortar condensed (Schur complement) element matrices and maintains some additional
+    data for later use.
     This is an over-constrained version with identity bases everywhere.
 */
 static inline
@@ -174,7 +175,7 @@ void mortar_condensed_local_matrices_overconstrained(interp_data_t& interp_data,
 }
 
 /**
-    Obtains the mortar condensed element matrices and maintains some additional data for later use.
+    Obtains the mortar condensed (Schur complement) element matrices and maintains some additional data for later use.
 
     Uses the cface bases, while the "interiors" are taken fine-scale.
 
@@ -371,7 +372,8 @@ void mortar_condensed_local_matrices(interp_data_t& interp_data, const agg_parti
 
 /**
     Obtains the mortar condensed (i.e., defined only on cface DoFs) element rhs vectors
-    and maintains some additional data for later use.
+    and maintains some additional data for later use (associated with the Schur complement and
+    the elimination and backwards substitution steps).
 */
 static inline
 void mortar_condensed_local_rhs(interp_data_t& interp_data, const agg_partitioning_relations_t& agg_part_rels,
@@ -696,7 +698,7 @@ void mortar_schur_recover(const interp_data_t& interp_data,
     HypreParVector lfacev(*agg_part_rels.cface_cDof_TruecDof, 1);
     agg_part_rels.cface_cDof_TruecDof->Mult(facev, lfacev);
 
-    // Allocate the global solution vector (in all true DoFs, including the interiors)
+    // Consider the global solution vector (in all true DoFs, including the interiors)
     // and copy the available face solution from facev.
     SA_ASSERT(x.Size() == rhs.Size());
     SA_ASSERT(facev.Size() + interp_data.celements_cdofs == x.Size());

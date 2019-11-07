@@ -30,15 +30,16 @@
 
 /**
     Nonconforming mortar AMGe in two-level setting applied to
-    an elliptic problem as a solver.
+    an elliptic problem as as an auxiliary space solver.
 
     This example starts with an H1 problem and produces an agglomeration.
-    Based on the agglomerates it builds mortar spaces (on the agglomerate
-    elements and agglomerate faces) and formulation together with transition operators (using averaging only on "interior" DoFs)
-    between H1 and the constructed mortar spaces. The mortar spaces are fine-scale on the interior and coarse
-    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors.
+    Based on the agglomerates it builds non-conforming spaces (on the agglomerate
+    elements and agglomerate faces) and a mortar formulation together with transition operators (using averaging only on "element" DoFs)
+    between H1 and the constructed non-conforming spaces. The non-conforming spaces are fine-scale on the interior and coarse
+    (using polynomials) on the agglomerate faces. The Lagrangian multipliers are not explicitly appearing in the vectors
+    and right-hand sides, but the space for them is cloned from the interface non-conforming space.
     The mortar problem is condensed to the agglomerate faces (utilizing a Schur complement)
-    via the elimination of the "interiors" and Lagrangian multipliers.
+    via the elimination of the "elements" and Lagrangian multipliers.
 
     In the end, it uses the transition operators and the mortar formulation to obtain, by utilizing
     the standard two-level V-cycle, a multiplicative auxiliary space preconditioner
