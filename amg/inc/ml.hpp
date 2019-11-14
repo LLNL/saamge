@@ -66,7 +66,7 @@ public:
         int coarsenings, int *nparts_arr, int first_nu_pro, int nu_pro,
         int nu_relax, double first_theta, double theta,
         int polynomial_coarse_space, bool use_correct_nullspace, bool use_arpack,
-        bool do_aggregates);
+        bool do_aggregates, int fixed_num_evecs_f=0, int fixed_num_evecs_c=0);
 
     /**
        Constructor so every level has same parameters.
@@ -82,6 +82,7 @@ public:
     int get_nu_pro(int j) const {return nu_pro[j];}
     int get_nu_relax(int j) const {return nu_relax[j];}
     double get_theta(int j) const {return theta[j];}
+    double get_fixed_num_evecs(int j) const {return fixed_num_evecs[j];}
     bool get_smooth_interp(int j) const {return (nu_pro[j] > 0);}
     int get_polynomial_coarse_space(int j) const {return polynomial_coarse_space[j];}
     bool get_use_correct_nullspace() const {return use_correct_nullspace;}
@@ -106,6 +107,7 @@ private:
     int * nu_pro;
     int * nu_relax;
     double * theta;
+    int * fixed_num_evecs;
     int * polynomial_coarse_space;
     bool use_correct_nullspace;
     bool use_arpack;

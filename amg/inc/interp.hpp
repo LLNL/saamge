@@ -289,7 +289,7 @@ void interp_compute_vectors(
     const interp_data_t& interp_data, ElementMatrixProvider *elem_data,
     double tol, double& theta, bool *xbad_lin_indep, bool *vector_added,
     const mfem::Vector *xbad, bool transf, bool readapting,
-    bool all_eigens, bool spect_update, bool bdr_cond_imposed);
+    bool all_eigens, bool spect_update, bool bdr_cond_imposed, int fixed_num_evecs=0);
 
 /*! \brief A simple version of \a interp_compute_vectors() that does not store all matrix information.
 
@@ -368,7 +368,7 @@ mfem::SparseMatrix *interp_sparse_tent_build(
     ElementMatrixProvider * elem_data, double& tol,
     double& theta, bool *xbad_lin_indep/*=NULL*/, bool *vector_added/*=NULL*/,
     const mfem::Vector *xbad/*=NULL*/, bool transf/*=0*/, bool readapting/*=0*/,
-    bool all_eigens/*=0*/, bool spect_update/*=1*/, bool avoid_ess_bdr_dofs, int svd_min_skip=0);
+    bool all_eigens/*=0*/, bool spect_update/*=1*/, bool avoid_ess_bdr_dofs, int fixed_num_evecs=0, int svd_min_skip=0);
 
 /*! \brief Simply (re)assembles the tentative interpolant.
 

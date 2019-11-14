@@ -112,7 +112,7 @@ bool Eigensolver::Solve(
 #if SAAMGE_USE_ARPACK
         return SolveIterative(A, B, part, agg_id, aggregate_size,
                               theta, cut_evects, 
-                              NULL, transf, all_eigens);
+                              NULL, transf, all_eigens, fixed_num);
 #else
         count_direct_solves++;
         return SolveDirect(A, B, part, agg_id, aggregate_size,
@@ -152,6 +152,7 @@ bool Eigensolver::SolveDirect(
 
     SA_ASSERT(SA_REAL_ALMOST_LE(theta, lmax));
     SA_ASSERT(theta >= 0.);
+    SA_ASSERT(fixed_num <= 0 || !all_eigens); // Not a meaningful parameter combination in the current implementation.
 
     if (transf)
     {
@@ -275,10 +276,11 @@ bool Eigensolver::SolveIterative(
     mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
     double& theta, mfem::DenseMatrix& cut_evects,
     const mfem::DenseMatrix *Tt,
-    bool transf, bool all_eigens)
+    bool transf, bool all_eigens, int fixed_num)
 {
     SA_ASSERT(!transf); // not implemented, but possible if you want
     SA_ASSERT(!all_eigens); // not implemented, and difficult with ARPACK
+    SA_ASSERT(fixed_num <= max_arpack_vectors);
 
     DenseMatrix *cut_ptr, cut_helper;
     delete eigenvalues;
@@ -312,14 +314,20 @@ bool Eigensolver::SolveIterative(
     const SparseMatrix *As = dynamic_cast<SparseMatrix *>(&A);
     SA_ASSERT(As); // It is currently only implemented for sparse matrices
     int numvectors = arpacks_calc_portion_eigens_sparse_diag(
-        *As, evals, *cut_ptr, *B, max_arpack_vectors, true,
+        *As, evals, *cut_ptr, *B, (fixed_num > 0 ? fixed_num : max_arpack_vectors), true,
         max_arpack_its, num_arnoldi, arpack_tol);
-    int vectors_got = min_vectors;
-    for (int ev=min_vectors; ev<max_arpack_vectors; ++ev)
+    SA_ASSERT(numvectors == (fixed_num > 0 ? fixed_num : max_arpack_vectors));
+    int vectors_got;
+    if (fixed_num <= 0)
     {
-        if (evals[ev] < theta)
-            vectors_got++;
-    }
+        vectors_got = min_vectors;
+        for (int ev=min_vectors; ev<max_arpack_vectors; ++ev)
+        {
+            if (evals[ev] < theta)
+                vectors_got++;
+        }
+    } else
+        vectors_got = fixed_num;
     if (vectors_got == max_arpack_vectors)
     {
         count_max_used++;

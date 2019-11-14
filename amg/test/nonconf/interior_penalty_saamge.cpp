@@ -149,6 +149,14 @@ int main(int argc, char *argv[])
     double theta_saamge_c = theta_saamge;
     args.AddOption(&theta_saamge_c, "-tsc", "--theta-saamge-c",
                    "Tolerance for eigenvalue problems for the SAAMGe preconditioner of the IP matrix for the rest of the coarsenings.");
+    int fixed_num_evecs_saamge = 0;
+    args.AddOption(&fixed_num_evecs_saamge, "-fvs", "--fixed-num-evecs-saamge",
+                   "Takes a predetermined number of eigenvectors from the eigenvalue problems for the SAAMGe preconditioner "
+                   "of the IP matrix for the first coarsening. A value of 0 disables it and uses theta tolerances.");
+    int fixed_num_evecs_saamge_c = fixed_num_evecs_saamge;
+    args.AddOption(&fixed_num_evecs_saamge_c, "-fvsc", "--fixed-num-evecs-saamge-c",
+                   "Takes a predetermined number of eigenvectors from the eigenvalue problems for the SAAMGe preconditioner "
+                   "of the IP matrix for the rest of the coarsenings. A value of 0 disables it and uses theta tolerances.");
     int nu_relax = 2;
     args.AddOption(&nu_relax, "-n", "--nu-relax",
                    "Degree for smoother in the relaxation when preconditioning the IP problem.");
@@ -228,7 +236,7 @@ int main(int argc, char *argv[])
     bool use_cg = false;
     args.AddOption(&use_cg, "-cg", "--cg",
                    "-ncg", "--no-cg",
-                   "Use CG on the auxiliary space, preconditioned by the SAAMGe. Otherwise, use a basic static iteration of SAAMGe.");
+                   "Use CG on the auxiliary space, preconditioned by the SAAMGe (or BoomerAMG). Otherwise, use a basic static iteration of SAAMGe.");
     int iters = 1;
     args.AddOption(&iters, "-iters", "--iterations",
                    "Number of static linear or CG iterations on the auxiliary level.");
@@ -423,7 +431,8 @@ int main(int argc, char *argv[])
             if (nparts_arr[i] < 1) nparts_arr[i] = 1;
         }
         MultilevelParameters mlp(nl-1, nparts_arr, 0, 0, nu_relax, theta_saamge,
-                                 theta_saamge_c, -1, false, !direct_eigensolver, false);
+                                 theta_saamge_c, -1, false, !direct_eigensolver, false,
+                                 fixed_num_evecs_saamge, fixed_num_evecs_saamge_c);
         mlp.set_svd_min_skip(svd_min_skip);
         if (coarse_direct)
             mlp.set_coarse_direct(true);
@@ -432,7 +441,7 @@ int main(int argc, char *argv[])
     } else if (use_saamge)
     {
         tg_data_saamge = tg_produce_data(*tg_data->Ac, *agg_part_rels_saamge, 0, nu_relax, emp_ip, theta_saamge, false, -1,
-                                         !direct_eigensolver, false, svd_min_skip);
+                                         !direct_eigensolver, false, fixed_num_evecs_saamge, svd_min_skip);
         tg_fillin_coarse_operator(*tg_data->Ac, tg_data_saamge, false);
 
         Solver *solver;

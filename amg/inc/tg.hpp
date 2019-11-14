@@ -478,7 +478,7 @@ void tg_build_hierarchy_with_polynomial(
 void tg_build_hierarchy(mfem::HypreParMatrix& Ag, tg_data_t& tg_data,
                         const agg_partitioning_relations_t& agg_part_rels,
                         ElementMatrixProvider *elem_data,
-                        bool avoid_ess_bdr_dofs, int svd_min_skip=0);
+                        bool avoid_ess_bdr_dofs, int fixed_num_evecs=0, int svd_min_skip=0);
 
 /*! \brief Extends an identity block to top-left of tg_data.interp
 
@@ -567,7 +567,7 @@ tg_data_t *tg_produce_data(
     const agg_partitioning_relations_t& agg_part_rels, int nu_pro,
     int nu_relax, ElementMatrixProvider *elem_data_finest, double theta,
     bool smooth_interp, int polynomial_coarse_arg, bool use_arpack,
-    bool avoid_ess_bdr_dofs, int svd_min_skip=0);
+    bool avoid_ess_bdr_dofs, int fixed_num_evecs=0, int svd_min_skip=0);
 
 /*! \brief Frees the TG data.
 

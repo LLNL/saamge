@@ -378,7 +378,7 @@ void interp_compute_vectors(
     const interp_data_t& interp_data, ElementMatrixProvider *elem_data,
     double tol, double& theta, bool *xbad_lin_indep, bool *vector_added,
     const Vector *xbad, bool transf, bool readapting,
-    bool all_eigens, bool spect_update, bool bdr_cond_imposed)
+    bool all_eigens, bool spect_update, bool bdr_cond_imposed, int fixed_num_evecs)
 {
     // const bool assemble_ess_diag = true;
     const int nparts = agg_part_rels.nparts;
@@ -540,7 +540,7 @@ void interp_compute_vectors(
             local_added = eigensolver.Solve(
                 *AE_stiffm, rhs_matrices_arr[i], i, i,
                 agg_size,
-                theta_local, *(cut_evects_arr[i]));
+                theta_local, *(cut_evects_arr[i]), fixed_num_evecs);
 
 #if 0
             const double lower_bound = 1e-4;
@@ -901,7 +901,7 @@ SparseMatrix *interp_sparse_tent_build(
     interp_data_t& interp_data, ElementMatrixProvider *elem_data, double& tol,
     double& theta, bool *xbad_lin_indep, bool *vector_added, const Vector *xbad,
     bool transf, bool readapting, bool all_eigens, bool spect_update,
-    bool avoid_ess_bdr_dofs, int svd_min_skip)
+    bool avoid_ess_bdr_dofs, int fixed_num_evecs, int svd_min_skip)
 {
     SA_RPRINTF_L(0,4, "%s", "---------- interp_compute_vectors { --------------"
                  "-----\n");
@@ -910,7 +910,7 @@ SparseMatrix *interp_sparse_tent_build(
     interp_compute_vectors(
         agg_part_rels, interp_data, elem_data, tol, theta, xbad_lin_indep,
         vector_added, xbad, transf, readapting, all_eigens, spect_update,
-        bdr_cond_imposed);
+        bdr_cond_imposed, fixed_num_evecs);
 
     if (SA_IS_OUTPUT_LEVEL(4))
     {

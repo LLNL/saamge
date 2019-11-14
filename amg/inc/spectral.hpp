@@ -115,7 +115,7 @@ public:
     virtual bool Solve(
         const mfem::Matrix& A, mfem::SparseMatrix *& B, 
         int part, int agg_id, int aggregate_size, double& theta,
-        mfem::DenseMatrix& cut_evects, int fixed_num=-1);
+        mfem::DenseMatrix& cut_evects, int fixed_num=0);
 
     /**
        Returns the obtained eigenvalues (if any) providing the ownership to the
@@ -200,7 +200,7 @@ private:
         mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
         double& theta, mfem::DenseMatrix& cut_evects,
         const mfem::DenseMatrix *Tt,
-        bool transf, bool all_eigens, int fixed_num=-1);
+        bool transf, bool all_eigens, int fixed_num=0);
 
     /**
        Implemented as a sparse iterative eigensolver using
@@ -212,7 +212,7 @@ private:
         mfem::SparseMatrix *& B, int part, int agg_id, int agg_size,
         double& theta, mfem::DenseMatrix& cut_evects,
         const mfem::DenseMatrix *Tt,
-        bool transf, bool all_eigens);
+        bool transf, bool all_eigens, int fixed_num=0);
 #endif
 
     const int * aggregates;

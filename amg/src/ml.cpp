@@ -55,7 +55,7 @@ MultilevelParameters::MultilevelParameters(
     int coarsenings, int *nparts_arr_arg, int first_nu_pro, int nu_pro_arg, 
     int nu_relax_arg, double first_theta, double theta_arg,
     int polynomial_coarse_space_arg, bool use_correct_nullspace,
-    bool use_arpack, bool do_aggregates) 
+    bool use_arpack, bool do_aggregates, int fixed_num_evecs_f, int fixed_num_evecs_c)
     :
     num_coarsenings(coarsenings),
     use_correct_nullspace(use_correct_nullspace),
@@ -71,12 +71,14 @@ MultilevelParameters::MultilevelParameters(
     nu_pro = new int[num_coarsenings];
     nu_relax = new int[num_coarsenings];
     theta = new double[num_coarsenings];
+    fixed_num_evecs = new int[num_coarsenings];
     polynomial_coarse_space = new int[num_coarsenings];
 
     nparts_arr[0] = nparts_arr_arg[0];
     nu_pro[0] = first_nu_pro;
     nu_relax[0] = nu_relax_arg;
     theta[0] = first_theta;
+    fixed_num_evecs[0] = fixed_num_evecs_f;
     polynomial_coarse_space[0] = polynomial_coarse_space_arg;
 
     for (int i=1; i<num_coarsenings; ++i)
@@ -85,6 +87,7 @@ MultilevelParameters::MultilevelParameters(
         nu_pro[i] = nu_pro_arg;
         nu_relax[i] = nu_relax_arg;
         theta[i] = theta_arg;
+        fixed_num_evecs[i] = fixed_num_evecs_c;
         polynomial_coarse_space[i] = polynomial_coarse_space_arg;
     }
 }
@@ -188,7 +191,7 @@ void ml_produce_hierarchy_from_level(
         ElementMatrixProvider * emp = new ElementMatrixParallelCoarse(
             *agg_part_rels, ml_data.levels_list.coarsest);
         tg_build_hierarchy(*A, *tg_data, *agg_part_rels,
-                           emp, mlp.get_avoid_ess_bdr_dofs(), mlp.get_svd_min_skip());
+                           emp, mlp.get_avoid_ess_bdr_dofs(), mlp.get_fixed_num_evecs(i), mlp.get_svd_min_skip());
 
         if (agg_part_rels->testmesh)
         {
@@ -441,7 +444,7 @@ ml_data_t * ml_produce_data(
     else
     {
         tg_build_hierarchy(Ag, *tg_data, *agg_part_rels,
-                           elem_data_finest, mlp.get_avoid_ess_bdr_dofs(), mlp.get_svd_min_skip());
+                           elem_data_finest, mlp.get_avoid_ess_bdr_dofs(), mlp.get_fixed_num_evecs(0), mlp.get_svd_min_skip());
     }
 
     if (agg_part_rels->testmesh)
