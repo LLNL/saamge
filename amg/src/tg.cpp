@@ -1001,7 +1001,7 @@ void tg_update_coarse_operator(mfem::HypreParMatrix& A, tg_data_t *tg_data,
             {
                 SA_RPRINTF_L(0, 5, "%s", "Setting coarse solver as a CG preconditioned "
                                          "with BoomerAMG.\n");
-                tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1000);
+                tg_data->coarse_solver = new AMGSolver(*tg_data->Ac, false, 1e-16, 1);
             }
         }
         else
