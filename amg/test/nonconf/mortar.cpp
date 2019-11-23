@@ -79,7 +79,7 @@ double checkboard_coef(Vector& x)
           (!((int)ceil(x(2)*d) & 1) &&
            ((int)ceil(x(0)*d) & 1) != ((int)ceil(x(1)*d) & 1)))))
     {
-        return 1e6;
+        return 1e4;
     }
     else
     {

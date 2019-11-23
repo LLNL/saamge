@@ -81,7 +81,7 @@ double checkboard_coef(Vector& x)
           (!((int)ceil(x(2)*d) & 1) &&
            ((int)ceil(x(0)*d) & 1) != ((int)ceil(x(1)*d) & 1)))))
     {
-        return 1e6;
+        return 1e4;
     }
     else
     {
@@ -393,7 +393,7 @@ int main(int argc, char *argv[])
 
         agg_dof_status_t *bdr_dofs = new agg_dof_status_t[agg_part_rels->cface_cDof_TruecDof->GetNumRows()]();
         const int lev_elems_per_agg = (2 == dim ? elems_per_agg * elems_per_agg :
-                                                  elems_per_agg * elems_per_agg);
+                                                  elems_per_agg * elems_per_agg * elems_per_agg);
         nparts = (int) round((double) nparts / (double) lev_elems_per_agg);
         agg_part_rels_saamge = agg_create_partitioning_fine(*tg_data->Ac, agg_part_rels->nparts, elem_to_dof,
                                    elem_to_elem, NULL, bdr_dofs, &nparts, agg_part_rels->cface_cDof_TruecDof, false);
