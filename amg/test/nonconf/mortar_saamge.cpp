@@ -59,6 +59,8 @@
 
     While stationary iteration is supported here, for the auxiliary-space preconditioner, it is mostly intended to be
     used in a Krylov solver (e.g., CG).
+
+    There is also an option to invoke an additive version of the auxiliary space preconditioner.
 */
 
 #include <mfem.hpp>
@@ -233,6 +235,13 @@ int main(int argc, char *argv[])
     args.AddOption(&use_saamge, "-saamge", "--saamge",
                    "-nsaamge", "--no-saamge",
                    "Use SAAMGe on the auxiliary level. Otherwise, use BoomerAMG.");
+    bool additive = false;
+    args.AddOption(&additive, "-ad", "--additive",
+                   "-nad", "--no-additive",
+                   "Use an additive auxiliary space preconditioner. Otherwise, it defaults to a multiplicative one.");
+    int times_add_smooth = 2;
+    args.AddOption(&times_add_smooth, "-tad", "--times-add-smooth",
+                   "Times to apply the smoother in an additive setting.");
 
     args.Parse();
     if (!args.Good())
@@ -251,6 +260,9 @@ int main(int argc, char *argv[])
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
     SA_ASSERT(2 <= dim && dim <= 3);
+
+    if (additive && aux)
+        CONFIG_ACCESS_OPTION(TG, pre_smoother) = CONFIG_ACCESS_OPTION(TG, post_smoother) = solve_empty;
 
     // Build mesh.
     if (2 == dim)
@@ -626,13 +638,19 @@ int main(int argc, char *argv[])
     {
         VCycleSolver Bprec(tg_data, false);
         Bprec.SetOperator(*Ag);
+        SmootherSolver Sprec(smpr_sym_poly, tg_data->poly_data, false, times_add_smooth);
+        Sprec.SetOperator(*Ag);
+        AdditiveSolver Aprec(Sprec, Bprec);
 
         CGSolver hpcg(MPI_COMM_WORLD);
         hpcg.SetOperator(*Ag);
         hpcg.SetRelTol(sqrt(tol)); // MFEM squares this.
         hpcg.SetMaxIter(1000);
         hpcg.SetPrintLevel(1);
-        hpcg.SetPreconditioner(Bprec);
+        if (additive)
+            hpcg.SetPreconditioner(Aprec);
+        else
+            hpcg.SetPreconditioner(Bprec);
         hpcg.Mult(*bg, *pxg);
         iterations = hpcg.GetNumIterations();
         converged = hpcg.GetConverged();

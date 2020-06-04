@@ -30,7 +30,7 @@
 
 /**
     Nonconforming mortar AMGe in two-level setting applied to
-    an elliptic problem as as an auxiliary space solver.
+    an elliptic problem as an auxiliary space solver.
 
     This example starts with an H1 problem and produces an agglomeration.
     Based on the agglomerates it builds non-conforming spaces (on the agglomerate
@@ -44,6 +44,8 @@
     In the end, it uses the transition operators and the mortar formulation to obtain, by utilizing
     the standard two-level V-cycle, a multiplicative auxiliary space preconditioner
     for the H1 problem. The mortar problem is inverted "exactly" in the preconditioner.
+
+    There is also an option to invoke an additive version of the auxiliary space preconditioner.
 */
 
 #include <mfem.hpp>
@@ -149,6 +151,13 @@ int main(int argc, char *argv[])
     double tol = 1e-8;
     args.AddOption(&tol, "-tol", "--tolerance",
                    "Relative tolerance for solver convergence.");
+    bool additive = false;
+    args.AddOption(&additive, "-ad", "--additive",
+                   "-nad", "--no-additive",
+                   "Use an additive auxiliary space preconditioner. Otherwise, it defaults to a multiplicative one.");
+    int times_add_smooth = 2;
+    args.AddOption(&times_add_smooth, "-tad", "--times-add-smooth",
+                   "Times to apply the smoother in an additive setting.");
 
     args.Parse();
     if (!args.Good())
@@ -164,6 +173,9 @@ int main(int argc, char *argv[])
     MPI_Barrier(PROC_COMM); // try to make MFEM's debug element orientation prints not mess up the parameters above
 
     SA_ASSERT(2 <= dim && dim <= 3);
+
+    if (additive)
+        CONFIG_ACCESS_OPTION(TG, pre_smoother) = CONFIG_ACCESS_OPTION(TG, post_smoother) = solve_empty;
 
     // Build mesh.
     if (2 == dim)
@@ -337,13 +349,19 @@ int main(int argc, char *argv[])
 
     VCycleSolver Bprec(tg_data, false);
     Bprec.SetOperator(*Ag);
+    SmootherSolver Sprec(smpr_sym_poly, tg_data->poly_data, false, times_add_smooth);
+    Sprec.SetOperator(*Ag);
+    AdditiveSolver Aprec(Sprec, Bprec);
 
     CGSolver hpcg(MPI_COMM_WORLD);
     hpcg.SetOperator(*Ag);
     hpcg.SetRelTol(sqrt(tol)); // MFEM squares this.
     hpcg.SetMaxIter(1000);
     hpcg.SetPrintLevel(1);
-    hpcg.SetPreconditioner(Bprec);
+    if (additive)
+        hpcg.SetPreconditioner(Aprec);
+    else
+        hpcg.SetPreconditioner(Bprec);
     hpcg.Mult(*bg, *pxg);
     iterations = hpcg.GetNumIterations();
     converged = hpcg.GetConverged();

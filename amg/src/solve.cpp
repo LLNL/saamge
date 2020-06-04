@@ -229,10 +229,10 @@ void SpectralAMGSolver::Mult(const Vector &x, Vector &y) const
     v_cycle_->Mult(x, y);
 }
 
-void solve_empty(HypreParMatrix& A, HypreParVector& b, HypreParVector& x,
+void solve_empty(HypreParMatrix& A, const Vector& b, Vector& x,
                  void *data)
 {
-    x = 0.;
+    // Do nothing.
 }
 
 

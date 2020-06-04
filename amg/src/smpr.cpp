@@ -156,6 +156,28 @@ double smpr_compute_tauk(int nu, double a, int k)
 
 /* Functions */
 
+void SmootherSolver::SetOperator(const Operator &op)
+{
+    A = const_cast<HypreParMatrix *>(dynamic_cast<const HypreParMatrix *>(&op));
+    if (A == NULL)
+        mfem_error("SmootherSolver::SetOperator : not HypreParMatrix!");
+}
+
+void SmootherSolver::Mult(const Vector &b, Vector &x) const
+{
+    SA_ASSERT(smoother);
+    SA_ASSERT(data);
+    SA_ASSERT(A);
+    SA_ASSERT(A->Width() == b.Size());
+    SA_ASSERT(b.Size() == x.Size());
+
+    if (!iterative_mode)
+        x = 0.0;
+
+    for (int i=0; i < iters; ++i)
+        smoother(*A, b, x, data);
+}
+
 int smpr_nu_from_a(double a)
 {
     double tmp;

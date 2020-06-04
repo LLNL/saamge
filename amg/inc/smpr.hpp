@@ -114,6 +114,28 @@ typedef struct {
     smpr_ft schur_smoother; /*!< Smoother for the Schur complement. */
 } smpr_poly_data_t;
 
+/**
+   @brief Puts smpr_ft in an MFEM style.
+
+   Basically a wrapper for the C-struct as we move to being a bit
+   more C++-like.
+*/
+class SmootherSolver : public mfem::Solver
+{
+public:
+    SmootherSolver(smpr_ft smoother, void *data, bool iterative_mode, int iters=1) :
+        mfem::Solver(0, iterative_mode), iters(iters), smoother(smoother), data(data), A(NULL)
+    { }
+    ~SmootherSolver() { }
+    virtual void SetOperator(const mfem::Operator &op);
+    virtual void Mult(const mfem::Vector &x, mfem::Vector &y) const;
+private:
+    int iters;
+    smpr_ft smoother;
+    void *data;
+    mfem::HypreParMatrix *A;
+};
+
 /* Functions */
 /*! \brief Computes appropriate \em nu from \a a.
 

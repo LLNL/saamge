@@ -139,6 +139,29 @@ private:
 };
 
 /**
+   @brief Adds the effect of two solvers.
+*/
+class AdditiveSolver : public mfem::Solver
+{
+public:
+    AdditiveSolver(mfem::Solver& solver1, mfem::Solver& solver2) :
+        solver1(solver1), solver2(solver2) { }
+    ~AdditiveSolver() { }
+    virtual void SetOperator(const mfem::Operator &op) { }
+    virtual void Mult(const mfem::Vector &b, mfem::Vector &x) const
+    {
+        SA_ASSERT(b.Size() == x.Size());
+        mfem::Vector t(b.Size());
+        solver1.Mult(b, x);
+        solver2.Mult(b, t);
+        x += t;
+    }
+private:
+    mfem::Solver &solver1;
+    mfem::Solver &solver2;
+};
+
+/**
    @brief Encapsulates and wraps the spectral smoothed aggregation
    spectral element AMG solver in a user-friendly way.
 
@@ -183,7 +206,7 @@ private:
 /* Functions */
 /*! \brief Empty coarse solver.
 
-    It only make \a x equal to zero. That is, it disables coarsest correction.
+    It does nothing.
 
     \param A (IN) The sparse matrix of the linear system to be solved.
     \param b (IN) The right-hand side.
@@ -191,8 +214,8 @@ private:
     \param data (IN/OUT) Not used.
 */
 void solve_empty(
-    mfem::HypreParMatrix& A, mfem::HypreParVector& b,
-    mfem::HypreParVector& x, void *data);
+mfem::HypreParMatrix& A, const mfem::Vector& b,
+    mfem::Vector& x, void *data);
 
 /*! \brief Inexact coarse solve by a TG(or V)-cycle.
 
