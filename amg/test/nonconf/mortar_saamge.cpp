@@ -261,9 +261,6 @@ int main(int argc, char *argv[])
 
     SA_ASSERT(2 <= dim && dim <= 3);
 
-    if (additive && aux)
-        CONFIG_ACCESS_OPTION(TG, pre_smoother) = CONFIG_ACCESS_OPTION(TG, post_smoother) = solve_empty;
-
     // Build mesh.
     if (2 == dim)
         mesh = new Mesh(elems_per_agg, elems_per_agg, Element::TRIANGLE, 1);
@@ -648,8 +645,10 @@ int main(int argc, char *argv[])
         hpcg.SetMaxIter(1000);
         hpcg.SetPrintLevel(1);
         if (additive)
+        {
+            tg_data->pre_smoother = tg_data->post_smoother = solve_empty;
             hpcg.SetPreconditioner(Aprec);
-        else
+        } else
             hpcg.SetPreconditioner(Bprec);
         hpcg.Mult(*bg, *pxg);
         iterations = hpcg.GetNumIterations();
