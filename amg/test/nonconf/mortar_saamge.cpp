@@ -463,7 +463,7 @@ int main(int argc, char *argv[])
     {
         // Obtain the H1 solution.
         Solver *fsolver;
-        if (coarse_direct)
+        if (coarse_direct && 1 == PROC_NUM)
             fsolver = new HypreDirect(*Ag);
         else
             fsolver = new AMGSolver(*Ag, false);
